@@ -1,0 +1,15 @@
+package com.example.demo.services;
+
+import com.example.demo.dto.DepartmentDto;
+
+import java.util.List;
+import java.util.UUID;
+
+public interface DepartmentService {
+    DepartmentDto create(DepartmentDto dto);
+    DepartmentDto get(UUID id);
+    List<DepartmentDto> list();
+    DepartmentDto update(UUID id, DepartmentDto dto);
+    void delete(UUID id);
+}
+
