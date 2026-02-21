@@ -7,6 +7,11 @@ import lombok.Setter;
 import java.time.Instant;
 import java.util.UUID;
 
+import org.springframework.data.annotation.CreatedBy;
+import org.springframework.data.annotation.LastModifiedBy;
+import org.springframework.data.annotation.CreatedDate;
+import org.springframework.data.annotation.LastModifiedDate;
+
 @MappedSuperclass
 @Getter
 @Setter
@@ -16,13 +21,23 @@ public abstract class BaseEntity {
     private UUID id = UUID.randomUUID();
 
     @Column(name = "created_at", updatable = false)
+    @CreatedDate
     private Instant createdAt;
 
     @Column(name = "updated_at")
+    @LastModifiedDate
     private Instant updatedAt;
 
     @Column(name = "deleted_at")
     private Instant deletedAt;
+
+    @CreatedBy
+    @Column(name = "created_by")
+    private String createdBy;
+
+    @LastModifiedBy
+    @Column(name = "modified_by")
+    private String modifiedBy;
 
     @PrePersist
     protected void onCreate() {

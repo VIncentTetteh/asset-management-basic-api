@@ -3,6 +3,7 @@ package com.example.demo.controllers.v1;
 import com.example.demo.dto.OrganisationDto;
 import com.example.demo.services.OrganisationService;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import jakarta.validation.Valid;
@@ -20,11 +21,13 @@ public class OrganisationController {
     }
 
     @PostMapping
+    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
     public ResponseEntity<OrganisationDto> create(@Valid @RequestBody OrganisationDto dto) {
         return ResponseEntity.ok(organisationService.create(dto));
     }
 
     @GetMapping("/{id}")
+    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_USER','ROLE_ADMIN')")
     public ResponseEntity<OrganisationDto> get(@PathVariable UUID id) {
         OrganisationDto dto = organisationService.get(id);
         if (dto == null) return ResponseEntity.notFound().build();
@@ -32,11 +35,13 @@ public class OrganisationController {
     }
 
     @GetMapping
+    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_USER','ROLE_ADMIN')")
     public ResponseEntity<List<OrganisationDto>> list() {
         return ResponseEntity.ok(organisationService.list());
     }
 
     @PutMapping("/{id}")
+    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
     public ResponseEntity<OrganisationDto> update(@PathVariable UUID id, @Valid @RequestBody OrganisationDto dto) {
         try {
             return ResponseEntity.ok(organisationService.update(id, dto));
@@ -46,6 +51,7 @@ public class OrganisationController {
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
     public ResponseEntity<Void> delete(@PathVariable UUID id) {
         organisationService.delete(id);
         return ResponseEntity.noContent().build();

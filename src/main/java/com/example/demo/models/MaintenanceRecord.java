@@ -1,0 +1,46 @@
+package com.example.demo.models;
+
+import com.example.demo.enums.MaintenanceStatus;
+import com.example.demo.enums.MaintenanceType;
+import jakarta.persistence.*;
+import lombok.Getter;
+import lombok.Setter;
+
+import java.math.BigDecimal;
+import java.time.LocalDate;
+
+@Getter
+@Setter
+@Entity
+@Table(name = "maintenance_record")
+public class MaintenanceRecord extends BaseEntity {
+
+    @ManyToOne
+    @JoinColumn(nullable = false)
+    private Asset asset;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private MaintenanceType maintenanceType;
+
+    @Column(columnDefinition = "TEXT")
+    private String description;
+
+    private LocalDate scheduledDate;
+
+    private LocalDate performedDate;
+
+    @ManyToOne
+    private Supplier vendor;
+
+    @Column(precision = 15, scale = 2)
+    private BigDecimal cost;
+
+    @Enumerated(EnumType.STRING)
+    @Column(length = 20)
+    private MaintenanceStatus status = MaintenanceStatus.SCHEDULED;
+
+    private LocalDate nextDueDate;
+
+}
+

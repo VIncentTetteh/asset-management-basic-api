@@ -23,11 +23,11 @@ public class OrganisationServiceImpl implements OrganisationService {
     @Override
     public OrganisationDto create(OrganisationDto dto) {
 
-        if (dto.name == null || dto.name.trim().isEmpty()) {
+        if (dto.getName() == null || dto.getName().trim().isEmpty()) {
             throw new IllegalArgumentException("Organisation name is required");
         }
 
-        String name = dto.name.trim();
+        String name = dto.getName().trim();
 
         if (organisationRepository.existsByNameIgnoreCaseAndDeletedAtIsNull(name)) {
             throw new IllegalStateException("Organisation with the same name already exists");
@@ -54,7 +54,7 @@ public class OrganisationServiceImpl implements OrganisationService {
     @Override
     public OrganisationDto update(UUID id, OrganisationDto dto) {
         Organisation o = organisationRepository.findByIdAndDeletedAtIsNull(id).orElseThrow(() -> new IllegalArgumentException("Organisation not found"));
-        if (dto.name != null) o.setName(dto.name);
+        if (dto.getName() != null) o.setName(dto.getName());
         Organisation saved = organisationRepository.save(o);
         return toDto(saved);
     }
@@ -68,8 +68,8 @@ public class OrganisationServiceImpl implements OrganisationService {
 
     private OrganisationDto toDto(Organisation o) {
         OrganisationDto dto = new OrganisationDto();
-        dto.id = o.getId();
-        dto.name = o.getName();
+        dto.setId(o.getId());
+        dto.setName(o.getName());
         return dto;
     }
 }

@@ -1,31 +1,72 @@
 package com.example.demo.dto;
 
+import com.example.demo.enums.*;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
-import jakarta.validation.constraints.Positive;
-import jakarta.validation.constraints.PositiveOrZero;
+import lombok.Data;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.UUID;
 
+@Data
 public class AssetDto {
-    public UUID id;
+    private UUID id;
 
-    @NotBlank
-    public String name;
+    @NotBlank(message = "Asset name is required")
+    private String name;
 
-    @NotBlank
-    public String category;
+    @NotBlank(message = "Asset tag is required")
+    private String assetTag;
 
-    @NotNull
-    @PositiveOrZero
-    public BigDecimal purchaseCost;
+    private String serialNumber;
 
-    @NotNull
-    @Positive
-    public Integer usefulLifeInYears;
+    private String barcodeQrCode;
 
-    public String state;
-    public UUID departmentId;
-    public UUID organisationId;
+    private String description;
+
+    private UUID categoryId;
+
+    @NotNull(message = "Asset type is required")
+    private AssetType assetType;
+
+    private String manufacturer;
+
+    private String model;
+
+    private LocalDate purchaseDate;
+
+    private BigDecimal purchaseCost;
+
+    private String currency;
+
+    private DepreciationMethod depreciationMethod;
+
+    private Integer usefulLifeMonths;
+
+    private BigDecimal residualValue;
+
+    private BigDecimal currentBookValue;
+
+    private LocalDate warrantyExpiryDate;
+
+    private AssetStatus status;
+
+    private AssetCondition condition;
+
+    private UUID locationId;
+
+    private UUID assignedUserId;
+
+    private UUID supplierId;
+
+    private String invoiceId;
+
+    private String insurancePolicyId;
+
+    @NotNull(message = "Department ID is required")
+    private UUID departmentId;
+
+    @NotNull(message = "Organisation ID is required")
+    private UUID organisationId;
 }

@@ -2,6 +2,8 @@ package com.example.demo.services.impl;
 
 import com.example.demo.dto.DepartmentDto;
 import com.example.demo.models.Department;
+import com.example.demo.models.Organisation;
+import com.example.demo.multitenancy.TenantContext;
 import com.example.demo.repositories.DepartmentRepository;
 import com.example.demo.repositories.OrganisationRepository;
 import com.example.demo.services.DepartmentService;
@@ -26,24 +28,35 @@ public class DepartmentServiceImpl implements DepartmentService {
     @Override
     public DepartmentDto create(DepartmentDto dto) {
 
-        if (dto.name == null || dto.name.trim().isEmpty()) {
+        if (dto.getName() == null || dto.getName().trim().isEmpty()) {
             throw new IllegalArgumentException("Department name is required");
         }
 
-        String name = dto.name.trim();
+        String name = dto.getName().trim();
 
-        if (departmentRepository.existsByNameIgnoreCaseAndDeletedAtIsNull(name)) {
-            throw new IllegalStateException("Department with the same name already exists");
+        Organisation organisation = null;
+        if (TenantContext.hasOrganisationId()) {
+            UUID orgId = TenantContext.getOrganisationId();
+            organisation = organisationRepository.findByIdAndDeletedAtIsNull(orgId)
+                    .orElseThrow(() -> new IllegalArgumentException("Organisation not found for tenant"));
+
+            if (departmentRepository.existsByNameIgnoreCaseAndOrganisationAndDeletedAtIsNull(name, organisation)) {
+                throw new IllegalStateException("Department with the same name already exists in this organisation");
+            }
+        } else {
+            if (departmentRepository.existsByNameIgnoreCaseAndDeletedAtIsNull(name)) {
+                throw new IllegalStateException("Department with the same name already exists");
+            }
+            if (dto.getOrganisationId() != null) {
+                organisation = organisationRepository
+                        .findByIdAndDeletedAtIsNull(dto.getOrganisationId())
+                        .orElse(null);
+            }
         }
 
         Department department = new Department();
         department.setName(name);
-
-        if (dto.organisationId != null) {
-            organisationRepository
-                    .findByIdAndDeletedAtIsNull(dto.organisationId)
-                    .ifPresent(department::setOrganisation);
-        }
+        if (organisation != null) department.setOrganisation(organisation);
 
         Department saved = departmentRepository.save(department);
         return toDto(saved);
@@ -52,35 +65,60 @@ public class DepartmentServiceImpl implements DepartmentService {
 
     @Override
     public DepartmentDto get(UUID id) {
+        if (TenantContext.hasOrganisationId()) {
+            UUID orgId = TenantContext.getOrganisationId();
+            Organisation org = organisationRepository.findByIdAndDeletedAtIsNull(orgId).orElseThrow(() -> new IllegalArgumentException("Organisation not found for tenant"));
+            return departmentRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org).map(this::toDto).orElse(null);
+        }
         return departmentRepository.findByIdAndDeletedAtIsNull(id).map(this::toDto).orElse(null);
     }
 
     @Override
     public List<DepartmentDto> list() {
+        if (TenantContext.hasOrganisationId()) {
+            UUID orgId = TenantContext.getOrganisationId();
+            Organisation org = organisationRepository.findByIdAndDeletedAtIsNull(orgId).orElseThrow(() -> new IllegalArgumentException("Organisation not found for tenant"));
+            return departmentRepository.findAllByOrganisationAndDeletedAtIsNull(org).stream().map(this::toDto).collect(Collectors.toList());
+        }
         return departmentRepository.findAllByDeletedAtIsNull().stream().map(this::toDto).collect(Collectors.toList());
     }
 
     @Override
     public DepartmentDto update(UUID id, DepartmentDto dto) {
-        Department d = departmentRepository.findByIdAndDeletedAtIsNull(id).orElseThrow(() -> new IllegalArgumentException("Department not found"));
-        if (dto.name != null) d.setName(dto.name);
-        if (dto.organisationId != null) organisationRepository.findByIdAndDeletedAtIsNull(dto.organisationId).ifPresent(d::setOrganisation);
+        Department d;
+        if (TenantContext.hasOrganisationId()) {
+            UUID orgId = TenantContext.getOrganisationId();
+            Organisation org = organisationRepository.findByIdAndDeletedAtIsNull(orgId).orElseThrow(() -> new IllegalArgumentException("Organisation not found for tenant"));
+            d = departmentRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org).orElseThrow(() -> new IllegalArgumentException("Department not found"));
+        } else {
+            d = departmentRepository.findByIdAndDeletedAtIsNull(id).orElseThrow(() -> new IllegalArgumentException("Department not found"));
+        }
+
+        if (dto.getName() != null) d.setName(dto.getName());
+        if (dto.getOrganisationId() != null && !TenantContext.hasOrganisationId()) organisationRepository.findByIdAndDeletedAtIsNull(dto.getOrganisationId()).ifPresent(d::setOrganisation);
         Department saved = departmentRepository.save(d);
         return toDto(saved);
     }
 
     @Override
     public void delete(UUID id) {
-        Department d = departmentRepository.findByIdAndDeletedAtIsNull(id).orElseThrow(() -> new IllegalArgumentException("Department not found"));
+        Department d;
+        if (TenantContext.hasOrganisationId()) {
+            UUID orgId = TenantContext.getOrganisationId();
+            Organisation org = organisationRepository.findByIdAndDeletedAtIsNull(orgId).orElseThrow(() -> new IllegalArgumentException("Organisation not found for tenant"));
+            d = departmentRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org).orElseThrow(() -> new IllegalArgumentException("Department not found"));
+        } else {
+            d = departmentRepository.findByIdAndDeletedAtIsNull(id).orElseThrow(() -> new IllegalArgumentException("Department not found"));
+        }
         d.setDeletedAt(Instant.now());
         departmentRepository.save(d);
     }
 
     private DepartmentDto toDto(Department d) {
         DepartmentDto dto = new DepartmentDto();
-        dto.id = d.getId();
-        dto.name = d.getName();
-        if (d.getOrganisation() != null) dto.organisationId = d.getOrganisation().getId();
+        dto.setId(d.getId());
+        dto.setName(d.getName());
+        if (d.getOrganisation() != null) dto.setOrganisationId(d.getOrganisation().getId());
         return dto;
     }
 }

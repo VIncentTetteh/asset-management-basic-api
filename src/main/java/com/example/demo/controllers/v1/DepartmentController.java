@@ -3,6 +3,7 @@ package com.example.demo.controllers.v1;
 import com.example.demo.dto.DepartmentDto;
 import com.example.demo.services.DepartmentService;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import jakarta.validation.Valid;
@@ -20,11 +21,13 @@ public class DepartmentController {
     }
 
     @PostMapping
+    @PreAuthorize("hasAuthority('ROLE_ORG_ADMIN') or hasAuthority('ROLE_ADMIN')")
     public ResponseEntity<DepartmentDto> create(@Valid @RequestBody DepartmentDto dto) {
         return ResponseEntity.ok(departmentService.create(dto));
     }
 
     @GetMapping("/{id}")
+    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_USER','ROLE_ADMIN')")
     public ResponseEntity<DepartmentDto> get(@PathVariable UUID id) {
         DepartmentDto dto = departmentService.get(id);
         if (dto == null) return ResponseEntity.notFound().build();
@@ -32,11 +35,13 @@ public class DepartmentController {
     }
 
     @GetMapping
+    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_USER','ROLE_ADMIN')")
     public ResponseEntity<List<DepartmentDto>> list() {
         return ResponseEntity.ok(departmentService.list());
     }
 
     @PutMapping("/{id}")
+    @PreAuthorize("hasAuthority('ROLE_ORG_ADMIN') or hasAuthority('ROLE_ADMIN')")
     public ResponseEntity<DepartmentDto> update(@PathVariable UUID id, @Valid @RequestBody DepartmentDto dto) {
         try {
             return ResponseEntity.ok(departmentService.update(id, dto));
@@ -46,6 +51,7 @@ public class DepartmentController {
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasAuthority('ROLE_ORG_ADMIN') or hasAuthority('ROLE_ADMIN')")
     public ResponseEntity<Void> delete(@PathVariable UUID id) {
         departmentService.delete(id);
         return ResponseEntity.noContent().build();

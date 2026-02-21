@@ -3,6 +3,7 @@ package com.example.demo.controllers.v1;
 import com.example.demo.dto.AssetDto;
 import com.example.demo.services.AssetService;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import jakarta.validation.Valid;
@@ -20,12 +21,14 @@ public class AssetController {
     }
 
     @PostMapping
+    @PreAuthorize("hasAuthority('ROLE_ORG_ADMIN') or hasAuthority('ROLE_ADMIN')")
     public ResponseEntity<AssetDto> create(@Valid @RequestBody AssetDto dto) {
         AssetDto created = assetService.create(dto);
         return ResponseEntity.ok(created);
     }
 
     @GetMapping("/{id}")
+    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_USER','ROLE_ADMIN')")
     public ResponseEntity<AssetDto> get(@PathVariable UUID id) {
         AssetDto dto = assetService.get(id);
         if (dto == null) return ResponseEntity.notFound().build();
@@ -33,11 +36,13 @@ public class AssetController {
     }
 
     @GetMapping
+    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_USER','ROLE_ADMIN')")
     public ResponseEntity<List<AssetDto>> list() {
         return ResponseEntity.ok(assetService.list());
     }
 
     @PostMapping("/{id}/assign/{departmentId}")
+    @PreAuthorize("hasAuthority('ROLE_ORG_ADMIN') or hasAuthority('ROLE_ADMIN')")
     public ResponseEntity<AssetDto> assign(@PathVariable UUID id, @PathVariable UUID departmentId) {
         try {
             AssetDto dto = assetService.assignToDepartment(id, departmentId);
@@ -50,6 +55,7 @@ public class AssetController {
     }
 
     @PutMapping("/{id}")
+    @PreAuthorize("hasAuthority('ROLE_ORG_ADMIN') or hasAuthority('ROLE_ADMIN')")
     public ResponseEntity<AssetDto> update(@PathVariable UUID id, @Valid @RequestBody AssetDto dto) {
         try {
             AssetDto updated = assetService.update(id, dto);
@@ -60,6 +66,7 @@ public class AssetController {
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasAuthority('ROLE_ORG_ADMIN') or hasAuthority('ROLE_ADMIN')")
     public ResponseEntity<Void> delete(@PathVariable UUID id) {
         assetService.delete(id);
         return ResponseEntity.noContent().build();
