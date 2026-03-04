@@ -11,26 +11,29 @@ import java.util.Set;
 @Setter
 @Getter
 @Entity
-@Table(name = "department")
+@Table(name = "department", uniqueConstraints = {
+        @UniqueConstraint(columnNames = { "department_code", "organisation_id" }, name = "uk_dept_code_per_org"),
+        @UniqueConstraint(columnNames = { "cost_center_code", "organisation_id" }, name = "uk_dept_costcenter_per_org")
+})
 public class Department extends BaseEntity {
 
     @Column(nullable = false)
     private String name;
 
-    @Column(unique = true)
+    @Column
     private String departmentCode;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "parent_department_id")
     private Department parentDepartment;
 
     @OneToMany(mappedBy = "parentDepartment")
     private Set<Department> subDepartments;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     private User manager;
 
-    @Column(unique = true)
+    @Column
     private String costCenterCode;
 
     private BigDecimal budgetLimit;
@@ -39,7 +42,7 @@ public class Department extends BaseEntity {
     @Column(length = 20)
     private DepartmentStatus status = DepartmentStatus.ACTIVE;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(nullable = false)
     private Organisation organisation;
 

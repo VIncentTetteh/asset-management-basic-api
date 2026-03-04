@@ -10,18 +10,23 @@ import java.util.Set;
 @Getter
 @Setter
 @Entity
-@Table(name = "supplier")
+@Table(name = "supplier", uniqueConstraints = {
+        @UniqueConstraint(columnNames = { "registration_number",
+                "organisation_id" }, name = "uk_supplier_regnum_per_org"),
+        @UniqueConstraint(columnNames = { "email", "organisation_id" }, name = "uk_supplier_email_per_org"),
+        @UniqueConstraint(columnNames = { "tax_id", "organisation_id" }, name = "uk_supplier_taxid_per_org")
+})
 public class Supplier extends BaseEntity {
 
     @Column(nullable = false)
     private String name;
 
-    @Column(unique = true)
+    @Column
     private String registrationNumber;
 
     private String contactPerson;
 
-    @Column(unique = true)
+    @Column
     private String email;
 
     private String phone;
@@ -31,14 +36,14 @@ public class Supplier extends BaseEntity {
     @Column(columnDefinition = "TEXT")
     private String bankDetails; // JSON format
 
-    @Column(unique = true)
+    @Column
     private String taxId;
 
     @Enumerated(EnumType.STRING)
     @Column(length = 20)
     private SupplierStatus status = SupplierStatus.ACTIVE;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(nullable = false)
     private Organisation organisation;
 
@@ -49,4 +54,3 @@ public class Supplier extends BaseEntity {
     private Set<PurchaseOrder> purchaseOrders;
 
 }
-

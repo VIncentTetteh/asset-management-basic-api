@@ -1,6 +1,6 @@
 package com.example.demo.models;
 
-import com.example.demo.enums.POStatus;
+import com.example.demo.enums.*;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
@@ -11,10 +11,12 @@ import java.time.Instant;
 @Getter
 @Setter
 @Entity
-@Table(name = "purchase_order")
+@Table(name = "purchase_order", uniqueConstraints = {
+        @UniqueConstraint(columnNames = { "po_number", "organisation_id" }, name = "uk_po_number_per_org")
+})
 public class PurchaseOrder extends BaseEntity {
 
-    @Column(nullable = false, unique = true)
+    @Column(nullable = false)
     private String poNumber;
 
     @Column(precision = 15, scale = 2, nullable = false)
@@ -26,7 +28,7 @@ public class PurchaseOrder extends BaseEntity {
     @Column(length = 20)
     private POStatus status = POStatus.DRAFT;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     private User approvedBy;
 
     private Instant approvedAt;
@@ -34,17 +36,15 @@ public class PurchaseOrder extends BaseEntity {
     @Column(columnDefinition = "TEXT")
     private String remarks;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(nullable = false)
     private Organisation organisation;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(nullable = false)
     private Department department;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(nullable = false)
     private Supplier supplier;
-
 }
-

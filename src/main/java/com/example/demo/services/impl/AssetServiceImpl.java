@@ -1,26 +1,22 @@
 package com.example.demo.services.impl;
 
 import com.example.demo.dto.AssetDto;
-import com.example.demo.enums.AssetState;
 import com.example.demo.enums.AssetStatus;
-import com.example.demo.models.Asset;
-import com.example.demo.models.Department;
-import com.example.demo.models.Organisation;
+import com.example.demo.models.*;
 import com.example.demo.multitenancy.TenantContext;
-import com.example.demo.repositories.AssetRepository;
-import com.example.demo.repositories.DepartmentRepository;
-import com.example.demo.repositories.OrganisationRepository;
+import com.example.demo.repositories.*;
 import com.example.demo.services.AssetService;
 import jakarta.transaction.Transactional;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
-import java.util.List;
-import java.util.Optional;
-import java.util.UUID;
+import java.util.*;
 import java.util.stream.Collectors;
-import java.math.BigDecimal;
+import java.util.EnumSet;
 
 @Service
 public class AssetServiceImpl implements AssetService {
@@ -28,169 +24,336 @@ public class AssetServiceImpl implements AssetService {
     private final AssetRepository assetRepository;
     private final DepartmentRepository departmentRepository;
     private final OrganisationRepository organisationRepository;
+    private final CategoryRepository categoryRepository;
+    private final LocationRepository locationRepository;
+    private final SupplierRepository supplierRepository;
+    private final UserRepository userRepository;
+    private final PurchaseOrderRepository purchaseOrderRepository;
 
-    public AssetServiceImpl(AssetRepository assetRepository, DepartmentRepository departmentRepository, OrganisationRepository organisationRepository) {
+    public AssetServiceImpl(AssetRepository assetRepository,
+            DepartmentRepository departmentRepository,
+            OrganisationRepository organisationRepository,
+            CategoryRepository categoryRepository,
+            LocationRepository locationRepository,
+            SupplierRepository supplierRepository,
+            UserRepository userRepository,
+            PurchaseOrderRepository purchaseOrderRepository) {
         this.assetRepository = assetRepository;
         this.departmentRepository = departmentRepository;
         this.organisationRepository = organisationRepository;
+        this.categoryRepository = categoryRepository;
+        this.locationRepository = locationRepository;
+        this.supplierRepository = supplierRepository;
+        this.userRepository = userRepository;
+        this.purchaseOrderRepository = purchaseOrderRepository;
     }
+
+    // ────────────────────────────────────────────────────
+    // Internal helpers
+    // ────────────────────────────────────────────────────
+
+    /** Returns the current tenant Organisation or throws 403. */
+    private Organisation requireTenantOrg() {
+        if (!TenantContext.hasOrganisationId()) {
+            throw new AccessDeniedException("Tenant context is required.");
+        }
+        return organisationRepository.findByIdAndDeletedAtIsNull(TenantContext.getOrganisationId())
+                .orElseThrow(() -> new AccessDeniedException("Organisation not found for current tenant."));
+    }
+
+    private boolean isAdmin() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        return auth != null && auth.getAuthorities().stream()
+                .anyMatch(a -> a.getAuthority().equals("ROLE_ADMIN"));
+    }
+
+    // ────────────────────────────────────────────────────
+    // CRUD operations
+    // ────────────────────────────────────────────────────
 
     @Override
     @Transactional
     public AssetDto create(AssetDto dto) {
-
         if (dto.getName() == null || dto.getName().trim().isEmpty()) {
             throw new IllegalArgumentException("Asset name is required");
         }
 
+        Organisation organisation = requireTenantOrg();
         String name = dto.getName().trim();
-
-        // Resolve organisation from tenant context when available; otherwise use dto.organisationId
-        Organisation organisation = null;
-        if (TenantContext.hasOrganisationId()) {
-            UUID orgId = TenantContext.getOrganisationId();
-            organisation = organisationRepository.findByIdAndDeletedAtIsNull(orgId)
-                    .orElseThrow(() -> new IllegalArgumentException("Organisation not found for tenant header"));
-        } else {
-            if (dto.getOrganisationId() == null) {
-                throw new IllegalArgumentException("Organisation is required");
-            }
-            organisation = organisationRepository.findByIdAndDeletedAtIsNull(dto.getOrganisationId())
-                    .orElseThrow(() -> new IllegalArgumentException("Organisation not found"));
-        }
 
         Department department = null;
         if (dto.getDepartmentId() != null) {
-            // When tenant header is set, department must belong to the tenant organisation
-            department = departmentRepository
-                    .findByIdAndDeletedAtIsNull(dto.getDepartmentId())
-                    .orElseThrow(() -> new IllegalArgumentException("Department not found"));
-            if (TenantContext.hasOrganisationId() && !department.getOrganisation().getId().equals(organisation.getId())) {
-                throw new IllegalArgumentException("Department does not belong to tenant organisation");
-            }
+            department = departmentRepository.findByIdAndOrganisationAndDeletedAtIsNull(
+                    dto.getDepartmentId(), organisation)
+                    .orElseThrow(() -> new IllegalArgumentException("Department not found in your organisation"));
         }
 
-        // Check uniqueness scoped to organisation + department
-        if (assetRepository.existsByNameIgnoreCaseAndOrganisationAndDepartmentAndDeletedAtIsNull(
-                name, organisation, department)) {
-            throw new IllegalStateException(
-                    "Asset with the same name already exists in this department");
+        // Uniqueness check: scoped to org + department when provided, or just org when
+        // no department
+        boolean duplicate;
+        if (department != null) {
+            duplicate = assetRepository.existsByNameIgnoreCaseAndOrganisationAndDepartmentAndDeletedAtIsNull(
+                    name, organisation, department);
+        } else {
+            duplicate = assetRepository.existsByNameIgnoreCaseAndOrganisationAndDeletedAtIsNull(name, organisation);
+        }
+        if (duplicate) {
+            throw new IllegalStateException("Asset with the same name already exists in this organisation");
         }
 
         Asset asset = new Asset();
         asset.setName(name);
-        if (dto.getCategoryId() != null) {
-            // TODO: Load category by ID
-        }
-        asset.setPurchaseCost(dto.getPurchaseCost());
-        asset.setUsefulLifeMonths(dto.getUsefulLifeMonths());
         asset.setOrganisation(organisation);
-        asset.setDepartment(department); // can be null if department not provided
+        asset.setDepartment(department);
+
+        // Map all DTO fields
+        asset.setAssetTag(dto.getAssetTag());
+        asset.setSerialNumber(dto.getSerialNumber());
+        asset.setBarcodeQrCode(dto.getBarcodeQrCode());
+        asset.setDescription(dto.getDescription());
+        asset.setAssetType(dto.getAssetType());
+        asset.setManufacturer(dto.getManufacturer());
+        asset.setModel(dto.getModel());
+        asset.setPurchaseDate(dto.getPurchaseDate());
+        asset.setPurchaseCost(dto.getPurchaseCost());
+        if (dto.getCurrency() != null)
+            asset.setCurrency(dto.getCurrency());
+        asset.setDepreciationMethod(dto.getDepreciationMethod());
+        asset.setUsefulLifeMonths(dto.getUsefulLifeMonths());
+        asset.setResidualValue(dto.getResidualValue());
+        asset.setWarrantyExpiryDate(dto.getWarrantyExpiryDate());
+        if (dto.getStatus() != null)
+            asset.setStatus(dto.getStatus());
+        if (dto.getCondition() != null)
+            asset.setCondition(dto.getCondition());
+        asset.setInvoiceId(dto.getInvoiceId());
+        asset.setInsurancePolicyId(dto.getInsurancePolicyId());
+
+        if (dto.getCategoryId() != null) {
+            categoryRepository.findByIdAndOrganisationAndDeletedAtIsNull(dto.getCategoryId(), organisation)
+                    .ifPresent(asset::setCategory);
+        }
+        if (dto.getLocationId() != null) {
+            locationRepository.findByIdAndOrganisationAndDeletedAtIsNull(dto.getLocationId(), organisation)
+                    .ifPresent(asset::setLocation);
+        }
+        if (dto.getSupplierId() != null) {
+            supplierRepository.findByIdAndOrganisationAndDeletedAtIsNull(dto.getSupplierId(), organisation)
+                    .ifPresent(asset::setSupplier);
+        }
+        if (dto.getAssignedUserId() != null) {
+            userRepository.findByIdAndOrganisation(dto.getAssignedUserId(), organisation)
+                    .ifPresent(asset::setAssignedUser);
+        }
+        if (dto.getPurchaseOrderId() != null) {
+            purchaseOrderRepository.findByIdAndOrganisationAndDeletedAtIsNull(dto.getPurchaseOrderId(), organisation)
+                    .ifPresent(asset::setPurchaseOrder);
+        }
 
         try {
-            Asset saved = assetRepository.save(asset);
-            return toDto(saved);
+            return toDto(assetRepository.save(asset));
         } catch (DataIntegrityViolationException ex) {
-            // Final safety net for race conditions
-            throw new IllegalStateException(
-                    "Asset with the same name already exists in this department");
+            throw new IllegalStateException("Asset with the same name already exists in this department");
         }
     }
 
     @Override
     public AssetDto get(UUID id) {
-        if (TenantContext.hasOrganisationId()) {
-            UUID orgId = TenantContext.getOrganisationId();
-            Organisation org = organisationRepository.findByIdAndDeletedAtIsNull(orgId).orElseThrow(() -> new IllegalArgumentException("Organisation not found for tenant"));
-            return assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org).map(this::toDto).orElse(null);
-        }
-        return assetRepository.findByIdAndDeletedAtIsNull(id).map(this::toDto).orElse(null);
+        Organisation org = requireTenantOrg();
+        Asset asset = assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org).orElse(null);
+        return asset != null ? toDto(asset) : null;
     }
 
     @Override
     public List<AssetDto> list() {
-        if (TenantContext.hasOrganisationId()) {
-            UUID orgId = TenantContext.getOrganisationId();
-            Organisation org = organisationRepository.findByIdAndDeletedAtIsNull(orgId).orElseThrow(() -> new IllegalArgumentException("Organisation not found for tenant"));
-            return assetRepository.findAllByOrganisationAndDeletedAtIsNull(org).stream().map(this::toDto).collect(Collectors.toList());
-        }
-        return assetRepository.findAllByDeletedAtIsNull().stream().map(this::toDto).collect(Collectors.toList());
+        Organisation org = requireTenantOrg();
+        return assetRepository.findAllByOrganisationAndDeletedAtIsNull(org)
+                .stream().map(this::toDto).collect(Collectors.toList());
     }
 
     @Override
     public AssetDto assignToDepartment(UUID assetId, UUID departmentId) {
-        Optional<Asset> oa = assetRepository.findByIdAndDeletedAtIsNull(assetId);
-        if (oa.isEmpty()) return null;
-        Asset asset = oa.get();
-        if (asset.getStatus() != AssetStatus.IN_USE) {
-            throw new IllegalStateException("Only assets in IN_USE status can be assigned");
+        Organisation org = requireTenantOrg();
+        Asset asset = assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(assetId, org)
+                .orElseThrow(() -> new IllegalArgumentException("Asset not found"));
+        // Allow assignment from any active status; only block retired/disposed/missing
+        // states
+        Set<AssetStatus> assignable = EnumSet.of(
+                AssetStatus.IN_STOCK, AssetStatus.RESERVED, AssetStatus.IN_USE);
+        if (!assignable.contains(asset.getStatus())) {
+            throw new IllegalStateException(
+                    "Asset cannot be assigned in its current status: " + asset.getStatus());
         }
-        Department dept = departmentRepository.findByIdAndDeletedAtIsNull(departmentId).orElseThrow(() -> new IllegalArgumentException("Department not found"));
-        if (TenantContext.hasOrganisationId()) {
-            UUID orgId = TenantContext.getOrganisationId();
-            if (!dept.getOrganisation().getId().equals(orgId) || !asset.getOrganisation().getId().equals(orgId)) {
-                throw new IllegalArgumentException("Department or asset does not belong to tenant organisation");
-            }
-        }
+        Department dept = departmentRepository.findByIdAndOrganisationAndDeletedAtIsNull(departmentId, org)
+                .orElseThrow(() -> new IllegalArgumentException("Department not found in your organisation"));
         asset.setDepartment(dept);
-        // Status remains IN_USE after assignment
-        Asset saved = assetRepository.save(asset);
-        return toDto(saved);
+        return toDto(assetRepository.save(asset));
     }
 
     @Override
+    @Transactional
     public AssetDto update(UUID id, AssetDto dto) {
-        Asset asset;
-        if (TenantContext.hasOrganisationId()) {
-            UUID orgId = TenantContext.getOrganisationId();
-            Organisation org = organisationRepository.findByIdAndDeletedAtIsNull(orgId).orElseThrow(() -> new IllegalArgumentException("Organisation not found for tenant"));
-            asset = assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
-                    .orElseThrow(() -> new IllegalArgumentException("Asset not found"));
-        } else {
-            asset = assetRepository.findByIdAndDeletedAtIsNull(id)
-                    .orElseThrow(() -> new IllegalArgumentException("Asset not found"));
+        Organisation org = requireTenantOrg();
+        // ROLE_ADMIN can update any asset in the org; ROLE_USER cannot write
+        if (!isAdmin()) {
+            throw new AccessDeniedException("Only administrators can update assets");
         }
+        Asset asset = assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
+                .orElseThrow(() -> new IllegalArgumentException("Asset not found"));
 
-        if (dto.getName() != null) asset.setName(dto.getName());
+        if (dto.getName() != null)
+            asset.setName(dto.getName());
+        if (dto.getAssetTag() != null)
+            asset.setAssetTag(dto.getAssetTag());
+        if (dto.getSerialNumber() != null)
+            asset.setSerialNumber(dto.getSerialNumber());
+        if (dto.getBarcodeQrCode() != null)
+            asset.setBarcodeQrCode(dto.getBarcodeQrCode());
+        if (dto.getDescription() != null)
+            asset.setDescription(dto.getDescription());
+        if (dto.getAssetType() != null)
+            asset.setAssetType(dto.getAssetType());
+        if (dto.getManufacturer() != null)
+            asset.setManufacturer(dto.getManufacturer());
+        if (dto.getModel() != null)
+            asset.setModel(dto.getModel());
+        if (dto.getPurchaseDate() != null)
+            asset.setPurchaseDate(dto.getPurchaseDate());
+        if (dto.getPurchaseCost() != null)
+            asset.setPurchaseCost(dto.getPurchaseCost());
+        if (dto.getCurrency() != null)
+            asset.setCurrency(dto.getCurrency());
+        if (dto.getDepreciationMethod() != null)
+            asset.setDepreciationMethod(dto.getDepreciationMethod());
+        if (dto.getUsefulLifeMonths() != null)
+            asset.setUsefulLifeMonths(dto.getUsefulLifeMonths());
+        if (dto.getResidualValue() != null)
+            asset.setResidualValue(dto.getResidualValue());
+        if (dto.getWarrantyExpiryDate() != null)
+            asset.setWarrantyExpiryDate(dto.getWarrantyExpiryDate());
+        if (dto.getStatus() != null)
+            asset.setStatus(dto.getStatus());
+        if (dto.getCondition() != null)
+            asset.setCondition(dto.getCondition());
+        if (dto.getInvoiceId() != null)
+            asset.setInvoiceId(dto.getInvoiceId());
+        if (dto.getInsurancePolicyId() != null)
+            asset.setInsurancePolicyId(dto.getInsurancePolicyId());
+
         if (dto.getCategoryId() != null) {
-            // Load category by ID if provided
+            categoryRepository.findByIdAndOrganisationAndDeletedAtIsNull(dto.getCategoryId(), org)
+                    .ifPresent(asset::setCategory);
         }
-        if (dto.getPurchaseCost() != null) asset.setPurchaseCost(dto.getPurchaseCost());
-        if (dto.getUsefulLifeMonths() != null) asset.setUsefulLifeMonths(dto.getUsefulLifeMonths());
-        if (dto.getOrganisationId() != null && !TenantContext.hasOrganisationId()) {
-            organisationRepository.findByIdAndDeletedAtIsNull(dto.getOrganisationId())
-                    .ifPresent(asset::setOrganisation);
+        if (dto.getDepartmentId() != null) {
+            departmentRepository.findByIdAndOrganisationAndDeletedAtIsNull(dto.getDepartmentId(), org)
+                    .ifPresent(asset::setDepartment);
         }
-        if (dto.getStatus() != null) asset.setStatus(dto.getStatus());
+        if (dto.getLocationId() != null) {
+            locationRepository.findByIdAndOrganisationAndDeletedAtIsNull(dto.getLocationId(), org)
+                    .ifPresent(asset::setLocation);
+        }
+        if (dto.getSupplierId() != null) {
+            supplierRepository.findByIdAndOrganisationAndDeletedAtIsNull(dto.getSupplierId(), org)
+                    .ifPresent(asset::setSupplier);
+        }
+        if (dto.getAssignedUserId() != null) {
+            userRepository.findByIdAndOrganisation(dto.getAssignedUserId(), org)
+                    .ifPresent(asset::setAssignedUser);
+        }
+        if (dto.getPurchaseOrderId() != null) {
+            purchaseOrderRepository.findByIdAndOrganisationAndDeletedAtIsNull(dto.getPurchaseOrderId(), org)
+                    .ifPresent(asset::setPurchaseOrder);
+        }
 
-        Asset saved = assetRepository.save(asset);
-        return toDto(saved);
+        return toDto(assetRepository.save(asset));
     }
 
     @Override
+    @Transactional
     public void delete(UUID id) {
-        Asset a;
-        if (TenantContext.hasOrganisationId()) {
-            UUID orgId = TenantContext.getOrganisationId();
-            Organisation org = organisationRepository.findByIdAndDeletedAtIsNull(orgId).orElseThrow(() -> new IllegalArgumentException("Organisation not found for tenant"));
-            a = assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org).orElseThrow(() -> new IllegalArgumentException("Asset not found"));
-        } else {
-            a = assetRepository.findByIdAndDeletedAtIsNull(id).orElseThrow(() -> new IllegalArgumentException("Asset not found"));
+        Organisation org = requireTenantOrg();
+        // Only admins may delete
+        if (!isAdmin()) {
+            throw new AccessDeniedException("Only administrators can delete assets");
         }
-        a.setDeletedAt(Instant.now());
-        assetRepository.save(a);
+        Asset asset = assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
+                .orElseThrow(() -> new IllegalArgumentException("Asset not found"));
+        asset.setDeletedAt(Instant.now());
+        assetRepository.save(asset);
     }
+
+    // ────────────────────────────────────────────────────
+    // Filtered list queries
+    // ────────────────────────────────────────────────────
+
+    @Override
+    public Set<AssetDto> listByStatus(AssetStatus status) {
+        Organisation org = requireTenantOrg();
+        return assetRepository.findByOrganisationIdAndStatusAndDeletedAtIsNull(org.getId(), status)
+                .stream().map(this::toDto).collect(Collectors.toSet());
+    }
+
+    @Override
+    public Set<AssetDto> listByDepartment(UUID departmentId) {
+        Organisation org = requireTenantOrg();
+        // Ensure the department belongs to this tenant
+        departmentRepository.findByIdAndOrganisationAndDeletedAtIsNull(departmentId, org)
+                .orElseThrow(() -> new IllegalArgumentException("Department not found in your organisation"));
+        return assetRepository.findByDepartmentIdAndDeletedAtIsNull(departmentId)
+                .stream().map(this::toDto).collect(Collectors.toSet());
+    }
+
+    @Override
+    public Set<AssetDto> listByCategory(UUID categoryId) {
+        Organisation org = requireTenantOrg();
+        // Ensure category belongs to this tenant
+        categoryRepository.findByIdAndOrganisationAndDeletedAtIsNull(categoryId, org)
+                .orElseThrow(() -> new IllegalArgumentException("Category not found in your organisation"));
+        return assetRepository.findByCategoryIdAndDeletedAtIsNull(categoryId)
+                .stream().map(this::toDto).collect(Collectors.toSet());
+    }
+
+    // ────────────────────────────────────────────────────
+    // DTO conversion
+    // ────────────────────────────────────────────────────
 
     private AssetDto toDto(Asset a) {
         AssetDto d = new AssetDto();
         d.setId(a.getId());
         d.setName(a.getName());
-        d.setCategoryId(a.getCategory() != null ? a.getCategory().getId() : null);
+        d.setAssetTag(a.getAssetTag());
+        d.setSerialNumber(a.getSerialNumber());
+        d.setBarcodeQrCode(a.getBarcodeQrCode());
+        d.setDescription(a.getDescription());
+        d.setAssetType(a.getAssetType());
+        d.setManufacturer(a.getManufacturer());
+        d.setModel(a.getModel());
+        d.setPurchaseDate(a.getPurchaseDate());
         d.setPurchaseCost(a.getPurchaseCost());
+        d.setCurrency(a.getCurrency());
+        d.setDepreciationMethod(a.getDepreciationMethod());
         d.setUsefulLifeMonths(a.getUsefulLifeMonths());
+        d.setResidualValue(a.getResidualValue());
+        d.setCurrentBookValue(a.getCurrentBookValue());
+        d.setWarrantyExpiryDate(a.getWarrantyExpiryDate());
         d.setStatus(a.getStatus());
-        if (a.getDepartment() != null) d.setDepartmentId(a.getDepartment().getId());
-        if (a.getOrganisation() != null) d.setOrganisationId(a.getOrganisation().getId());
+        d.setCondition(a.getCondition());
+        d.setInvoiceId(a.getInvoiceId());
+        d.setInsurancePolicyId(a.getInsurancePolicyId());
+        if (a.getCategory() != null)
+            d.setCategoryId(a.getCategory().getId());
+        if (a.getDepartment() != null)
+            d.setDepartmentId(a.getDepartment().getId());
+        if (a.getOrganisation() != null)
+            d.setOrganisationId(a.getOrganisation().getId());
+        if (a.getLocation() != null)
+            d.setLocationId(a.getLocation().getId());
+        if (a.getSupplier() != null)
+            d.setSupplierId(a.getSupplier().getId());
+        if (a.getAssignedUser() != null)
+            d.setAssignedUserId(a.getAssignedUser().getId());
+        if (a.getPurchaseOrder() != null)
+            d.setPurchaseOrderId(a.getPurchaseOrder().getId());
         return d;
     }
 }

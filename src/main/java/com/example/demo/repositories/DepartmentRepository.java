@@ -9,15 +9,30 @@ import java.util.Optional;
 import java.util.UUID;
 
 public interface DepartmentRepository extends JpaRepository<Department, UUID> {
-    List<Department> findAllByDeletedAtIsNull();
-    Optional<Department> findByIdAndDeletedAtIsNull(UUID id);
+        List<Department> findAllByDeletedAtIsNull();
 
-    Optional<Department> findByNameIgnoreCaseAndDeletedAtIsNull(String name);
-    boolean existsByNameIgnoreCaseAndDeletedAtIsNull(String name);
+        List<Department> findAllByCreatedByAndDeletedAtIsNull(String createdBy);
 
-    // Organisation-scoped queries
-    List<Department> findAllByOrganisationAndDeletedAtIsNull(Organisation organisation);
-    Optional<Department> findByIdAndOrganisationAndDeletedAtIsNull(UUID id, Organisation organisation);
-    Optional<Department> findByNameIgnoreCaseAndOrganisationAndDeletedAtIsNull(String name, Organisation organisation);
-    boolean existsByNameIgnoreCaseAndOrganisationAndDeletedAtIsNull(String name, Organisation organisation);
+        Optional<Department> findByIdAndDeletedAtIsNull(UUID id);
+
+        Optional<Department> findByNameIgnoreCaseAndDeletedAtIsNull(String name);
+
+        boolean existsByNameIgnoreCaseAndDeletedAtIsNull(String name);
+
+        // Organisation-scoped queries
+        List<Department> findAllByOrganisationAndDeletedAtIsNull(Organisation organisation);
+
+        List<Department> findAllByOrganisationAndCreatedByAndDeletedAtIsNull(Organisation organisation,
+                        String createdBy);
+
+        List<Department> findAllByOrganisationAndCreatedByInOrCreatedByIsNullAndDeletedAtIsNull(
+                        Organisation organisation,
+                        java.util.Collection<String> createdByList);
+
+        Optional<Department> findByIdAndOrganisationAndDeletedAtIsNull(UUID id, Organisation organisation);
+
+        Optional<Department> findByNameIgnoreCaseAndOrganisationAndDeletedAtIsNull(String name,
+                        Organisation organisation);
+
+        boolean existsByNameIgnoreCaseAndOrganisationAndDeletedAtIsNull(String name, Organisation organisation);
 }

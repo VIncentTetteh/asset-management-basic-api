@@ -1,0 +1,168 @@
+API TEST LOG - Mon Feb 23 12:05:10 GMT 2026
+======================================
+--------------------------------------
+Endpoint: POST /auth/login
+Description: Admin Login
+Request Body: {"email":"test.admin@example.com", "password":"Password123!"}
+Status: 200
+Response Body: {
+  "expiresIn" : 86400,
+  "token" : "eyJhbGciOiJIUzI1NiJ9.eyJmaXJzdE5hbWUiOiJUZXN0IiwibGFzdE5hbWUiOiJBZG1pbiIsInJvbGUiOiJST0xFX0FETUlOIiwib3JnYW5pc2F0aW9uSWQiOiJkODViOTFkMi04YzM2LTQ2NzAtOWQwYi1jZDRmMzQ1MTcxMzIiLCJwZXJtaXNzaW9ucyI6IltcIkFMTFwiXSIsImRlcGFydG1lbnRJZCI6ImFmMjA5NWQxLWRhYTYtNDFjZi04ZmRiLTMxYTQ3MTk4MzlkZiIsImVtYWlsIjoidGVzdC5hZG1pbkBleGFtcGxlLmNvbSIsInN1YiI6InRlc3QuYWRtaW5AZXhhbXBsZS5jb20iLCJpYXQiOjE3NzE4NDgzMTIsImV4cCI6MTc3MTkzNDcxMn0.y8so0tcGCnfHRCnGLvKdd6SfQvXy77O1hwljXeIaUZs",
+  "user" : {
+    "id" : "d9495462-3890-4032-a715-5c375ed5bae5",
+    "role" : "ADMIN",
+    "lastName" : "Admin",
+    "email" : "test.admin@example.com",
+    "firstName" : "Test"
+  }
+}
+
+--------------------------------------
+Endpoint: GET /auth/profile
+Description: Get Profile
+Status: 200
+Response Body: {
+  "id" : "d9495462-3890-4032-a715-5c375ed5bae5",
+  "firstName" : "Test",
+  "lastName" : "Admin",
+  "email" : "test.admin@example.com",
+  "employeeId" : "EMP-TEST-ADMIN",
+  "jobTitle" : "Administrator",
+  "roleId" : "ac2b3db8-1fd4-4375-b81e-738aedd0340d",
+  "status" : "ACTIVE",
+  "organisationId" : "d85b91d2-8c36-4670-9d0b-cd4f34517132",
+  "departmentId" : "af2095d1-daa6-41cf-8fdb-31a4719839df"
+}
+
+--------------------------------------
+Endpoint: GET /organisations
+Description: List Organisations
+Status: 200
+Response Body: [ {
+  "id" : "d85b91d2-8c36-4670-9d0b-cd4f34517132",
+  "name" : "Demo Org"
+} ]
+
+--------------------------------------
+Endpoint: POST /organisations
+Description: Create Organisation
+Request Body: {"name":"New Test Org", "registrationNumber":"REG-999"}
+Status: 200
+Response Body: {
+  "id" : "b33bfcd8-b97e-4d26-8ac1-ae872f97476d",
+  "name" : "New Test Org"
+}
+
+--------------------------------------
+Endpoint: GET /departments?organisationId=
+Description: List Departments
+Status: 200
+Response Body: [ {
+  "id" : "af2095d1-daa6-41cf-8fdb-31a4719839df",
+  "name" : "IT",
+  "organisationId" : "d85b91d2-8c36-4670-9d0b-cd4f34517132"
+} ]
+
+--------------------------------------
+Endpoint: POST /departments
+Description: Create Department
+Request Body: {"name":"Finance", "organisationId":""}
+Status: 200
+Response Body: {
+  "id" : "f34aa84e-0a06-4de3-a9b8-06d33f6e29a0",
+  "name" : "Finance",
+  "organisationId" : "d85b91d2-8c36-4670-9d0b-cd4f34517132"
+}
+
+--------------------------------------
+Endpoint: GET /assets?organisationId=
+Description: List Assets
+Status: 200
+Response Body: [ ]
+
+--------------------------------------
+Endpoint: POST /assets
+Description: Create Asset
+Request Body: {"name":"MacBook Pro", "assetTag":"MBP-2026-001", "purchaseCost":2500, "usefulLifeInYears":5, "organisationId":"", "departmentId":""}
+Status: 400
+Response Body: {
+  "errors" : {
+    "organisationId" : "Organisation ID is required",
+    "departmentId" : "Department ID is required",
+    "assetType" : "Asset type is required"
+  },
+  "status" : 400
+}
+
+--------------------------------------
+Endpoint: GET /asset-transfers?organisationId=
+Description: List Asset Transfers
+Status: 400
+Response Body: 
+
+--------------------------------------
+Endpoint: GET /audits?organisationId=
+Description: List Audits
+Status: 400
+Response Body: 
+
+--------------------------------------
+Endpoint: GET /categories
+Description: List Categories
+Status: 400
+Response Body: {
+  "type" : "about:blank",
+  "title" : "Bad Request",
+  "status" : 400,
+  "detail" : "Required parameter 'organisationId' is not present.",
+  "instance" : "/api/v1/categories"
+}
+
+--------------------------------------
+Endpoint: GET /locations
+Description: List Locations
+Status: 400
+Response Body: {
+  "type" : "about:blank",
+  "title" : "Bad Request",
+  "status" : 400,
+  "detail" : "Required parameter 'organisationId' is not present.",
+  "instance" : "/api/v1/locations"
+}
+
+--------------------------------------
+Endpoint: GET /maintenance
+Description: List Maintenance
+Status: 400
+Response Body: 
+
+--------------------------------------
+Endpoint: GET /roles?organisationId=
+Description: List Roles
+Status: 400
+Response Body: {
+  "type" : "about:blank",
+  "title" : "Bad Request",
+  "status" : 400,
+  "detail" : "Required parameter 'organisationId' is not present.",
+  "instance" : "/api/v1/roles"
+}
+
+--------------------------------------
+Endpoint: GET /suppliers
+Description: List Suppliers
+Status: 400
+Response Body: {
+  "type" : "about:blank",
+  "title" : "Bad Request",
+  "status" : 400,
+  "detail" : "Required parameter 'organisationId' is not present.",
+  "instance" : "/api/v1/suppliers"
+}
+
+--------------------------------------
+Endpoint: GET /purchase-orders
+Description: List Purchase Orders
+Status: 400
+Response Body: 
+

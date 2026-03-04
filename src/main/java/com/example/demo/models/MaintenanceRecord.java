@@ -42,5 +42,8 @@ public class MaintenanceRecord extends BaseEntity {
 
     private LocalDate nextDueDate;
 
-}
+    @ManyToOne
+    @JoinColumn(nullable = false)
+    private Organisation organisation;
 
+}

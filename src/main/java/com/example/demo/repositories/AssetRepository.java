@@ -12,28 +12,49 @@ import java.util.Set;
 import java.util.UUID;
 
 public interface AssetRepository extends JpaRepository<Asset, UUID> {
-    List<Asset> findAllByDeletedAtIsNull();
-    Optional<Asset> findByIdAndDeletedAtIsNull(UUID id);
-    Optional<Asset> findByNameAndOrganisationAndDeletedAtIsNull(String name, Organisation organisation);
+        List<Asset> findAllByDeletedAtIsNull();
 
-    Optional<Asset> findByNameIgnoreCaseAndDeletedAtIsNull(String name);
-    boolean existsByNameIgnoreCaseAndDeletedAtIsNull(String name);
+        List<Asset> findAllByCreatedByAndDeletedAtIsNull(String createdBy);
 
-    boolean existsByNameIgnoreCaseAndOrganisationAndDepartmentAndDeletedAtIsNull(
-            String name, Organisation organisation, Department department);
+        Optional<Asset> findByIdAndDeletedAtIsNull(UUID id);
 
-    // Organisation-scoped queries
-    List<Asset> findAllByOrganisationAndDeletedAtIsNull(Organisation organisation);
-    Optional<Asset> findByIdAndOrganisationAndDeletedAtIsNull(UUID id, Organisation organisation);
-    Optional<Asset> findByNameIgnoreCaseAndOrganisationAndDeletedAtIsNull(String name, Organisation organisation);
+        Optional<Asset> findByNameAndOrganisationAndDeletedAtIsNull(String name, Organisation organisation);
 
-    // Asset-specific queries
-    Optional<Asset> findByAssetTagAndDeletedAtIsNull(String assetTag);
-    Optional<Asset> findBySerialNumberAndDeletedAtIsNull(String serialNumber);
-    Set<Asset> findByDepartmentIdAndDeletedAtIsNull(UUID departmentId);
-    Set<Asset> findByLocationIdAndDeletedAtIsNull(UUID locationId);
-    Set<Asset> findByAssignedUserIdAndDeletedAtIsNull(UUID userId);
-    Set<Asset> findByStatusAndDeletedAtIsNull(AssetStatus status);
-    Set<Asset> findByOrganisationIdAndStatusAndDeletedAtIsNull(UUID organisationId, AssetStatus status);
-    Set<Asset> findByCategoryIdAndDeletedAtIsNull(UUID categoryId);
+        Optional<Asset> findByNameIgnoreCaseAndDeletedAtIsNull(String name);
+
+        boolean existsByNameIgnoreCaseAndDeletedAtIsNull(String name);
+
+        boolean existsByNameIgnoreCaseAndOrganisationAndDepartmentAndDeletedAtIsNull(
+                        String name, Organisation organisation, Department department);
+
+        boolean existsByNameIgnoreCaseAndOrganisationAndDeletedAtIsNull(String name, Organisation organisation);
+
+        // Organisation-scoped queries
+        List<Asset> findAllByOrganisationAndDeletedAtIsNull(Organisation organisation);
+
+        List<Asset> findAllByOrganisationAndCreatedByAndDeletedAtIsNull(Organisation organisation, String createdBy);
+
+        List<Asset> findAllByOrganisationAndCreatedByInOrCreatedByIsNullAndDeletedAtIsNull(Organisation organisation,
+                        java.util.Collection<String> createdByList);
+
+        Optional<Asset> findByIdAndOrganisationAndDeletedAtIsNull(UUID id, Organisation organisation);
+
+        Optional<Asset> findByNameIgnoreCaseAndOrganisationAndDeletedAtIsNull(String name, Organisation organisation);
+
+        // Asset-specific queries
+        Optional<Asset> findByAssetTagAndDeletedAtIsNull(String assetTag);
+
+        Optional<Asset> findBySerialNumberAndDeletedAtIsNull(String serialNumber);
+
+        Set<Asset> findByDepartmentIdAndDeletedAtIsNull(UUID departmentId);
+
+        Set<Asset> findByLocationIdAndDeletedAtIsNull(UUID locationId);
+
+        Set<Asset> findByAssignedUserIdAndDeletedAtIsNull(UUID userId);
+
+        Set<Asset> findByStatusAndDeletedAtIsNull(AssetStatus status);
+
+        Set<Asset> findByOrganisationIdAndStatusAndDeletedAtIsNull(UUID organisationId, AssetStatus status);
+
+        Set<Asset> findByCategoryIdAndDeletedAtIsNull(UUID categoryId);
 }

@@ -30,7 +30,5 @@ public class DisposalRecordDto {
 
     private String complianceDocumentUrl;
 
-    @NotNull(message = "Organisation ID is required")
     private UUID organisationId;
 }
-

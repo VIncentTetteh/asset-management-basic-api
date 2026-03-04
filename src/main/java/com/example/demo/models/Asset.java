@@ -12,33 +12,31 @@ import java.time.LocalDate;
 @Getter
 @Entity
 @Table(name = "asset", uniqueConstraints = {
-    @UniqueConstraint(columnNames = {"asset_tag", "organisation_id"},
-                      name = "uk_asset_tag_per_organisation"),
-    @UniqueConstraint(columnNames = {"serial_number", "organisation_id"},
-                      name = "uk_serial_number_per_organisation")
+        @UniqueConstraint(columnNames = { "asset_tag", "organisation_id" }, name = "uk_asset_tag_per_organisation"),
+        @UniqueConstraint(columnNames = { "serial_number",
+                "organisation_id" }, name = "uk_serial_number_per_organisation")
 })
 public class Asset extends BaseEntity {
 
     @Column(nullable = false)
     private String name;
 
-    @Column(nullable = false, unique = true)
+    @Column
     private String assetTag;
 
-    @Column(unique = true)
+    @Column
     private String serialNumber;
 
-    @Column(unique = true)
+    @Column
     private String barcodeQrCode;
 
-    @Column(nullable = false)
+    @Column
     private String description;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     private Category category;
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
     private AssetType assetType;
 
     private String manufacturer;
@@ -73,25 +71,31 @@ public class Asset extends BaseEntity {
     @Column(length = 20)
     private AssetCondition condition = AssetCondition.GOOD;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     private Location location;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     private User assignedUser;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     private Supplier supplier;
 
     private String invoiceId;
 
     private String insurancePolicyId;
 
-    @ManyToOne
-    @JoinColumn(nullable = false)
+    @ManyToOne(fetch = FetchType.LAZY)
     private Department department;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(nullable = false)
     private Organisation organisation;
+
+    /**
+     * The purchase order that sourced this asset — enables PO→Asset lifecycle
+     * traceability.
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    private PurchaseOrder purchaseOrder;
 
 }

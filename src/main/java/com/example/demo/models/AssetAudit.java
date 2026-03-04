@@ -46,10 +46,4 @@ public class AssetAudit extends BaseEntity {
         }
     }
 
-    @PreUpdate
-    protected void onUpdate() {
-        throw new UnsupportedOperationException("Audit records are immutable and cannot be updated");
-    }
-
 }
-

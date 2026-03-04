@@ -6,86 +6,98 @@ import com.example.demo.models.Organisation;
 import com.example.demo.repositories.CategoryRepository;
 import com.example.demo.repositories.OrganisationRepository;
 import com.example.demo.services.CategoryService;
+import com.example.demo.services.TenantAwareService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Service
 @Transactional
-public class CategoryServiceImpl implements CategoryService {
+public class CategoryServiceImpl extends TenantAwareService implements CategoryService {
 
     private final CategoryRepository categoryRepository;
-    private final OrganisationRepository organisationRepository;
 
-    public CategoryServiceImpl(CategoryRepository categoryRepository, OrganisationRepository organisationRepository) {
+    public CategoryServiceImpl(CategoryRepository categoryRepository,
+            OrganisationRepository organisationRepository) {
+        super(organisationRepository);
         this.categoryRepository = categoryRepository;
-        this.organisationRepository = organisationRepository;
     }
 
     @Override
     public CategoryDto createCategory(CategoryDto categoryDto, UUID organisationId) {
-        Organisation organisation = organisationRepository.findById(organisationId)
-            .orElseThrow(() -> new IllegalArgumentException("Organisation not found"));
+        // organisationId param is ignored — always use tenant context
+        Organisation org = requireTenantOrg();
 
         Category category = new Category();
         category.setName(categoryDto.getName());
         category.setAssetPrefixCode(categoryDto.getAssetPrefixCode());
         category.setDefaultWarrantyPeriodMonths(categoryDto.getDefaultWarrantyPeriodMonths());
-        category.setOrganisation(organisation);
+        category.setOrganisation(org);
 
         if (categoryDto.getParentCategoryId() != null) {
-            Category parentCategory = categoryRepository.findById(categoryDto.getParentCategoryId())
-                .orElseThrow(() -> new IllegalArgumentException("Parent category not found"));
+            Category parentCategory = categoryRepository.findByIdAndOrganisationAndDeletedAtIsNull(
+                    categoryDto.getParentCategoryId(), org)
+                    .orElseThrow(() -> new IllegalArgumentException("Parent category not found in your organisation"));
             category.setParentCategory(parentCategory);
         }
 
-        Category savedCategory = categoryRepository.save(category);
-        return mapToDto(savedCategory);
+        return mapToDto(categoryRepository.save(category));
     }
 
     @Override
     @Transactional(readOnly = true)
     public CategoryDto getCategoryById(UUID id) {
-        Category category = categoryRepository.findById(id)
-            .orElseThrow(() -> new IllegalArgumentException("Category not found"));
+        Organisation org = requireTenantOrg();
+        Category category = categoryRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
+                .orElseThrow(() -> new IllegalArgumentException("Category not found"));
         return mapToDto(category);
     }
 
     @Override
     @Transactional(readOnly = true)
     public Set<CategoryDto> getCategoriesByOrganisation(UUID organisationId) {
-        return categoryRepository.findByOrganisationId(organisationId).stream()
-            .map(this::mapToDto)
-            .collect(Collectors.toSet());
+        // Always scope to tenant context, ignore param
+        Organisation org = requireTenantOrg();
+        return categoryRepository.findByOrganisationAndDeletedAtIsNull(org).stream()
+                .map(this::mapToDto)
+                .collect(Collectors.toSet());
     }
 
     @Override
     @Transactional(readOnly = true)
     public Set<CategoryDto> getSubCategories(UUID parentCategoryId) {
-        return categoryRepository.findByParentCategoryId(parentCategoryId).stream()
-            .map(this::mapToDto)
-            .collect(Collectors.toSet());
+        Organisation org = requireTenantOrg();
+        categoryRepository.findByIdAndOrganisationAndDeletedAtIsNull(parentCategoryId, org)
+                .orElseThrow(() -> new IllegalArgumentException("Parent category not found in your organisation"));
+        return categoryRepository.findByParentCategoryIdAndDeletedAtIsNull(parentCategoryId).stream()
+                .map(this::mapToDto)
+                .collect(Collectors.toSet());
     }
 
     @Override
     public CategoryDto updateCategory(UUID id, CategoryDto categoryDto) {
-        Category category = categoryRepository.findById(id)
-            .orElseThrow(() -> new IllegalArgumentException("Category not found"));
+        Organisation org = requireTenantOrg();
+        Category category = categoryRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
+                .orElseThrow(() -> new IllegalArgumentException("Category not found"));
 
         category.setName(categoryDto.getName());
         category.setAssetPrefixCode(categoryDto.getAssetPrefixCode());
         category.setDefaultWarrantyPeriodMonths(categoryDto.getDefaultWarrantyPeriodMonths());
 
-        Category updatedCategory = categoryRepository.save(category);
-        return mapToDto(updatedCategory);
+        return mapToDto(categoryRepository.save(category));
     }
 
     @Override
     public void deleteCategory(UUID id) {
-        categoryRepository.deleteById(id);
+        Organisation org = requireTenantOrg();
+        Category category = categoryRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
+                .orElseThrow(() -> new IllegalArgumentException("Category not found"));
+        category.setDeletedAt(Instant.now());
+        categoryRepository.save(category);
     }
 
     private CategoryDto mapToDto(Category category) {
@@ -104,4 +116,3 @@ public class CategoryServiceImpl implements CategoryService {
         return dto;
     }
 }
-

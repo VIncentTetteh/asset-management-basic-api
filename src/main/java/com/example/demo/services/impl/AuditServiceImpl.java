@@ -7,6 +7,7 @@ import com.example.demo.models.Department;
 import com.example.demo.models.User;
 import com.example.demo.repositories.*;
 import com.example.demo.services.AuditService;
+import com.example.demo.services.TenantAwareService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -17,103 +18,114 @@ import java.util.stream.Collectors;
 
 @Service
 @Transactional
-public class AuditServiceImpl implements AuditService {
+public class AuditServiceImpl extends TenantAwareService implements AuditService {
 
     private final AssetAuditRepository auditRepository;
-    private final OrganisationRepository organisationRepository;
     private final DepartmentRepository departmentRepository;
     private final UserRepository userRepository;
 
     public AuditServiceImpl(AssetAuditRepository auditRepository,
-                          OrganisationRepository organisationRepository,
-                          DepartmentRepository departmentRepository,
-                          UserRepository userRepository) {
+            OrganisationRepository organisationRepository,
+            DepartmentRepository departmentRepository,
+            UserRepository userRepository) {
+        super(organisationRepository);
         this.auditRepository = auditRepository;
-        this.organisationRepository = organisationRepository;
         this.departmentRepository = departmentRepository;
         this.userRepository = userRepository;
     }
 
     @Override
     public AssetAuditDto createAudit(AssetAuditDto auditDto) {
-        Organisation organisation = organisationRepository.findById(auditDto.getOrganisationId())
-            .orElseThrow(() -> new IllegalArgumentException("Organisation not found"));
-        Department department = departmentRepository.findById(auditDto.getDepartmentId())
-            .orElseThrow(() -> new IllegalArgumentException("Department not found"));
-        User conductor = userRepository.findById(auditDto.getConductedById())
-            .orElseThrow(() -> new IllegalArgumentException("User not found"));
+        Organisation org = requireTenantOrg();
+
+        Department department = departmentRepository.findByIdAndOrganisationAndDeletedAtIsNull(
+                auditDto.getDepartmentId(), org)
+                .orElseThrow(() -> new IllegalArgumentException("Department not found in your organisation"));
+
+        User conductor = userRepository.findByIdAndOrganisation(auditDto.getConductedById(), org)
+                .orElseThrow(() -> new IllegalArgumentException("Conductor not found in your organisation"));
 
         AssetAudit audit = new AssetAudit();
-        audit.setOrganisation(organisation);
+        audit.setOrganisation(org);
         audit.setDepartment(department);
         audit.setAuditDate(auditDto.getAuditDate());
         audit.setConductedBy(conductor);
         audit.setStatus(auditDto.getStatus());
         audit.setRemarks(auditDto.getRemarks());
 
-        AssetAudit savedAudit = auditRepository.save(audit);
-        return mapToDto(savedAudit);
+        return mapToDto(auditRepository.save(audit));
     }
 
     @Override
     @Transactional(readOnly = true)
     public AssetAuditDto getAuditById(UUID id) {
-        AssetAudit audit = auditRepository.findById(id)
-            .orElseThrow(() -> new IllegalArgumentException("Audit not found"));
+        Organisation org = requireTenantOrg();
+        AssetAudit audit = auditRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
+                .orElseThrow(() -> new IllegalArgumentException("Audit not found"));
         return mapToDto(audit);
     }
 
     @Override
     @Transactional(readOnly = true)
     public Set<AssetAuditDto> getAuditsByOrganisation(UUID organisationId) {
-        return auditRepository.findByOrganisationId(organisationId).stream()
-            .map(this::mapToDto)
-            .collect(Collectors.toSet());
+        // Always scope to tenant context, ignore param
+        Organisation org = requireTenantOrg();
+        return auditRepository.findByOrganisationAndDeletedAtIsNull(org).stream()
+                .map(this::mapToDto)
+                .collect(Collectors.toSet());
     }
 
     @Override
     @Transactional(readOnly = true)
     public Set<AssetAuditDto> getAuditsByDepartment(UUID departmentId) {
-        return auditRepository.findByDepartmentId(departmentId).stream()
-            .map(this::mapToDto)
-            .collect(Collectors.toSet());
+        Organisation org = requireTenantOrg();
+        departmentRepository.findByIdAndOrganisationAndDeletedAtIsNull(departmentId, org)
+                .orElseThrow(() -> new IllegalArgumentException("Department not found in your organisation"));
+        return auditRepository.findByDepartmentIdAndDeletedAtIsNull(departmentId).stream()
+                .map(this::mapToDto)
+                .collect(Collectors.toSet());
     }
 
     @Override
     @Transactional(readOnly = true)
     public Set<AssetAuditDto> getAuditsByDateRange(LocalDate startDate, LocalDate endDate) {
-        return auditRepository.findByAuditDateBetween(startDate, endDate).stream()
-            .map(this::mapToDto)
-            .collect(Collectors.toSet());
+        Organisation org = requireTenantOrg();
+        return auditRepository.findByOrganisationAndAuditDateBetweenAndDeletedAtIsNull(org, startDate, endDate)
+                .stream()
+                .map(this::mapToDto)
+                .collect(Collectors.toSet());
     }
 
     @Override
     @Transactional(readOnly = true)
     public Set<AssetAuditDto> getAuditsByConductor(UUID userId) {
-        return auditRepository.findByConductedById(userId).stream()
-            .map(this::mapToDto)
-            .collect(Collectors.toSet());
+        Organisation org = requireTenantOrg();
+        userRepository.findByIdAndOrganisation(userId, org)
+                .orElseThrow(() -> new IllegalArgumentException("User not found in your organisation"));
+        return auditRepository.findByConductedByIdAndDeletedAtIsNull(userId).stream()
+                .map(this::mapToDto)
+                .collect(Collectors.toSet());
     }
 
     @Override
     public AssetAuditDto updateAuditStatus(UUID auditId, String status) {
-        AssetAudit audit = auditRepository.findById(auditId)
-            .orElseThrow(() -> new IllegalArgumentException("Audit not found"));
+        Organisation org = requireTenantOrg();
+        AssetAudit audit = auditRepository.findByIdAndOrganisationAndDeletedAtIsNull(auditId, org)
+                .orElseThrow(() -> new IllegalArgumentException("Audit not found"));
 
         try {
             audit.setStatus(com.example.demo.enums.AuditStatus.valueOf(status));
         } catch (IllegalArgumentException e) {
-            throw new IllegalArgumentException("Invalid audit status");
+            throw new IllegalArgumentException("Invalid audit status: " + status);
         }
 
-        AssetAudit updatedAudit = auditRepository.save(audit);
-        return mapToDto(updatedAudit);
+        return mapToDto(auditRepository.save(audit));
     }
 
     @Override
     public void deleteAudit(UUID id) {
-        // Note: In production, audit deletion should be prevented entirely
-        auditRepository.deleteById(id);
+        // Audit records should not be deleted — they are immutable compliance records
+        throw new IllegalStateException("Audit records cannot be deleted. They are immutable compliance records.");
     }
 
     private AssetAuditDto mapToDto(AssetAudit audit) {
@@ -128,4 +140,3 @@ public class AuditServiceImpl implements AuditService {
         return dto;
     }
 }
-

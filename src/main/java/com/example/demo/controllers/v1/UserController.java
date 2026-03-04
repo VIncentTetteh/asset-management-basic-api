@@ -1,0 +1,71 @@
+package com.example.demo.controllers.v1;
+
+import com.example.demo.dto.UserDto;
+import com.example.demo.services.UserService;
+import jakarta.validation.Valid;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.Set;
+import java.util.UUID;
+
+/**
+ * H6: User management endpoints — create, list, update, deactivate,
+ * assign-role.
+ * All operations are scoped to the current tenant organisation via
+ * TenantContext.
+ */
+@RestController
+@RequestMapping("/api/v1/users")
+public class UserController {
+
+    private final UserService userService;
+
+    public UserController(UserService userService) {
+        this.userService = userService;
+    }
+
+    @PostMapping
+    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    public ResponseEntity<UserDto> createUser(@Valid @RequestBody UserDto dto) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(userService.createUser(dto));
+    }
+
+    @GetMapping("/{id}")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_USER')")
+    public ResponseEntity<UserDto> getUser(@PathVariable UUID id) {
+        return ResponseEntity.ok(userService.getUserById(id));
+    }
+
+    @GetMapping
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_USER')")
+    public ResponseEntity<Set<UserDto>> listUsers(
+            @RequestParam(required = false) UUID departmentId) {
+        if (departmentId != null) {
+            return ResponseEntity.ok(userService.listUsersByDepartment(departmentId));
+        }
+        return ResponseEntity.ok(userService.listUsers());
+    }
+
+    @PutMapping("/{id}")
+    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    public ResponseEntity<UserDto> updateUser(@PathVariable UUID id,
+            @Valid @RequestBody UserDto dto) {
+        return ResponseEntity.ok(userService.updateUser(id, dto));
+    }
+
+    @PutMapping("/{id}/deactivate")
+    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    public ResponseEntity<UserDto> deactivateUser(@PathVariable UUID id) {
+        return ResponseEntity.ok(userService.deactivateUser(id));
+    }
+
+    @PutMapping("/{id}/role")
+    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    public ResponseEntity<UserDto> assignRole(@PathVariable UUID id,
+            @RequestParam UUID roleId) {
+        return ResponseEntity.ok(userService.assignRole(id, roleId));
+    }
+}

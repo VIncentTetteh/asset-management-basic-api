@@ -47,5 +47,8 @@ public class AssetTransfer extends BaseEntity {
     @Column(columnDefinition = "TEXT")
     private String reason;
 
-}
+    @ManyToOne
+    @JoinColumn(nullable = false)
+    private Organisation organisation;
 
+}

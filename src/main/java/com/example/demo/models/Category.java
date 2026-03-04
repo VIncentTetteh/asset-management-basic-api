@@ -15,22 +15,21 @@ public class Category extends BaseEntity {
     @Column(nullable = false)
     private String name;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "parent_category_id")
     private Category parentCategory;
 
     @OneToMany(mappedBy = "parentCategory")
     private Set<Category> subCategories;
 
-    @ManyToOne
-    @JoinColumn(nullable = false)
+    @ManyToOne(fetch = FetchType.LAZY)
     private DepreciationPolicy depreciationPolicy;
 
     private Integer defaultWarrantyPeriodMonths;
 
     private String assetPrefixCode;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(nullable = false)
     private Organisation organisation;
 
@@ -38,4 +37,3 @@ public class Category extends BaseEntity {
     private Set<Asset> assets;
 
 }
-

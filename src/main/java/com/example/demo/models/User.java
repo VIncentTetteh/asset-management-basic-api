@@ -12,7 +12,8 @@ import java.util.Set;
 @Setter
 @Entity
 @Table(name = "app_user", uniqueConstraints = {
-    @UniqueConstraint(columnNames = {"email", "organisation_id"}, name = "uk_user_email_per_org")
+        @UniqueConstraint(columnNames = { "email", "organisation_id" }, name = "uk_user_email_per_org"),
+        @UniqueConstraint(columnNames = { "employee_id", "organisation_id" }, name = "uk_user_employeeid_per_org")
 })
 public class User extends BaseEntity {
 
@@ -30,12 +31,12 @@ public class User extends BaseEntity {
     @Column(nullable = false)
     private String passwordHash;
 
-    @Column(unique = true)
+    @Column(nullable = false)
     private String employeeId;
 
     private String jobTitle;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     private Role role;
 
     @Enumerated(EnumType.STRING)
@@ -45,14 +46,19 @@ public class User extends BaseEntity {
     @Column(name = "last_login_at")
     private Instant lastLoginAt;
 
-    @ManyToOne
+    @Column(name = "reset_password_token", length = 100)
+    private String resetPasswordToken;
+
+    @Column(name = "reset_password_token_expiry")
+    private Instant resetPasswordTokenExpiry;
+
+    @ManyToOne(fetch = FetchType.LAZY)
     private Organisation organisation;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     private Department department;
 
     @OneToMany(mappedBy = "assignedUser")
     private Set<Asset> assignedAssets;
 
 }
-

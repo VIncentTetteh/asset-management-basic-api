@@ -4,6 +4,7 @@ import com.example.demo.dto.CategoryDto;
 import com.example.demo.services.CategoryService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import jakarta.validation.Valid;
@@ -21,41 +22,46 @@ public class CategoryController {
     }
 
     @PostMapping
-    public ResponseEntity<CategoryDto> createCategory(@Valid @RequestBody CategoryDto categoryDto,
-                                                     @RequestParam UUID organisationId) {
-        CategoryDto createdCategory = categoryService.createCategory(categoryDto, organisationId);
+    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    public ResponseEntity<CategoryDto> createCategory(@Valid @RequestBody CategoryDto categoryDto) {
+        CategoryDto createdCategory = categoryService.createCategory(categoryDto, null);
         return ResponseEntity.status(HttpStatus.CREATED).body(createdCategory);
     }
 
     @GetMapping("/{id}")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_USER')")
     public ResponseEntity<CategoryDto> getCategoryById(@PathVariable UUID id) {
         CategoryDto category = categoryService.getCategoryById(id);
         return ResponseEntity.ok(category);
     }
 
     @GetMapping
-    public ResponseEntity<Set<CategoryDto>> getCategoriesByOrganisation(@RequestParam UUID organisationId) {
-        Set<CategoryDto> categories = categoryService.getCategoriesByOrganisation(organisationId);
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_USER')")
+    public ResponseEntity<Set<CategoryDto>> getCategoriesByOrganisation() {
+        // organisationId ignored — derived from TenantContext in service
+        Set<CategoryDto> categories = categoryService.getCategoriesByOrganisation(null);
         return ResponseEntity.ok(categories);
     }
 
     @GetMapping("/{parentId}/sub-categories")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_USER')")
     public ResponseEntity<Set<CategoryDto>> getSubCategories(@PathVariable UUID parentId) {
         Set<CategoryDto> subCategories = categoryService.getSubCategories(parentId);
         return ResponseEntity.ok(subCategories);
     }
 
     @PutMapping("/{id}")
+    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
     public ResponseEntity<CategoryDto> updateCategory(@PathVariable UUID id,
-                                                     @Valid @RequestBody CategoryDto categoryDto) {
+            @Valid @RequestBody CategoryDto categoryDto) {
         CategoryDto updatedCategory = categoryService.updateCategory(id, categoryDto);
         return ResponseEntity.ok(updatedCategory);
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
     public ResponseEntity<Void> deleteCategory(@PathVariable UUID id) {
         categoryService.deleteCategory(id);
         return ResponseEntity.noContent().build();
     }
 }
-

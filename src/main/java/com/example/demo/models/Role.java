@@ -21,7 +21,7 @@ public class Role extends BaseEntity {
     @Column(columnDefinition = "TEXT")
     private String permissions; // JSON format: ["PERMISSION1", "PERMISSION2", ...]
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(nullable = false)
     private Organisation organisation;
 

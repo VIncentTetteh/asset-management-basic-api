@@ -4,6 +4,7 @@ import com.example.demo.dto.LocationDto;
 import com.example.demo.services.LocationService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import jakarta.validation.Valid;
@@ -21,41 +22,46 @@ public class LocationController {
     }
 
     @PostMapping
-    public ResponseEntity<LocationDto> createLocation(@Valid @RequestBody LocationDto locationDto,
-                                                     @RequestParam UUID organisationId) {
-        LocationDto createdLocation = locationService.createLocation(locationDto, organisationId);
+    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    public ResponseEntity<LocationDto> createLocation(@Valid @RequestBody LocationDto locationDto) {
+        LocationDto createdLocation = locationService.createLocation(locationDto, null);
         return ResponseEntity.status(HttpStatus.CREATED).body(createdLocation);
     }
 
     @GetMapping("/{id}")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_USER')")
     public ResponseEntity<LocationDto> getLocationById(@PathVariable UUID id) {
         LocationDto location = locationService.getLocationById(id);
         return ResponseEntity.ok(location);
     }
 
     @GetMapping
-    public ResponseEntity<Set<LocationDto>> getLocationsByOrganisation(@RequestParam UUID organisationId) {
-        Set<LocationDto> locations = locationService.getLocationsByOrganisation(organisationId);
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_USER')")
+    public ResponseEntity<Set<LocationDto>> getLocationsByOrganisation() {
+        // organisationId ignored — derived from TenantContext in service
+        Set<LocationDto> locations = locationService.getLocationsByOrganisation(null);
         return ResponseEntity.ok(locations);
     }
 
     @GetMapping("/{parentId}/sub-locations")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_USER')")
     public ResponseEntity<Set<LocationDto>> getSubLocations(@PathVariable UUID parentId) {
         Set<LocationDto> subLocations = locationService.getSubLocations(parentId);
         return ResponseEntity.ok(subLocations);
     }
 
     @PutMapping("/{id}")
+    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
     public ResponseEntity<LocationDto> updateLocation(@PathVariable UUID id,
-                                                     @Valid @RequestBody LocationDto locationDto) {
+            @Valid @RequestBody LocationDto locationDto) {
         LocationDto updatedLocation = locationService.updateLocation(id, locationDto);
         return ResponseEntity.ok(updatedLocation);
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
     public ResponseEntity<Void> deleteLocation(@PathVariable UUID id) {
         locationService.deleteLocation(id);
         return ResponseEntity.noContent().build();
     }
 }
-

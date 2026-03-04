@@ -37,10 +37,4 @@ public class AuditItem {
     @Column(nullable = false, updatable = false)
     private java.time.Instant createdAt = java.time.Instant.now();
 
-    @PreUpdate
-    public void preventUpdate() {
-        throw new UnsupportedOperationException("Audit items are immutable and cannot be updated");
-    }
-
 }
-

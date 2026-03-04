@@ -1,16 +1,21 @@
 package com.example.demo.services.impl;
 
 import com.example.demo.dto.MaintenanceRecordDto;
+import com.example.demo.enums.AssetStatus;
 import com.example.demo.enums.MaintenanceStatus;
 import com.example.demo.models.MaintenanceRecord;
 import com.example.demo.models.Asset;
+import com.example.demo.models.Organisation;
 import com.example.demo.repositories.MaintenanceRecordRepository;
 import com.example.demo.repositories.AssetRepository;
+import com.example.demo.repositories.OrganisationRepository;
 import com.example.demo.repositories.SupplierRepository;
+import com.example.demo.services.TenantAwareService;
 import com.example.demo.services.MaintenanceService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Set;
 import java.util.UUID;
@@ -18,15 +23,17 @@ import java.util.stream.Collectors;
 
 @Service
 @Transactional
-public class MaintenanceServiceImpl implements MaintenanceService {
+public class MaintenanceServiceImpl extends TenantAwareService implements MaintenanceService {
 
     private final MaintenanceRecordRepository recordRepository;
     private final AssetRepository assetRepository;
     private final SupplierRepository supplierRepository;
 
     public MaintenanceServiceImpl(MaintenanceRecordRepository recordRepository,
-                                AssetRepository assetRepository,
-                                SupplierRepository supplierRepository) {
+            AssetRepository assetRepository,
+            SupplierRepository supplierRepository,
+            OrganisationRepository organisationRepository) {
+        super(organisationRepository);
         this.recordRepository = recordRepository;
         this.assetRepository = assetRepository;
         this.supplierRepository = supplierRepository;
@@ -34,8 +41,11 @@ public class MaintenanceServiceImpl implements MaintenanceService {
 
     @Override
     public MaintenanceRecordDto createMaintenanceRecord(MaintenanceRecordDto recordDto) {
-        Asset asset = assetRepository.findById(recordDto.getAssetId())
-            .orElseThrow(() -> new IllegalArgumentException("Asset not found"));
+        Organisation org = requireTenantOrg();
+
+        // Asset must belong to the tenant org
+        Asset asset = assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(recordDto.getAssetId(), org)
+                .orElseThrow(() -> new IllegalArgumentException("Asset not found in your organisation"));
 
         MaintenanceRecord record = new MaintenanceRecord();
         record.setAsset(asset);
@@ -48,50 +58,83 @@ public class MaintenanceServiceImpl implements MaintenanceService {
         record.setNextDueDate(recordDto.getNextDueDate());
 
         if (recordDto.getVendorId() != null) {
-            record.setVendor(supplierRepository.findById(recordDto.getVendorId())
-                .orElseThrow(() -> new IllegalArgumentException("Vendor not found")));
+            record.setVendor(supplierRepository.findByIdAndOrganisationAndDeletedAtIsNull(recordDto.getVendorId(), org)
+                    .orElseThrow(() -> new IllegalArgumentException("Vendor not found in your organisation")));
         }
 
+        record.setOrganisation(org);
         MaintenanceRecord savedRecord = recordRepository.save(record);
+
+        // M6: update asset status to MAINTENANCE when record is created
+        asset.setStatus(AssetStatus.MAINTENANCE);
+        assetRepository.save(asset);
+
         return mapToDto(savedRecord);
     }
 
     @Override
     @Transactional(readOnly = true)
     public MaintenanceRecordDto getMaintenanceRecordById(UUID id) {
-        MaintenanceRecord record = recordRepository.findById(id)
-            .orElseThrow(() -> new IllegalArgumentException("Maintenance record not found"));
+        Organisation org = requireTenantOrg();
+        MaintenanceRecord record = recordRepository.findByIdAndDeletedAtIsNull(id)
+                .orElseThrow(() -> new IllegalArgumentException("Maintenance record not found"));
+        if (!record.getOrganisation().getId().equals(org.getId())) {
+            throw new IllegalArgumentException("Maintenance record not found");
+        }
         return mapToDto(record);
     }
 
     @Override
     @Transactional(readOnly = true)
+    public Set<MaintenanceRecordDto> getAllMaintenanceRecords() {
+        Organisation org = requireTenantOrg();
+        return recordRepository.findByOrganisationAndDeletedAtIsNull(org).stream()
+                .map(this::mapToDto)
+                .collect(Collectors.toSet());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public Set<MaintenanceRecordDto> getMaintenanceRecordsByAsset(UUID assetId) {
-        return recordRepository.findByAssetIdOrderByPerformedDateDesc(assetId).stream()
-            .map(this::mapToDto)
-            .collect(Collectors.toSet());
+        Organisation org = requireTenantOrg();
+        // Verify asset belongs to tenant
+        assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(assetId, org)
+                .orElseThrow(() -> new IllegalArgumentException("Asset not found in your organisation"));
+        return recordRepository.findByAssetIdAndDeletedAtIsNull(assetId).stream()
+                .map(this::mapToDto)
+                .collect(Collectors.toSet());
     }
 
     @Override
     @Transactional(readOnly = true)
     public Set<MaintenanceRecordDto> getMaintenanceRecordsByVendor(UUID vendorId) {
-        return recordRepository.findByVendorId(vendorId).stream()
-            .map(this::mapToDto)
-            .collect(Collectors.toSet());
+        Organisation org = requireTenantOrg();
+        // Verify vendor belongs to tenant
+        if (!supplierRepository.existsByIdAndOrganisation(vendorId, org)) {
+            throw new IllegalArgumentException("Vendor not found in your organisation");
+        }
+        return recordRepository.findByVendorIdAndDeletedAtIsNull(vendorId).stream()
+                .map(this::mapToDto)
+                .collect(Collectors.toSet());
     }
 
     @Override
     @Transactional(readOnly = true)
     public Set<MaintenanceRecordDto> getMaintenanceRecordsDueBy(LocalDate date) {
-        return recordRepository.findByNextDueDateBefore(date).stream()
-            .map(this::mapToDto)
-            .collect(Collectors.toSet());
+        Organisation org = requireTenantOrg();
+        return recordRepository.findByOrganisationAndNextDueDateBeforeAndDeletedAtIsNull(org, date).stream()
+                .map(this::mapToDto)
+                .collect(Collectors.toSet());
     }
 
     @Override
     public MaintenanceRecordDto updateMaintenanceRecord(UUID id, MaintenanceRecordDto recordDto) {
-        MaintenanceRecord record = recordRepository.findById(id)
-            .orElseThrow(() -> new IllegalArgumentException("Maintenance record not found"));
+        Organisation org = requireTenantOrg();
+        MaintenanceRecord record = recordRepository.findByIdAndDeletedAtIsNull(id)
+                .orElseThrow(() -> new IllegalArgumentException("Maintenance record not found"));
+        if (!record.getAsset().getOrganisation().getId().equals(org.getId())) {
+            throw new IllegalArgumentException("Maintenance record not found");
+        }
 
         record.setMaintenanceType(recordDto.getMaintenanceType());
         record.setDescription(recordDto.getDescription());
@@ -107,19 +150,35 @@ public class MaintenanceServiceImpl implements MaintenanceService {
 
     @Override
     public MaintenanceRecordDto completeMaintenanceRecord(UUID id) {
-        MaintenanceRecord record = recordRepository.findById(id)
-            .orElseThrow(() -> new IllegalArgumentException("Maintenance record not found"));
+        Organisation org = requireTenantOrg();
+        MaintenanceRecord record = recordRepository.findByIdAndDeletedAtIsNull(id)
+                .orElseThrow(() -> new IllegalArgumentException("Maintenance record not found"));
+        if (!record.getAsset().getOrganisation().getId().equals(org.getId())) {
+            throw new IllegalArgumentException("Maintenance record not found");
+        }
 
         record.setStatus(MaintenanceStatus.COMPLETED);
         record.setPerformedDate(LocalDate.now());
+        recordRepository.save(record);
 
-        MaintenanceRecord updatedRecord = recordRepository.save(record);
-        return mapToDto(updatedRecord);
+        // M6: update asset status back to IN_USE when maintenance is completed
+        Asset asset = record.getAsset();
+        asset.setStatus(AssetStatus.IN_USE);
+        assetRepository.save(asset);
+
+        return mapToDto(record);
     }
 
     @Override
     public void deleteMaintenanceRecord(UUID id) {
-        recordRepository.deleteById(id);
+        Organisation org = requireTenantOrg();
+        MaintenanceRecord record = recordRepository.findByIdAndDeletedAtIsNull(id)
+                .orElseThrow(() -> new IllegalArgumentException("Maintenance record not found"));
+        if (!record.getAsset().getOrganisation().getId().equals(org.getId())) {
+            throw new IllegalArgumentException("Maintenance record not found");
+        }
+        record.setDeletedAt(Instant.now());
+        recordRepository.save(record);
     }
 
     private MaintenanceRecordDto mapToDto(MaintenanceRecord record) {
@@ -139,4 +198,3 @@ public class MaintenanceServiceImpl implements MaintenanceService {
         return dto;
     }
 }
-

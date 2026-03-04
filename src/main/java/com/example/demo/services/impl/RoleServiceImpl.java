@@ -6,79 +6,88 @@ import com.example.demo.models.Organisation;
 import com.example.demo.repositories.RoleRepository;
 import com.example.demo.repositories.OrganisationRepository;
 import com.example.demo.services.RoleService;
+import com.example.demo.services.TenantAwareService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Service
 @Transactional
-public class RoleServiceImpl implements RoleService {
+public class RoleServiceImpl extends TenantAwareService implements RoleService {
 
     private final RoleRepository roleRepository;
-    private final OrganisationRepository organisationRepository;
 
-    public RoleServiceImpl(RoleRepository roleRepository, OrganisationRepository organisationRepository) {
+    public RoleServiceImpl(RoleRepository roleRepository,
+            OrganisationRepository organisationRepository) {
+        super(organisationRepository);
         this.roleRepository = roleRepository;
-        this.organisationRepository = organisationRepository;
     }
 
     @Override
     public RoleDto createRole(RoleDto roleDto, UUID organisationId) {
-        Organisation organisation = organisationRepository.findById(organisationId)
-            .orElseThrow(() -> new IllegalArgumentException("Organisation not found"));
+        // Always use tenant context, ignore param
+        Organisation org = requireTenantOrg();
 
         Role role = new Role();
         role.setName(roleDto.getName());
         role.setDescription(roleDto.getDescription());
         role.setPermissions(roleDto.getPermissions());
-        role.setOrganisation(organisation);
+        role.setOrganisation(org);
 
-        Role savedRole = roleRepository.save(role);
-        return mapToDto(savedRole);
+        return mapToDto(roleRepository.save(role));
     }
 
     @Override
     @Transactional(readOnly = true)
     public RoleDto getRoleById(UUID id) {
-        Role role = roleRepository.findById(id)
-            .orElseThrow(() -> new IllegalArgumentException("Role not found"));
+        Organisation org = requireTenantOrg();
+        Role role = roleRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
+                .orElseThrow(() -> new IllegalArgumentException("Role not found"));
         return mapToDto(role);
     }
 
     @Override
     @Transactional(readOnly = true)
     public Set<RoleDto> getRolesByOrganisation(UUID organisationId) {
-        return roleRepository.findByOrganisationId(organisationId).stream()
-            .map(this::mapToDto)
-            .collect(Collectors.toSet());
+        // Always scope to tenant context, ignore param
+        Organisation org = requireTenantOrg();
+        return roleRepository.findByOrganisationAndDeletedAtIsNull(org).stream()
+                .map(this::mapToDto)
+                .collect(Collectors.toSet());
     }
 
     @Override
     public RoleDto updateRole(UUID id, RoleDto roleDto) {
-        Role role = roleRepository.findById(id)
-            .orElseThrow(() -> new IllegalArgumentException("Role not found"));
+        Organisation org = requireTenantOrg();
+        Role role = roleRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
+                .orElseThrow(() -> new IllegalArgumentException("Role not found"));
 
         role.setName(roleDto.getName());
         role.setDescription(roleDto.getDescription());
         role.setPermissions(roleDto.getPermissions());
 
-        Role updatedRole = roleRepository.save(role);
-        return mapToDto(updatedRole);
+        return mapToDto(roleRepository.save(role));
     }
 
     @Override
     public void deleteRole(UUID id) {
-        roleRepository.deleteById(id);
+        Organisation org = requireTenantOrg();
+        Role role = roleRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
+                .orElseThrow(() -> new IllegalArgumentException("Role not found"));
+        role.setDeletedAt(Instant.now());
+        roleRepository.save(role);
     }
 
     @Override
     @Transactional(readOnly = true)
     public RoleDto getRoleByNameAndOrganisation(String name, UUID organisationId) {
-        Role role = roleRepository.findByNameAndOrganisationId(name, organisationId)
-            .orElseThrow(() -> new IllegalArgumentException("Role not found"));
+        Organisation org = requireTenantOrg();
+        Role role = roleRepository.findByNameAndOrganisationAndDeletedAtIsNull(name, org)
+                .orElseThrow(() -> new IllegalArgumentException("Role not found"));
         return mapToDto(role);
     }
 
@@ -92,4 +101,3 @@ public class RoleServiceImpl implements RoleService {
         return dto;
     }
 }
-

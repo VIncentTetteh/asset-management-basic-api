@@ -2,17 +2,21 @@ package com.example.demo.services.impl;
 
 import com.example.demo.dto.AssetTransferDto;
 import com.example.demo.enums.TransferStatus;
-import com.example.demo.enums.AssetStatus;
 import com.example.demo.models.AssetTransfer;
 import com.example.demo.models.Asset;
 import com.example.demo.models.Department;
 import com.example.demo.models.Location;
+import com.example.demo.models.Organisation;
 import com.example.demo.models.User;
 import com.example.demo.repositories.*;
 import com.example.demo.services.AssetTransferService;
+import com.example.demo.services.TenantAwareService;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Set;
 import java.util.UUID;
@@ -20,7 +24,7 @@ import java.util.stream.Collectors;
 
 @Service
 @Transactional
-public class AssetTransferServiceImpl implements AssetTransferService {
+public class AssetTransferServiceImpl extends TenantAwareService implements AssetTransferService {
 
     private final AssetTransferRepository transferRepository;
     private final AssetRepository assetRepository;
@@ -29,10 +33,12 @@ public class AssetTransferServiceImpl implements AssetTransferService {
     private final UserRepository userRepository;
 
     public AssetTransferServiceImpl(AssetTransferRepository transferRepository,
-                                  AssetRepository assetRepository,
-                                  DepartmentRepository departmentRepository,
-                                  LocationRepository locationRepository,
-                                  UserRepository userRepository) {
+            AssetRepository assetRepository,
+            DepartmentRepository departmentRepository,
+            LocationRepository locationRepository,
+            UserRepository userRepository,
+            OrganisationRepository organisationRepository) {
+        super(organisationRepository);
         this.transferRepository = transferRepository;
         this.assetRepository = assetRepository;
         this.departmentRepository = departmentRepository;
@@ -42,14 +48,21 @@ public class AssetTransferServiceImpl implements AssetTransferService {
 
     @Override
     public AssetTransferDto createTransferRequest(AssetTransferDto transferDto) {
-        Asset asset = assetRepository.findById(transferDto.getAssetId())
-            .orElseThrow(() -> new IllegalArgumentException("Asset not found"));
-        Department fromDept = departmentRepository.findById(transferDto.getFromDepartmentId())
-            .orElseThrow(() -> new IllegalArgumentException("From department not found"));
-        Department toDept = departmentRepository.findById(transferDto.getToDepartmentId())
-            .orElseThrow(() -> new IllegalArgumentException("To department not found"));
-        User requester = userRepository.findById(transferDto.getRequestedById())
-            .orElseThrow(() -> new IllegalArgumentException("User not found"));
+        Organisation org = requireTenantOrg();
+
+        Asset asset = assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(transferDto.getAssetId(), org)
+                .orElseThrow(() -> new IllegalArgumentException("Asset not found in your organisation"));
+
+        Department fromDept = departmentRepository.findByIdAndOrganisationAndDeletedAtIsNull(
+                transferDto.getFromDepartmentId(), org)
+                .orElseThrow(() -> new IllegalArgumentException("From-department not found in your organisation"));
+
+        Department toDept = departmentRepository.findByIdAndOrganisationAndDeletedAtIsNull(
+                transferDto.getToDepartmentId(), org)
+                .orElseThrow(() -> new IllegalArgumentException("To-department not found in your organisation"));
+
+        User requester = userRepository.findByIdAndOrganisation(transferDto.getRequestedById(), org)
+                .orElseThrow(() -> new IllegalArgumentException("Requester not found in your organisation"));
 
         AssetTransfer transfer = new AssetTransfer();
         transfer.setAsset(asset);
@@ -60,15 +73,20 @@ public class AssetTransferServiceImpl implements AssetTransferService {
         transfer.setReason(transferDto.getReason());
 
         if (transferDto.getFromLocationId() != null) {
-            transfer.setFromLocation(locationRepository.findById(transferDto.getFromLocationId())
-                .orElseThrow(() -> new IllegalArgumentException("From location not found")));
+            Location fromLoc = locationRepository.findByIdAndOrganisationAndDeletedAtIsNull(
+                    transferDto.getFromLocationId(), org)
+                    .orElseThrow(() -> new IllegalArgumentException("From-location not found in your organisation"));
+            transfer.setFromLocation(fromLoc);
         }
 
         if (transferDto.getToLocationId() != null) {
-            transfer.setToLocation(locationRepository.findById(transferDto.getToLocationId())
-                .orElseThrow(() -> new IllegalArgumentException("To location not found")));
+            Location toLoc = locationRepository.findByIdAndOrganisationAndDeletedAtIsNull(
+                    transferDto.getToLocationId(), org)
+                    .orElseThrow(() -> new IllegalArgumentException("To-location not found in your organisation"));
+            transfer.setToLocation(toLoc);
         }
 
+        transfer.setOrganisation(org);
         AssetTransfer savedTransfer = transferRepository.save(transfer);
         return mapToDto(savedTransfer);
     }
@@ -76,73 +94,106 @@ public class AssetTransferServiceImpl implements AssetTransferService {
     @Override
     @Transactional(readOnly = true)
     public AssetTransferDto getTransferById(UUID id) {
-        AssetTransfer transfer = transferRepository.findById(id)
-            .orElseThrow(() -> new IllegalArgumentException("Transfer not found"));
+        Organisation org = requireTenantOrg();
+        AssetTransfer transfer = transferRepository.findByIdAndDeletedAtIsNull(id)
+                .orElseThrow(() -> new IllegalArgumentException("Transfer not found"));
+        if (!transfer.getOrganisation().getId().equals(org.getId())) {
+            throw new IllegalArgumentException("Transfer not found");
+        }
         return mapToDto(transfer);
     }
 
     @Override
     @Transactional(readOnly = true)
+    public Set<AssetTransferDto> getAllTransfers() {
+        Organisation org = requireTenantOrg();
+        return transferRepository.findByOrganisationAndDeletedAtIsNull(org).stream()
+                .map(this::mapToDto)
+                .collect(Collectors.toSet());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public Set<AssetTransferDto> getTransfersByAsset(UUID assetId) {
-        return transferRepository.findByAssetId(assetId).stream()
-            .map(this::mapToDto)
-            .collect(Collectors.toSet());
+        Organisation org = requireTenantOrg();
+        assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(assetId, org)
+                .orElseThrow(() -> new IllegalArgumentException("Asset not found in your organisation"));
+        return transferRepository.findByAssetIdAndDeletedAtIsNull(assetId).stream()
+                .map(this::mapToDto)
+                .collect(Collectors.toSet());
     }
 
     @Override
     @Transactional(readOnly = true)
     public Set<AssetTransferDto> getTransfersFromDepartment(UUID departmentId) {
-        return transferRepository.findByFromDepartmentId(departmentId).stream()
-            .map(this::mapToDto)
-            .collect(Collectors.toSet());
+        Organisation org = requireTenantOrg();
+        departmentRepository.findByIdAndOrganisationAndDeletedAtIsNull(departmentId, org)
+                .orElseThrow(() -> new IllegalArgumentException("Department not found in your organisation"));
+        return transferRepository.findByFromDepartmentIdAndDeletedAtIsNull(departmentId).stream()
+                .map(this::mapToDto)
+                .collect(Collectors.toSet());
     }
 
     @Override
     @Transactional(readOnly = true)
     public Set<AssetTransferDto> getTransfersToDepartment(UUID departmentId) {
-        return transferRepository.findByToDepartmentId(departmentId).stream()
-            .map(this::mapToDto)
-            .collect(Collectors.toSet());
+        Organisation org = requireTenantOrg();
+        departmentRepository.findByIdAndOrganisationAndDeletedAtIsNull(departmentId, org)
+                .orElseThrow(() -> new IllegalArgumentException("Department not found in your organisation"));
+        return transferRepository.findByToDepartmentIdAndDeletedAtIsNull(departmentId).stream()
+                .map(this::mapToDto)
+                .collect(Collectors.toSet());
     }
 
     @Override
     @Transactional(readOnly = true)
     public Set<AssetTransferDto> getTransfersByRequester(UUID userId) {
-        return transferRepository.findByRequestedById(userId).stream()
-            .map(this::mapToDto)
-            .collect(Collectors.toSet());
+        Organisation org = requireTenantOrg();
+        userRepository.findByIdAndOrganisation(userId, org)
+                .orElseThrow(() -> new IllegalArgumentException("User not found in your organisation"));
+        return transferRepository.findByRequestedByIdAndDeletedAtIsNull(userId).stream()
+                .map(this::mapToDto)
+                .collect(Collectors.toSet());
     }
 
     @Override
-    public AssetTransferDto approveTransfer(UUID id, UUID approvedById) {
-        AssetTransfer transfer = transferRepository.findById(id)
-            .orElseThrow(() -> new IllegalArgumentException("Transfer not found"));
-        User approver = userRepository.findById(approvedById)
-            .orElseThrow(() -> new IllegalArgumentException("User not found"));
-
+    public AssetTransferDto approveTransfer(UUID id) {
+        Organisation org = requireTenantOrg();
+        AssetTransfer transfer = transferRepository.findByIdAndDeletedAtIsNull(id)
+                .orElseThrow(() -> new IllegalArgumentException("Transfer not found"));
+        if (!transfer.getOrganisation().getId().equals(org.getId())) {
+            throw new IllegalArgumentException("Transfer not found");
+        }
+        // C4 fix: resolve approver from current authenticated user
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth != null && auth.getName() != null) {
+            userRepository.findByEmailAndOrganisationId(auth.getName(), org.getId())
+                    .ifPresent(transfer::setApprovedBy);
+        }
         transfer.setStatus(TransferStatus.APPROVED);
-        transfer.setApprovedBy(approver);
-
-        AssetTransfer updatedTransfer = transferRepository.save(transfer);
-        return mapToDto(updatedTransfer);
+        return mapToDto(transferRepository.save(transfer));
     }
 
     @Override
     public AssetTransferDto rejectTransfer(UUID id) {
-        AssetTransfer transfer = transferRepository.findById(id)
-            .orElseThrow(() -> new IllegalArgumentException("Transfer not found"));
-
+        Organisation org = requireTenantOrg();
+        AssetTransfer transfer = transferRepository.findByIdAndDeletedAtIsNull(id)
+                .orElseThrow(() -> new IllegalArgumentException("Transfer not found"));
+        if (!transfer.getAsset().getOrganisation().getId().equals(org.getId())) {
+            throw new IllegalArgumentException("Transfer not found");
+        }
         transfer.setStatus(TransferStatus.CANCELLED);
-
-        AssetTransfer updatedTransfer = transferRepository.save(transfer);
-        return mapToDto(updatedTransfer);
+        return mapToDto(transferRepository.save(transfer));
     }
 
     @Override
     public AssetTransferDto completeTransfer(UUID id) {
-        AssetTransfer transfer = transferRepository.findById(id)
-            .orElseThrow(() -> new IllegalArgumentException("Transfer not found"));
-
+        Organisation org = requireTenantOrg();
+        AssetTransfer transfer = transferRepository.findByIdAndDeletedAtIsNull(id)
+                .orElseThrow(() -> new IllegalArgumentException("Transfer not found"));
+        if (!transfer.getAsset().getOrganisation().getId().equals(org.getId())) {
+            throw new IllegalArgumentException("Transfer not found");
+        }
         if (transfer.getStatus() != TransferStatus.APPROVED) {
             throw new IllegalStateException("Transfer must be approved before completion");
         }
@@ -157,13 +208,20 @@ public class AssetTransferServiceImpl implements AssetTransferService {
         transfer.setStatus(TransferStatus.COMPLETED);
         transfer.setTransferDate(LocalDate.now());
 
-        AssetTransfer updatedTransfer = transferRepository.save(transfer);
-        return mapToDto(updatedTransfer);
+        return mapToDto(transferRepository.save(transfer));
     }
 
     @Override
     public void deleteTransfer(UUID id) {
-        transferRepository.deleteById(id);
+        Organisation org = requireTenantOrg();
+        AssetTransfer transfer = transferRepository.findByIdAndDeletedAtIsNull(id)
+                .orElseThrow(() -> new IllegalArgumentException("Transfer not found"));
+        // M3 fix: check organisation FK directly
+        if (!transfer.getOrganisation().getId().equals(org.getId())) {
+            throw new IllegalArgumentException("Transfer not found");
+        }
+        transfer.setDeletedAt(Instant.now());
+        transferRepository.save(transfer);
     }
 
     private AssetTransferDto mapToDto(AssetTransfer transfer) {
@@ -188,4 +246,3 @@ public class AssetTransferServiceImpl implements AssetTransferService {
         return dto;
     }
 }
-

@@ -1,6 +1,7 @@
 package com.example.demo.controllers.v1;
 
 import com.example.demo.dto.AssetDto;
+import com.example.demo.enums.AssetStatus;
 import com.example.demo.services.AssetService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -8,6 +9,7 @@ import org.springframework.web.bind.annotation.*;
 
 import jakarta.validation.Valid;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 @RestController
@@ -21,28 +23,57 @@ public class AssetController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAuthority('ROLE_ORG_ADMIN') or hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN')")
     public ResponseEntity<AssetDto> create(@Valid @RequestBody AssetDto dto) {
-        AssetDto created = assetService.create(dto);
-        return ResponseEntity.ok(created);
+        try {
+            AssetDto created = assetService.create(dto);
+            return ResponseEntity.ok(created);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().build();
+        } catch (IllegalStateException e) {
+            return ResponseEntity.status(409).body(null);
+        }
     }
 
     @GetMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_USER','ROLE_ADMIN')")
     public ResponseEntity<AssetDto> get(@PathVariable UUID id) {
         AssetDto dto = assetService.get(id);
-        if (dto == null) return ResponseEntity.notFound().build();
+        if (dto == null)
+            return ResponseEntity.notFound().build();
         return ResponseEntity.ok(dto);
     }
 
+    /**
+     * List assets with optional filters.
+     * Query params (mutually exclusive, first match wins):
+     * ?status=IN_USE – filter by AssetStatus
+     * ?departmentId=<uuid> – filter by department
+     * ?categoryId=<uuid> – filter by category
+     */
     @GetMapping
     @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_USER','ROLE_ADMIN')")
-    public ResponseEntity<List<AssetDto>> list() {
-        return ResponseEntity.ok(assetService.list());
+    public ResponseEntity<?> list(
+            @RequestParam(required = false) AssetStatus status,
+            @RequestParam(required = false) UUID departmentId,
+            @RequestParam(required = false) UUID categoryId) {
+
+        if (status != null) {
+            Set<AssetDto> result = assetService.listByStatus(status);
+            return ResponseEntity.ok(result);
+        } else if (departmentId != null) {
+            Set<AssetDto> result = assetService.listByDepartment(departmentId);
+            return ResponseEntity.ok(result);
+        } else if (categoryId != null) {
+            Set<AssetDto> result = assetService.listByCategory(categoryId);
+            return ResponseEntity.ok(result);
+        }
+        List<AssetDto> all = assetService.list();
+        return ResponseEntity.ok(all);
     }
 
     @PostMapping("/{id}/assign/{departmentId}")
-    @PreAuthorize("hasAuthority('ROLE_ORG_ADMIN') or hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
     public ResponseEntity<AssetDto> assign(@PathVariable UUID id, @PathVariable UUID departmentId) {
         try {
             AssetDto dto = assetService.assignToDepartment(id, departmentId);
@@ -55,7 +86,7 @@ public class AssetController {
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasAuthority('ROLE_ORG_ADMIN') or hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
     public ResponseEntity<AssetDto> update(@PathVariable UUID id, @Valid @RequestBody AssetDto dto) {
         try {
             AssetDto updated = assetService.update(id, dto);
@@ -66,7 +97,7 @@ public class AssetController {
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAuthority('ROLE_ORG_ADMIN') or hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
     public ResponseEntity<Void> delete(@PathVariable UUID id) {
         assetService.delete(id);
         return ResponseEntity.noContent().build();

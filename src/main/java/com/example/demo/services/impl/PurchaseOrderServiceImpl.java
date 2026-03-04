@@ -6,9 +6,11 @@ import com.example.demo.models.PurchaseOrder;
 import com.example.demo.models.Organisation;
 import com.example.demo.models.Department;
 import com.example.demo.models.Supplier;
-import com.example.demo.models.User;
 import com.example.demo.repositories.*;
 import com.example.demo.services.PurchaseOrderService;
+import com.example.demo.services.TenantAwareService;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -19,21 +21,20 @@ import java.util.stream.Collectors;
 
 @Service
 @Transactional
-public class PurchaseOrderServiceImpl implements PurchaseOrderService {
+public class PurchaseOrderServiceImpl extends TenantAwareService implements PurchaseOrderService {
 
     private final PurchaseOrderRepository poRepository;
-    private final OrganisationRepository organisationRepository;
     private final DepartmentRepository departmentRepository;
     private final SupplierRepository supplierRepository;
     private final UserRepository userRepository;
 
     public PurchaseOrderServiceImpl(PurchaseOrderRepository poRepository,
-                                  OrganisationRepository organisationRepository,
-                                  DepartmentRepository departmentRepository,
-                                  SupplierRepository supplierRepository,
-                                  UserRepository userRepository) {
+            OrganisationRepository organisationRepository,
+            DepartmentRepository departmentRepository,
+            SupplierRepository supplierRepository,
+            UserRepository userRepository) {
+        super(organisationRepository);
         this.poRepository = poRepository;
-        this.organisationRepository = organisationRepository;
         this.departmentRepository = departmentRepository;
         this.supplierRepository = supplierRepository;
         this.userRepository = userRepository;
@@ -41,12 +42,15 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
 
     @Override
     public PurchaseOrderDto createPurchaseOrder(PurchaseOrderDto poDto) {
-        Organisation organisation = organisationRepository.findById(poDto.getOrganisationId())
-            .orElseThrow(() -> new IllegalArgumentException("Organisation not found"));
-        Department department = departmentRepository.findById(poDto.getDepartmentId())
-            .orElseThrow(() -> new IllegalArgumentException("Department not found"));
-        Supplier supplier = supplierRepository.findById(poDto.getSupplierId())
-            .orElseThrow(() -> new IllegalArgumentException("Supplier not found"));
+        Organisation org = requireTenantOrg();
+
+        Department department = departmentRepository.findByIdAndOrganisationAndDeletedAtIsNull(
+                poDto.getDepartmentId(), org)
+                .orElseThrow(() -> new IllegalArgumentException("Department not found in your organisation"));
+
+        Supplier supplier = supplierRepository.findByIdAndOrganisationAndDeletedAtIsNull(
+                poDto.getSupplierId(), org)
+                .orElseThrow(() -> new IllegalArgumentException("Supplier not found in your organisation"));
 
         PurchaseOrder po = new PurchaseOrder();
         po.setPoNumber(poDto.getPoNumber());
@@ -54,58 +58,69 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
         po.setCurrency(poDto.getCurrency() != null ? poDto.getCurrency() : "USD");
         po.setStatus(poDto.getStatus() != null ? poDto.getStatus() : POStatus.DRAFT);
         po.setRemarks(poDto.getRemarks());
-        po.setOrganisation(organisation);
+        po.setOrganisation(org);
         po.setDepartment(department);
         po.setSupplier(supplier);
 
-        PurchaseOrder savedPo = poRepository.save(po);
-        return mapToDto(savedPo);
+        return mapToDto(poRepository.save(po));
     }
 
     @Override
     @Transactional(readOnly = true)
     public PurchaseOrderDto getPurchaseOrderById(UUID id) {
-        PurchaseOrder po = poRepository.findById(id)
-            .orElseThrow(() -> new IllegalArgumentException("Purchase order not found"));
+        Organisation org = requireTenantOrg();
+        PurchaseOrder po = poRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
+                .orElseThrow(() -> new IllegalArgumentException("Purchase order not found"));
         return mapToDto(po);
     }
 
     @Override
     @Transactional(readOnly = true)
     public Set<PurchaseOrderDto> getPurchaseOrdersByOrganisation(UUID organisationId) {
-        return poRepository.findByOrganisationId(organisationId).stream()
-            .map(this::mapToDto)
-            .collect(Collectors.toSet());
+        // Always scope to tenant context, ignore param
+        Organisation org = requireTenantOrg();
+        return poRepository.findByOrganisationAndDeletedAtIsNull(org).stream()
+                .map(this::mapToDto)
+                .collect(Collectors.toSet());
     }
 
     @Override
     @Transactional(readOnly = true)
     public Set<PurchaseOrderDto> getPurchaseOrdersByDepartment(UUID departmentId) {
-        return poRepository.findByDepartmentId(departmentId).stream()
-            .map(this::mapToDto)
-            .collect(Collectors.toSet());
+        Organisation org = requireTenantOrg();
+        departmentRepository.findByIdAndOrganisationAndDeletedAtIsNull(departmentId, org)
+                .orElseThrow(() -> new IllegalArgumentException("Department not found in your organisation"));
+        return poRepository.findByDepartmentIdAndDeletedAtIsNull(departmentId).stream()
+                .map(this::mapToDto)
+                .collect(Collectors.toSet());
     }
 
     @Override
     @Transactional(readOnly = true)
     public Set<PurchaseOrderDto> getPurchaseOrdersBySupplier(UUID supplierId) {
+        Organisation org = requireTenantOrg();
+        supplierRepository.findByIdAndOrganisationAndDeletedAtIsNull(supplierId, org)
+                .orElseThrow(() -> new IllegalArgumentException("Supplier not found in your organisation"));
         return poRepository.findBySupplierId(supplierId).stream()
-            .map(this::mapToDto)
-            .collect(Collectors.toSet());
+                .filter(po -> po.getOrganisation().getId().equals(org.getId()))
+                .map(this::mapToDto)
+                .collect(Collectors.toSet());
     }
 
     @Override
     @Transactional(readOnly = true)
     public Set<PurchaseOrderDto> getPurchaseOrdersByStatus(POStatus status) {
-        return poRepository.findByStatus(status).stream()
-            .map(this::mapToDto)
-            .collect(Collectors.toSet());
+        Organisation org = requireTenantOrg();
+        return poRepository.findByOrganisationAndStatusAndDeletedAtIsNull(org, status).stream()
+                .map(this::mapToDto)
+                .collect(Collectors.toSet());
     }
 
     @Override
     public PurchaseOrderDto updatePurchaseOrder(UUID id, PurchaseOrderDto poDto) {
-        PurchaseOrder po = poRepository.findById(id)
-            .orElseThrow(() -> new IllegalArgumentException("Purchase order not found"));
+        Organisation org = requireTenantOrg();
+        PurchaseOrder po = poRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
+                .orElseThrow(() -> new IllegalArgumentException("Purchase order not found"));
 
         if (po.getStatus() != POStatus.DRAFT) {
             throw new IllegalStateException("Cannot update a non-draft purchase order");
@@ -116,39 +131,43 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
         po.setCurrency(poDto.getCurrency());
         po.setRemarks(poDto.getRemarks());
 
-        PurchaseOrder updatedPo = poRepository.save(po);
-        return mapToDto(updatedPo);
+        return mapToDto(poRepository.save(po));
     }
 
     @Override
-    public PurchaseOrderDto approvePurchaseOrder(UUID id, UUID approvedById) {
-        PurchaseOrder po = poRepository.findById(id)
-            .orElseThrow(() -> new IllegalArgumentException("Purchase order not found"));
-        User approver = userRepository.findById(approvedById)
-            .orElseThrow(() -> new IllegalArgumentException("User not found"));
+    public PurchaseOrderDto approvePurchaseOrder(UUID id) {
+        Organisation org = requireTenantOrg();
+        PurchaseOrder po = poRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
+                .orElseThrow(() -> new IllegalArgumentException("Purchase order not found"));
 
+        // C4 fix: resolve approver from authenticated user
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth != null && auth.getName() != null) {
+            userRepository.findByEmailAndOrganisationId(auth.getName(), org.getId())
+                    .ifPresent(po::setApprovedBy);
+        }
         po.setStatus(POStatus.APPROVED);
-        po.setApprovedBy(approver);
         po.setApprovedAt(Instant.now());
 
-        PurchaseOrder updatedPo = poRepository.save(po);
-        return mapToDto(updatedPo);
+        return mapToDto(poRepository.save(po));
     }
 
     @Override
     public PurchaseOrderDto rejectPurchaseOrder(UUID id) {
-        PurchaseOrder po = poRepository.findById(id)
-            .orElseThrow(() -> new IllegalArgumentException("Purchase order not found"));
-
+        Organisation org = requireTenantOrg();
+        PurchaseOrder po = poRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
+                .orElseThrow(() -> new IllegalArgumentException("Purchase order not found"));
         po.setStatus(POStatus.REJECTED);
-
-        PurchaseOrder updatedPo = poRepository.save(po);
-        return mapToDto(updatedPo);
+        return mapToDto(poRepository.save(po));
     }
 
     @Override
     public void deletePurchaseOrder(UUID id) {
-        poRepository.deleteById(id);
+        Organisation org = requireTenantOrg();
+        PurchaseOrder po = poRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
+                .orElseThrow(() -> new IllegalArgumentException("Purchase order not found"));
+        po.setDeletedAt(Instant.now());
+        poRepository.save(po);
     }
 
     private PurchaseOrderDto mapToDto(PurchaseOrder po) {
@@ -168,4 +187,3 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
         return dto;
     }
 }
-

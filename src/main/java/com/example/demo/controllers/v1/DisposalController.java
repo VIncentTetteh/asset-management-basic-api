@@ -4,6 +4,7 @@ import com.example.demo.dto.DisposalRecordDto;
 import com.example.demo.services.DisposalService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import jakarta.validation.Valid;
@@ -22,48 +23,51 @@ public class DisposalController {
     }
 
     @PostMapping
-    public ResponseEntity<DisposalRecordDto> createDisposalRecord(@Valid @RequestBody DisposalRecordDto recordDto) {
+    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    public ResponseEntity<DisposalRecordDto> createDisposalRecord(
+            @Valid @RequestBody DisposalRecordDto recordDto) {
         DisposalRecordDto createdRecord = disposalService.createDisposalRecord(recordDto);
         return ResponseEntity.status(HttpStatus.CREATED).body(createdRecord);
     }
 
     @GetMapping("/{id}")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_USER')")
     public ResponseEntity<DisposalRecordDto> getDisposalById(@PathVariable UUID id) {
         DisposalRecordDto record = disposalService.getDisposalById(id);
         return ResponseEntity.ok(record);
     }
 
     @GetMapping
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_USER')")
     public ResponseEntity<Set<DisposalRecordDto>> getDisposals(
             @RequestParam(required = false) UUID assetId,
-            @RequestParam(required = false) UUID organisationId,
             @RequestParam(required = false) LocalDate startDate,
             @RequestParam(required = false) LocalDate endDate,
             @RequestParam(required = false) UUID approvedById) {
 
         if (assetId != null) {
             return ResponseEntity.ok(disposalService.getDisposalsByAsset(assetId));
-        } else if (organisationId != null) {
-            return ResponseEntity.ok(disposalService.getDisposalsByOrganisation(organisationId));
         } else if (startDate != null && endDate != null) {
             return ResponseEntity.ok(disposalService.getDisposalsByDateRange(startDate, endDate));
         } else if (approvedById != null) {
             return ResponseEntity.ok(disposalService.getDisposalsByApprover(approvedById));
         }
-        return ResponseEntity.badRequest().build();
+        // H8: No filter → return all for this tenant org
+        return ResponseEntity.ok(disposalService.getDisposalsByOrganisation(null));
     }
 
     @PutMapping("/{id}")
+    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
     public ResponseEntity<DisposalRecordDto> updateDisposalRecord(@PathVariable UUID id,
-                                                                 @Valid @RequestBody DisposalRecordDto recordDto) {
+            @Valid @RequestBody DisposalRecordDto recordDto) {
         DisposalRecordDto updatedRecord = disposalService.updateDisposalRecord(id, recordDto);
         return ResponseEntity.ok(updatedRecord);
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
     public ResponseEntity<Void> deleteDisposalRecord(@PathVariable UUID id) {
         disposalService.deleteDisposalRecord(id);
         return ResponseEntity.noContent().build();
     }
 }
-

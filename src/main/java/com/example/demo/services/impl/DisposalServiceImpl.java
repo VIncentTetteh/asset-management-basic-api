@@ -8,9 +8,11 @@ import com.example.demo.models.User;
 import com.example.demo.enums.AssetStatus;
 import com.example.demo.repositories.*;
 import com.example.demo.services.DisposalService;
+import com.example.demo.services.TenantAwareService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Set;
 import java.util.UUID;
@@ -18,31 +20,33 @@ import java.util.stream.Collectors;
 
 @Service
 @Transactional
-public class DisposalServiceImpl implements DisposalService {
+public class DisposalServiceImpl extends TenantAwareService implements DisposalService {
 
     private final DisposalRecordRepository disposalRepository;
     private final AssetRepository assetRepository;
-    private final OrganisationRepository organisationRepository;
     private final UserRepository userRepository;
 
     public DisposalServiceImpl(DisposalRecordRepository disposalRepository,
-                             AssetRepository assetRepository,
-                             OrganisationRepository organisationRepository,
-                             UserRepository userRepository) {
+            AssetRepository assetRepository,
+            OrganisationRepository organisationRepository,
+            UserRepository userRepository) {
+        super(organisationRepository);
         this.disposalRepository = disposalRepository;
         this.assetRepository = assetRepository;
-        this.organisationRepository = organisationRepository;
         this.userRepository = userRepository;
     }
 
     @Override
     public DisposalRecordDto createDisposalRecord(DisposalRecordDto recordDto) {
-        Asset asset = assetRepository.findById(recordDto.getAssetId())
-            .orElseThrow(() -> new IllegalArgumentException("Asset not found"));
-        Organisation organisation = organisationRepository.findById(recordDto.getOrganisationId())
-            .orElseThrow(() -> new IllegalArgumentException("Organisation not found"));
-        User approver = userRepository.findById(recordDto.getApprovedById())
-            .orElseThrow(() -> new IllegalArgumentException("User not found"));
+        Organisation org = requireTenantOrg();
+
+        // Asset must belong to the tenant org
+        Asset asset = assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(recordDto.getAssetId(), org)
+                .orElseThrow(() -> new IllegalArgumentException("Asset not found in your organisation"));
+
+        // Approver must belong to the tenant org
+        User approver = userRepository.findByIdAndOrganisation(recordDto.getApprovedById(), org)
+                .orElseThrow(() -> new IllegalArgumentException("Approver not found in your organisation"));
 
         DisposalRecord record = new DisposalRecord();
         record.setAsset(asset);
@@ -52,7 +56,7 @@ public class DisposalServiceImpl implements DisposalService {
         record.setApprovedBy(approver);
         record.setReason(recordDto.getReason());
         record.setComplianceDocumentUrl(recordDto.getComplianceDocumentUrl());
-        record.setOrganisation(organisation);
+        record.setOrganisation(org);
 
         // Update asset status to disposed
         asset.setStatus(AssetStatus.DISPOSED);
@@ -65,47 +69,59 @@ public class DisposalServiceImpl implements DisposalService {
     @Override
     @Transactional(readOnly = true)
     public DisposalRecordDto getDisposalById(UUID id) {
-        DisposalRecord record = disposalRepository.findById(id)
-            .orElseThrow(() -> new IllegalArgumentException("Disposal record not found"));
+        Organisation org = requireTenantOrg();
+        DisposalRecord record = disposalRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
+                .orElseThrow(() -> new IllegalArgumentException("Disposal record not found"));
         return mapToDto(record);
     }
 
     @Override
     @Transactional(readOnly = true)
     public Set<DisposalRecordDto> getDisposalsByAsset(UUID assetId) {
-        return disposalRepository.findByAssetId(assetId).stream()
-            .map(this::mapToDto)
-            .collect(Collectors.toSet());
+        Organisation org = requireTenantOrg();
+        assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(assetId, org)
+                .orElseThrow(() -> new IllegalArgumentException("Asset not found in your organisation"));
+        return disposalRepository.findByAssetIdAndDeletedAtIsNull(assetId).stream()
+                .map(this::mapToDto)
+                .collect(Collectors.toSet());
     }
 
     @Override
     @Transactional(readOnly = true)
     public Set<DisposalRecordDto> getDisposalsByOrganisation(UUID organisationId) {
-        return disposalRepository.findByOrganisationId(organisationId).stream()
-            .map(this::mapToDto)
-            .collect(Collectors.toSet());
+        Organisation org = requireTenantOrg();
+        // Always use tenant org, ignore the passed organisationId
+        return disposalRepository.findByOrganisationAndDeletedAtIsNull(org).stream()
+                .map(this::mapToDto)
+                .collect(Collectors.toSet());
     }
 
     @Override
     @Transactional(readOnly = true)
     public Set<DisposalRecordDto> getDisposalsByDateRange(LocalDate startDate, LocalDate endDate) {
-        return disposalRepository.findByDisposalDateBetween(startDate, endDate).stream()
-            .map(this::mapToDto)
-            .collect(Collectors.toSet());
+        Organisation org = requireTenantOrg();
+        return disposalRepository.findByOrganisationAndDisposalDateBetweenAndDeletedAtIsNull(org, startDate, endDate)
+                .stream()
+                .map(this::mapToDto)
+                .collect(Collectors.toSet());
     }
 
     @Override
     @Transactional(readOnly = true)
     public Set<DisposalRecordDto> getDisposalsByApprover(UUID userId) {
-        return disposalRepository.findByApprovedById(userId).stream()
-            .map(this::mapToDto)
-            .collect(Collectors.toSet());
+        Organisation org = requireTenantOrg();
+        userRepository.findByIdAndOrganisation(userId, org)
+                .orElseThrow(() -> new IllegalArgumentException("User not found in your organisation"));
+        return disposalRepository.findByApprovedByIdAndDeletedAtIsNull(userId).stream()
+                .map(this::mapToDto)
+                .collect(Collectors.toSet());
     }
 
     @Override
     public DisposalRecordDto updateDisposalRecord(UUID id, DisposalRecordDto recordDto) {
-        DisposalRecord record = disposalRepository.findById(id)
-            .orElseThrow(() -> new IllegalArgumentException("Disposal record not found"));
+        Organisation org = requireTenantOrg();
+        DisposalRecord record = disposalRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
+                .orElseThrow(() -> new IllegalArgumentException("Disposal record not found"));
 
         record.setDisposalMethod(recordDto.getDisposalMethod());
         record.setDisposalDate(recordDto.getDisposalDate());
@@ -119,7 +135,11 @@ public class DisposalServiceImpl implements DisposalService {
 
     @Override
     public void deleteDisposalRecord(UUID id) {
-        disposalRepository.deleteById(id);
+        Organisation org = requireTenantOrg();
+        DisposalRecord record = disposalRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
+                .orElseThrow(() -> new IllegalArgumentException("Disposal record not found"));
+        record.setDeletedAt(Instant.now());
+        disposalRepository.save(record);
     }
 
     private DisposalRecordDto mapToDto(DisposalRecord record) {
@@ -136,4 +156,3 @@ public class DisposalServiceImpl implements DisposalService {
         return dto;
     }
 }
-

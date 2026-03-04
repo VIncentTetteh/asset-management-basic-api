@@ -6,30 +6,31 @@ import com.example.demo.models.Organisation;
 import com.example.demo.repositories.DepreciationPolicyRepository;
 import com.example.demo.repositories.OrganisationRepository;
 import com.example.demo.services.DepreciationPolicyService;
+import com.example.demo.services.TenantAwareService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Service
 @Transactional
-public class DepreciationPolicyServiceImpl implements DepreciationPolicyService {
+public class DepreciationPolicyServiceImpl extends TenantAwareService implements DepreciationPolicyService {
 
     private final DepreciationPolicyRepository policyRepository;
-    private final OrganisationRepository organisationRepository;
 
     public DepreciationPolicyServiceImpl(DepreciationPolicyRepository policyRepository,
-                                        OrganisationRepository organisationRepository) {
+            OrganisationRepository organisationRepository) {
+        super(organisationRepository);
         this.policyRepository = policyRepository;
-        this.organisationRepository = organisationRepository;
     }
 
     @Override
     public DepreciationPolicyDto createPolicy(DepreciationPolicyDto policyDto, UUID organisationId) {
-        Organisation organisation = organisationRepository.findById(organisationId)
-            .orElseThrow(() -> new IllegalArgumentException("Organisation not found"));
+        // Always use tenant context, ignore param
+        Organisation org = requireTenantOrg();
 
         DepreciationPolicy policy = new DepreciationPolicy();
         policy.setName(policyDto.getName());
@@ -37,32 +38,35 @@ public class DepreciationPolicyServiceImpl implements DepreciationPolicyService 
         policy.setMethod(policyDto.getMethod());
         policy.setUsefulLifeMonths(policyDto.getUsefulLifeMonths());
         policy.setSalvageValuePercent(policyDto.getSalvageValuePercent());
-        policy.setOrganisation(organisation);
+        policy.setOrganisation(org);
 
-        DepreciationPolicy savedPolicy = policyRepository.save(policy);
-        return mapToDto(savedPolicy);
+        return mapToDto(policyRepository.save(policy));
     }
 
     @Override
     @Transactional(readOnly = true)
     public DepreciationPolicyDto getPolicyById(UUID id) {
-        DepreciationPolicy policy = policyRepository.findById(id)
-            .orElseThrow(() -> new IllegalArgumentException("Policy not found"));
+        Organisation org = requireTenantOrg();
+        DepreciationPolicy policy = policyRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
+                .orElseThrow(() -> new IllegalArgumentException("Policy not found"));
         return mapToDto(policy);
     }
 
     @Override
     @Transactional(readOnly = true)
     public Set<DepreciationPolicyDto> getPoliciesByOrganisation(UUID organisationId) {
-        return policyRepository.findByOrganisationId(organisationId).stream()
-            .map(this::mapToDto)
-            .collect(Collectors.toSet());
+        // Always scope to tenant context, ignore param
+        Organisation org = requireTenantOrg();
+        return policyRepository.findByOrganisationAndDeletedAtIsNull(org).stream()
+                .map(this::mapToDto)
+                .collect(Collectors.toSet());
     }
 
     @Override
     public DepreciationPolicyDto updatePolicy(UUID id, DepreciationPolicyDto policyDto) {
-        DepreciationPolicy policy = policyRepository.findById(id)
-            .orElseThrow(() -> new IllegalArgumentException("Policy not found"));
+        Organisation org = requireTenantOrg();
+        DepreciationPolicy policy = policyRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
+                .orElseThrow(() -> new IllegalArgumentException("Policy not found"));
 
         policy.setName(policyDto.getName());
         policy.setDescription(policyDto.getDescription());
@@ -70,13 +74,16 @@ public class DepreciationPolicyServiceImpl implements DepreciationPolicyService 
         policy.setUsefulLifeMonths(policyDto.getUsefulLifeMonths());
         policy.setSalvageValuePercent(policyDto.getSalvageValuePercent());
 
-        DepreciationPolicy updatedPolicy = policyRepository.save(policy);
-        return mapToDto(updatedPolicy);
+        return mapToDto(policyRepository.save(policy));
     }
 
     @Override
     public void deletePolicy(UUID id) {
-        policyRepository.deleteById(id);
+        Organisation org = requireTenantOrg();
+        DepreciationPolicy policy = policyRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
+                .orElseThrow(() -> new IllegalArgumentException("Policy not found"));
+        policy.setDeletedAt(Instant.now());
+        policyRepository.save(policy);
     }
 
     private DepreciationPolicyDto mapToDto(DepreciationPolicy policy) {
@@ -91,4 +98,3 @@ public class DepreciationPolicyServiceImpl implements DepreciationPolicyService 
         return dto;
     }
 }
-

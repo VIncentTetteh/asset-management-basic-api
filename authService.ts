@@ -39,6 +39,7 @@ class AuthService {
       baseURL: this.API_BASE_URL,
       headers: {
         'Content-Type': 'application/json',
+        'Accept-Encoding': 'identity', // Disable compression to avoid encoding errors
       },
       // Important: Allow credentials for CORS
       withCredentials: false, // Set to true if using httpOnly cookies

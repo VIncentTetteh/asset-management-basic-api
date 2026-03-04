@@ -29,7 +29,7 @@ public class DepreciationPolicy extends BaseEntity {
     @Column(precision = 5, scale = 2)
     private BigDecimal salvageValuePercent; // Percentage of original cost
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(nullable = false)
     private Organisation organisation;
 

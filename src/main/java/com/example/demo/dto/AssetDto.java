@@ -2,7 +2,6 @@ package com.example.demo.dto;
 
 import com.example.demo.enums.*;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 
 import java.math.BigDecimal;
@@ -16,7 +15,6 @@ public class AssetDto {
     @NotBlank(message = "Asset name is required")
     private String name;
 
-    @NotBlank(message = "Asset tag is required")
     private String assetTag;
 
     private String serialNumber;
@@ -27,7 +25,6 @@ public class AssetDto {
 
     private UUID categoryId;
 
-    @NotNull(message = "Asset type is required")
     private AssetType assetType;
 
     private String manufacturer;
@@ -64,9 +61,9 @@ public class AssetDto {
 
     private String insurancePolicyId;
 
-    @NotNull(message = "Department ID is required")
     private UUID departmentId;
 
-    @NotNull(message = "Organisation ID is required")
     private UUID organisationId;
+
+    private UUID purchaseOrderId;
 }

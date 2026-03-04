@@ -28,14 +28,14 @@ public class Location extends BaseEntity {
     @Column(columnDefinition = "TEXT")
     private String geoCoordinates; // Format: "latitude,longitude"
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "parent_location_id")
     private Location parentLocation;
 
     @OneToMany(mappedBy = "parentLocation")
     private Set<Location> subLocations;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(nullable = false)
     private Organisation organisation;
 

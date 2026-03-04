@@ -1,38 +1,56 @@
 package com.example.demo.multitenancy;
 
 import com.example.demo.models.User;
+import com.example.demo.repositories.OrganisationRepository;
 import com.example.demo.repositories.UserRepository;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
-import java.util.Map;
 import java.util.UUID;
 
 @Component
 public class TenantFilter extends OncePerRequestFilter {
+    private static final Logger log = LoggerFactory.getLogger(TenantFilter.class);
 
     @Value("${app.tenant.header:X-Organisation-Id}")
     private String tenantHeader;
 
     private final UserRepository userRepository;
+    private final OrganisationRepository organisationRepository;
 
-    public TenantFilter(UserRepository userRepository) {
+    public TenantFilter(UserRepository userRepository, OrganisationRepository organisationRepository) {
         this.userRepository = userRepository;
+        this.organisationRepository = organisationRepository;
     }
 
     @Override
-    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain) throws ServletException, IOException {
-        // If user is authenticated, do a DB-backed lookup to determine tenant
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
+            throws ServletException, IOException {
+
+        // Skip for public registration path
+        String path = request.getRequestURI();
+        log.debug("[TENANT_FILTER] Checking path: {}", path);
+        if (path.startsWith("/api/v1/tenant") || path.startsWith("/api/v1/auth") ||
+                path.equals("/api/info") || path.equals("/api/cache/ping") || path.equals("/api/db/hits")) {
+            log.debug("[TENANT_FILTER] Skipping for path: {}", path);
+            filterChain.doFilter(request, response);
+            return;
+        }
+
+        // If user is authenticated and not anonymous, do a DB-backed lookup
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth != null && auth.isAuthenticated()) {
+        if (auth != null && auth.isAuthenticated() && !(auth instanceof AnonymousAuthenticationToken)) {
             Object principal = auth.getPrincipal();
             String username = null;
             if (principal instanceof String) {
@@ -49,7 +67,10 @@ public class TenantFilter extends OncePerRequestFilter {
                     return;
                 }
                 if (user.getOrganisation() != null) {
-                    TenantContext.setOrganisationId(user.getOrganisation().getId());
+                    UUID orgId = user.getOrganisation().getId();
+                    if (organisationRepository.existsById(orgId)) {
+                        TenantContext.setOrganisationId(orgId);
+                    }
                 }
             }
         }
@@ -60,12 +81,30 @@ public class TenantFilter extends OncePerRequestFilter {
             if (header != null && !header.isBlank()) {
                 try {
                     UUID orgId = UUID.fromString(header.trim());
-                    TenantContext.setOrganisationId(orgId);
+                    if (organisationRepository.existsById(orgId)) {
+                        TenantContext.setOrganisationId(orgId);
+                    }
                 } catch (IllegalArgumentException e) {
                     response.sendError(HttpServletResponse.SC_BAD_REQUEST, "Invalid organisation id in header");
                     return;
                 }
             }
+        }
+
+        // For authenticated requests to protected paths: require a resolved tenant
+        boolean isPublicPath = path.startsWith("/api/v1/tenant") || path.startsWith("/api/v1/auth")
+                || path.startsWith("/swagger-ui") || path.startsWith("/v3/api-docs")
+                || path.startsWith("/actuator");
+
+        Authentication finalAuth = SecurityContextHolder.getContext().getAuthentication();
+        boolean isAuthenticated = finalAuth != null && finalAuth.isAuthenticated()
+                && !(finalAuth instanceof AnonymousAuthenticationToken);
+
+        if (isAuthenticated && !isPublicPath && !TenantContext.hasOrganisationId()) {
+            log.warn("[TENANT_FILTER] Tenant context could not be resolved for authenticated request to {}", path);
+            response.sendError(HttpServletResponse.SC_FORBIDDEN,
+                    "No organisation context resolved for your account. Contact your administrator.");
+            return;
         }
 
         try {

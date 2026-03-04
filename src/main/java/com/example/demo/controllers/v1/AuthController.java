@@ -31,7 +31,7 @@ public class AuthController {
     private final JwtUtil jwtUtil;
 
     public AuthController(UserRepository userRepository, OrganisationRepository organisationRepository,
-                         RoleRepository roleRepository, PasswordEncoder passwordEncoder, JwtUtil jwtUtil) {
+            RoleRepository roleRepository, PasswordEncoder passwordEncoder, JwtUtil jwtUtil) {
         this.userRepository = userRepository;
         this.organisationRepository = organisationRepository;
         this.roleRepository = roleRepository;
@@ -55,24 +55,24 @@ public class AuthController {
 
         // Check if email already exists in organization
         var existingUser = userRepository.findByEmailAndOrganisationId(
-            request.getEmail(), request.getOrganisationId());
+                request.getEmail(), request.getOrganisationId());
         if (existingUser.isPresent()) {
             return ResponseEntity.badRequest().body(Map.of("error", "Email already registered in this organization"));
         }
 
         // Validate organization exists
         var organisation = organisationRepository.findById(request.getOrganisationId())
-            .orElseThrow(() -> new IllegalArgumentException("Organization not found"));
+                .orElseThrow(() -> new IllegalArgumentException("Organization not found"));
 
         // Get default role or specified role
         Role role = null;
         if (request.getRoleId() != null) {
             role = roleRepository.findById(request.getRoleId())
-                .orElseThrow(() -> new IllegalArgumentException("Role not found"));
+                    .orElseThrow(() -> new IllegalArgumentException("Role not found"));
         } else {
             // Try to find a default USER role
             role = roleRepository.findByNameAndOrganisationId("USER", request.getOrganisationId())
-                .orElse(null);
+                    .orElse(null);
         }
 
         // Create new user
@@ -90,12 +90,11 @@ public class AuthController {
         User savedUser = userRepository.save(newUser);
 
         return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
-            "id", savedUser.getId(),
-            "email", savedUser.getEmail(),
-            "firstName", savedUser.getFirstName(),
-            "lastName", savedUser.getLastName(),
-            "message", "User registered successfully"
-        ));
+                "id", savedUser.getId(),
+                "email", savedUser.getEmail(),
+                "firstName", savedUser.getFirstName(),
+                "lastName", savedUser.getLastName(),
+                "message", "User registered successfully"));
     }
 
     /**
@@ -107,7 +106,7 @@ public class AuthController {
         var userOpt = userRepository.findByEmail(request.getEmail());
         if (userOpt.isEmpty()) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                .body(Map.of("error", "Invalid email or password"));
+                    .body(Map.of("error", "Invalid email or password"));
         }
 
         User user = userOpt.get();
@@ -115,13 +114,13 @@ public class AuthController {
         // Verify password
         if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                .body(Map.of("error", "Invalid email or password"));
+                    .body(Map.of("error", "Invalid email or password"));
         }
 
         // Check user status
         if (user.getStatus() != UserStatus.ACTIVE) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                .body(Map.of("error", "User account is " + user.getStatus().toString().toLowerCase()));
+                    .body(Map.of("error", "User account is " + user.getStatus().toString().toLowerCase()));
         }
 
         // Update last login timestamp
@@ -135,7 +134,8 @@ public class AuthController {
         claims.put("lastName", user.getLastName());
 
         if (user.getRole() != null) {
-            claims.put("role", user.getRole().getName());
+            String roleName = user.getRole().getName();
+            claims.put("role", roleName.startsWith("ROLE_") ? roleName : "ROLE_" + roleName);
             claims.put("permissions", user.getRole().getPermissions());
         }
 
@@ -151,16 +151,14 @@ public class AuthController {
         String token = jwtUtil.generateToken(user.getEmail(), claims, 1000L * 60 * 60 * 24);
 
         return ResponseEntity.ok(Map.of(
-            "token", token,
-            "user", Map.of(
-                "id", user.getId(),
-                "email", user.getEmail(),
-                "firstName", user.getFirstName(),
-                "lastName", user.getLastName(),
-                "role", user.getRole() != null ? user.getRole().getName() : "NONE"
-            ),
-            "expiresIn", 86400
-        ));
+                "token", token,
+                "user", Map.of(
+                        "id", user.getId(),
+                        "email", user.getEmail(),
+                        "firstName", user.getFirstName(),
+                        "lastName", user.getLastName(),
+                        "role", user.getRole() != null ? user.getRole().getName() : "NONE"),
+                "expiresIn", 86400));
     }
 
     /**
@@ -170,7 +168,7 @@ public class AuthController {
     public ResponseEntity<?> refreshToken(@RequestHeader("Authorization") String authHeader) {
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                .body(Map.of("error", "Missing or invalid authorization header"));
+                    .body(Map.of("error", "Missing or invalid authorization header"));
         }
 
         String token = authHeader.substring(7);
@@ -178,13 +176,13 @@ public class AuthController {
 
         if (email == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                .body(Map.of("error", "Invalid token"));
+                    .body(Map.of("error", "Invalid token"));
         }
 
         var userOpt = userRepository.findByEmail(email);
         if (userOpt.isEmpty()) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                .body(Map.of("error", "User not found"));
+                    .body(Map.of("error", "User not found"));
         }
 
         User user = userOpt.get();
@@ -196,7 +194,8 @@ public class AuthController {
         claims.put("lastName", user.getLastName());
 
         if (user.getRole() != null) {
-            claims.put("role", user.getRole().getName());
+            String roleName = user.getRole().getName();
+            claims.put("role", roleName.startsWith("ROLE_") ? roleName : "ROLE_" + roleName);
         }
         if (user.getOrganisation() != null) {
             claims.put("organisationId", user.getOrganisation().getId().toString());
@@ -205,9 +204,63 @@ public class AuthController {
         String newToken = jwtUtil.generateToken(email, claims, 1000L * 60 * 60 * 24);
 
         return ResponseEntity.ok(Map.of(
-            "token", newToken,
-            "expiresIn", 86400
+                "token", newToken,
+                "expiresIn", 86400));
+    }
+
+    /**
+     * Request a password reset token
+     */
+    @PostMapping("/forgot-password")
+    public ResponseEntity<?> forgotPassword(@Valid @RequestBody ForgotPasswordRequest request) {
+        var userOpt = userRepository.findByEmail(request.getEmail());
+        if (userOpt.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "User with this email not found"));
+        }
+
+        User user = userOpt.get();
+        // Generate a random token
+        String token = UUID.randomUUID().toString();
+
+        // Set token and expiry (24 hours from now)
+        user.setResetPasswordToken(token);
+        user.setResetPasswordTokenExpiry(Instant.now().plusSeconds(24 * 60 * 60));
+        userRepository.save(user);
+
+        // In a real application, we would send an email with the link here
+        // For demonstration, we simply return it or pretend it was sent.
+        return ResponseEntity.ok(Map.of(
+                "message", "Password reset instructions sent to email",
+                "token", token // Returning token for easy testing
         ));
+    }
+
+    /**
+     * Reset password using the token
+     */
+    @PostMapping("/reset-password")
+    public ResponseEntity<?> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
+        var userOpt = userRepository.findByResetPasswordToken(request.getToken());
+        if (userOpt.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Invalid reset token"));
+        }
+
+        User user = userOpt.get();
+
+        // Check if token expired
+        if (user.getResetPasswordTokenExpiry() == null || user.getResetPasswordTokenExpiry().isBefore(Instant.now())) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Reset token has expired"));
+        }
+
+        // Encode new password
+        user.setPasswordHash(passwordEncoder.encode(request.getNewPassword()));
+
+        // Clear token fields
+        user.setResetPasswordToken(null);
+        user.setResetPasswordTokenExpiry(null);
+        userRepository.save(user);
+
+        return ResponseEntity.ok(Map.of("message", "Password has been successfully reset"));
     }
 
     /**
@@ -217,7 +270,7 @@ public class AuthController {
     public ResponseEntity<?> getProfile(@RequestHeader("Authorization") String authHeader) {
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                .body(Map.of("error", "Missing or invalid authorization header"));
+                    .body(Map.of("error", "Missing or invalid authorization header"));
         }
 
         String token = authHeader.substring(7);
@@ -225,13 +278,13 @@ public class AuthController {
 
         if (email == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                .body(Map.of("error", "Invalid token"));
+                    .body(Map.of("error", "Invalid token"));
         }
 
         var userOpt = userRepository.findByEmail(email);
         if (userOpt.isEmpty()) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                .body(Map.of("error", "User not found"));
+                    .body(Map.of("error", "User not found"));
         }
 
         User user = userOpt.get();
@@ -266,16 +319,17 @@ public class AuthController {
 
         public String jobTitle;
 
-        @NotBlank(message = "Organisation ID is required")
+        @jakarta.validation.constraints.NotNull(message = "Organisation ID is required")
         public UUID organisationId;
 
         public UUID roleId;
 
         // Constructor
-        public RegisterRequest() {}
+        public RegisterRequest() {
+        }
 
         public RegisterRequest(String firstName, String lastName, String email, String phone,
-                             String password, String jobTitle, UUID organisationId, UUID roleId) {
+                String password, String jobTitle, UUID organisationId, UUID roleId) {
             this.firstName = firstName;
             this.lastName = lastName;
             this.email = email;
@@ -287,14 +341,37 @@ public class AuthController {
         }
 
         // Getters
-        public String getFirstName() { return firstName; }
-        public String getLastName() { return lastName; }
-        public String getEmail() { return email; }
-        public String getPhone() { return phone; }
-        public String getPassword() { return password; }
-        public String getJobTitle() { return jobTitle; }
-        public UUID getOrganisationId() { return organisationId; }
-        public UUID getRoleId() { return roleId; }
+        public String getFirstName() {
+            return firstName;
+        }
+
+        public String getLastName() {
+            return lastName;
+        }
+
+        public String getEmail() {
+            return email;
+        }
+
+        public String getPhone() {
+            return phone;
+        }
+
+        public String getPassword() {
+            return password;
+        }
+
+        public String getJobTitle() {
+            return jobTitle;
+        }
+
+        public UUID getOrganisationId() {
+            return organisationId;
+        }
+
+        public UUID getRoleId() {
+            return roleId;
+        }
     }
 
     public static class LoginRequest {
@@ -306,7 +383,8 @@ public class AuthController {
         public String password;
 
         // Constructor
-        public LoginRequest() {}
+        public LoginRequest() {
+        }
 
         public LoginRequest(String email, String password) {
             this.email = email;
@@ -314,8 +392,55 @@ public class AuthController {
         }
 
         // Getters
-        public String getEmail() { return email; }
-        public String getPassword() { return password; }
+        public String getEmail() {
+            return email;
+        }
+
+        public String getPassword() {
+            return password;
+        }
+    }
+
+    public static class ForgotPasswordRequest {
+        @Email(message = "Email must be valid")
+        @NotBlank(message = "Email is required")
+        public String email;
+
+        public ForgotPasswordRequest() {
+        }
+
+        public ForgotPasswordRequest(String email) {
+            this.email = email;
+        }
+
+        public String getEmail() {
+            return email;
+        }
+    }
+
+    public static class ResetPasswordRequest {
+        @NotBlank(message = "Token is required")
+        public String token;
+
+        @NotBlank(message = "New password is required")
+        @Size(min = 8, message = "Password must be at least 8 characters")
+        public String newPassword;
+
+        public ResetPasswordRequest() {
+        }
+
+        public ResetPasswordRequest(String token, String newPassword) {
+            this.token = token;
+            this.newPassword = newPassword;
+        }
+
+        public String getToken() {
+            return token;
+        }
+
+        public String getNewPassword() {
+            return newPassword;
+        }
     }
 
     // Helper method
@@ -341,4 +466,3 @@ public class AuthController {
         return dto;
     }
 }
-

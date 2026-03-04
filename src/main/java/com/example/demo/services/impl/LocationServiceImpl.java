@@ -6,29 +6,31 @@ import com.example.demo.models.Organisation;
 import com.example.demo.repositories.LocationRepository;
 import com.example.demo.repositories.OrganisationRepository;
 import com.example.demo.services.LocationService;
+import com.example.demo.services.TenantAwareService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Service
 @Transactional
-public class LocationServiceImpl implements LocationService {
+public class LocationServiceImpl extends TenantAwareService implements LocationService {
 
     private final LocationRepository locationRepository;
-    private final OrganisationRepository organisationRepository;
 
-    public LocationServiceImpl(LocationRepository locationRepository, OrganisationRepository organisationRepository) {
+    public LocationServiceImpl(LocationRepository locationRepository,
+            OrganisationRepository organisationRepository) {
+        super(organisationRepository);
         this.locationRepository = locationRepository;
-        this.organisationRepository = organisationRepository;
     }
 
     @Override
     public LocationDto createLocation(LocationDto locationDto, UUID organisationId) {
-        Organisation organisation = organisationRepository.findById(organisationId)
-            .orElseThrow(() -> new IllegalArgumentException("Organisation not found"));
+        // Always use tenant context, ignore param
+        Organisation org = requireTenantOrg();
 
         Location location = new Location();
         location.setName(locationDto.getName());
@@ -38,46 +40,53 @@ public class LocationServiceImpl implements LocationService {
         location.setCity(locationDto.getCity());
         location.setCountry(locationDto.getCountry());
         location.setGeoCoordinates(locationDto.getGeoCoordinates());
-        location.setOrganisation(organisation);
+        location.setOrganisation(org);
 
         if (locationDto.getParentLocationId() != null) {
-            Location parentLocation = locationRepository.findById(locationDto.getParentLocationId())
-                .orElseThrow(() -> new IllegalArgumentException("Parent location not found"));
+            Location parentLocation = locationRepository.findByIdAndOrganisationAndDeletedAtIsNull(
+                    locationDto.getParentLocationId(), org)
+                    .orElseThrow(() -> new IllegalArgumentException("Parent location not found in your organisation"));
             location.setParentLocation(parentLocation);
         }
 
-        Location savedLocation = locationRepository.save(location);
-        return mapToDto(savedLocation);
+        return mapToDto(locationRepository.save(location));
     }
 
     @Override
     @Transactional(readOnly = true)
     public LocationDto getLocationById(UUID id) {
-        Location location = locationRepository.findById(id)
-            .orElseThrow(() -> new IllegalArgumentException("Location not found"));
+        Organisation org = requireTenantOrg();
+        Location location = locationRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
+                .orElseThrow(() -> new IllegalArgumentException("Location not found"));
         return mapToDto(location);
     }
 
     @Override
     @Transactional(readOnly = true)
     public Set<LocationDto> getLocationsByOrganisation(UUID organisationId) {
-        return locationRepository.findByOrganisationId(organisationId).stream()
-            .map(this::mapToDto)
-            .collect(Collectors.toSet());
+        // Always scope to tenant context, ignore param
+        Organisation org = requireTenantOrg();
+        return locationRepository.findByOrganisationAndDeletedAtIsNull(org).stream()
+                .map(this::mapToDto)
+                .collect(Collectors.toSet());
     }
 
     @Override
     @Transactional(readOnly = true)
     public Set<LocationDto> getSubLocations(UUID parentLocationId) {
-        return locationRepository.findByParentLocationId(parentLocationId).stream()
-            .map(this::mapToDto)
-            .collect(Collectors.toSet());
+        Organisation org = requireTenantOrg();
+        locationRepository.findByIdAndOrganisationAndDeletedAtIsNull(parentLocationId, org)
+                .orElseThrow(() -> new IllegalArgumentException("Parent location not found in your organisation"));
+        return locationRepository.findByParentLocationIdAndDeletedAtIsNull(parentLocationId).stream()
+                .map(this::mapToDto)
+                .collect(Collectors.toSet());
     }
 
     @Override
     public LocationDto updateLocation(UUID id, LocationDto locationDto) {
-        Location location = locationRepository.findById(id)
-            .orElseThrow(() -> new IllegalArgumentException("Location not found"));
+        Organisation org = requireTenantOrg();
+        Location location = locationRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
+                .orElseThrow(() -> new IllegalArgumentException("Location not found"));
 
         location.setName(locationDto.getName());
         location.setBuilding(locationDto.getBuilding());
@@ -87,13 +96,31 @@ public class LocationServiceImpl implements LocationService {
         location.setCountry(locationDto.getCountry());
         location.setGeoCoordinates(locationDto.getGeoCoordinates());
 
-        Location updatedLocation = locationRepository.save(location);
-        return mapToDto(updatedLocation);
+        if (locationDto.getParentLocationId() != null) {
+            Location parentLocation = locationRepository.findByIdAndOrganisationAndDeletedAtIsNull(
+                    locationDto.getParentLocationId(), org)
+                    .orElseThrow(() -> new IllegalArgumentException("Parent location not found in your organisation"));
+
+            // Prevent self-referencing hierarchy
+            if (parentLocation.getId().equals(id)) {
+                throw new IllegalArgumentException("A location cannot be its own parent");
+            }
+
+            location.setParentLocation(parentLocation);
+        } else {
+            location.setParentLocation(null);
+        }
+
+        return mapToDto(locationRepository.save(location));
     }
 
     @Override
     public void deleteLocation(UUID id) {
-        locationRepository.deleteById(id);
+        Organisation org = requireTenantOrg();
+        Location location = locationRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
+                .orElseThrow(() -> new IllegalArgumentException("Location not found"));
+        location.setDeletedAt(Instant.now());
+        locationRepository.save(location);
     }
 
     private LocationDto mapToDto(Location location) {
@@ -113,4 +140,3 @@ public class LocationServiceImpl implements LocationService {
         return dto;
     }
 }
-

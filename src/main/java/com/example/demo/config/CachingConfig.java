@@ -16,10 +16,12 @@ public class CachingConfig {
     @Bean
     public RedisCacheManager cacheManager(RedisConnectionFactory connectionFactory) {
         RedisCacheConfiguration config = RedisCacheConfiguration.defaultCacheConfig()
-            .entryTtl(Duration.ofMinutes(10))
-            .disableCachingNullValues();
+                .entryTtl(Duration.ofMinutes(10))
+                .disableCachingNullValues();
 
-        return RedisCacheManager.create(connectionFactory);
+        return RedisCacheManager.builder(connectionFactory)
+                .cacheDefaults(config)
+                .build();
     }
 
     /**
@@ -76,4 +78,3 @@ public class CachingConfig {
         public static final String DEPRECIATION_POLICY_BY_ID = "depreciation_policy_by_id";
     }
 }
-

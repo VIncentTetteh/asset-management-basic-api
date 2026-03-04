@@ -27,7 +27,7 @@
 
     <!-- Logstash appender for log aggregation (ELK Stack) -->
     <appender name="LOGSTASH" class="net.logstash.logback.appender.LogstashTcpSocketAppender">
-        <destination>localhost:5000</destination>
+        <destination>localhost:8009</destination>
         <encoder class="net.logstash.logback.encoder.LogstashEncoder">
             <customFields>{"service":"asset-management-system","version":"1.0.0"}</customFields>
         </encoder>
