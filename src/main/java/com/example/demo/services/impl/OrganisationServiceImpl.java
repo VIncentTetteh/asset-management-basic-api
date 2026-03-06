@@ -130,6 +130,11 @@ public class OrganisationServiceImpl implements OrganisationService {
     }
 
     @Override
+    public OrganisationDto patch(UUID id, OrganisationDto dto) {
+        return update(id, dto);
+    }
+
+    @Override
     public void delete(UUID id) {
         Organisation o = organisationRepository.findByIdAndDeletedAtIsNull(id)
                 .orElseThrow(() -> new IllegalArgumentException("Organisation not found"));

@@ -92,6 +92,31 @@ public class CategoryServiceImpl extends TenantAwareService implements CategoryS
     }
 
     @Override
+    public CategoryDto patchCategory(UUID id, CategoryDto categoryDto) {
+        Organisation org = requireTenantOrg();
+        Category category = categoryRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
+                .orElseThrow(() -> new IllegalArgumentException("Category not found"));
+
+        if (categoryDto.getName() != null) {
+            category.setName(categoryDto.getName());
+        }
+        if (categoryDto.getAssetPrefixCode() != null) {
+            category.setAssetPrefixCode(categoryDto.getAssetPrefixCode());
+        }
+        if (categoryDto.getDefaultWarrantyPeriodMonths() != null) {
+            category.setDefaultWarrantyPeriodMonths(categoryDto.getDefaultWarrantyPeriodMonths());
+        }
+        if (categoryDto.getParentCategoryId() != null) {
+            Category parentCategory = categoryRepository.findByIdAndOrganisationAndDeletedAtIsNull(
+                    categoryDto.getParentCategoryId(), org)
+                    .orElseThrow(() -> new IllegalArgumentException("Parent category not found in your organisation"));
+            category.setParentCategory(parentCategory);
+        }
+
+        return mapToDto(categoryRepository.save(category));
+    }
+
+    @Override
     public void deleteCategory(UUID id) {
         Organisation org = requireTenantOrg();
         Category category = categoryRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)

@@ -1,15 +1,17 @@
 package com.example.demo.models;
 
 import jakarta.persistence.*;
-import lombok.Getter;
-import lombok.Setter;
+import lombok.Data;
+import lombok.EqualsAndHashCode;
+
+
 
 import java.util.Set;
 
-@Getter
-@Setter
 @Entity
 @Table(name = "location")
+@Data
+@EqualsAndHashCode(callSuper = true)
 public class Location extends BaseEntity {
 
     @Column(nullable = false)

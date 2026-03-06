@@ -50,6 +50,16 @@ public class DepartmentController {
         }
     }
 
+    @PatchMapping("/{id}")
+    @PreAuthorize("hasAuthority('ROLE_ORG_ADMIN') or hasAuthority('ROLE_ADMIN')")
+    public ResponseEntity<DepartmentDto> patch(@PathVariable UUID id, @RequestBody DepartmentDto dto) {
+        try {
+            return ResponseEntity.ok(departmentService.patch(id, dto));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
     @DeleteMapping("/{id}")
     @PreAuthorize("hasAuthority('ROLE_ORG_ADMIN') or hasAuthority('ROLE_ADMIN')")
     public ResponseEntity<Void> delete(@PathVariable UUID id) {

@@ -10,6 +10,6 @@ public interface OrganisationService {
     OrganisationDto get(UUID id);
     List<OrganisationDto> list();
     OrganisationDto update(UUID id, OrganisationDto dto);
+    OrganisationDto patch(UUID id, OrganisationDto dto);
     void delete(UUID id);
 }
-

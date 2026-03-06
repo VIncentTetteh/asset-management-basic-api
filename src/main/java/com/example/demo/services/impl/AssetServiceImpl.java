@@ -6,6 +6,7 @@ import com.example.demo.models.*;
 import com.example.demo.multitenancy.TenantContext;
 import com.example.demo.repositories.*;
 import com.example.demo.services.AssetService;
+import jakarta.persistence.EntityManager;
 import jakarta.transaction.Transactional;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.access.AccessDeniedException;
@@ -29,6 +30,7 @@ public class AssetServiceImpl implements AssetService {
     private final SupplierRepository supplierRepository;
     private final UserRepository userRepository;
     private final PurchaseOrderRepository purchaseOrderRepository;
+    private final EntityManager entityManager;
 
     public AssetServiceImpl(AssetRepository assetRepository,
             DepartmentRepository departmentRepository,
@@ -37,7 +39,8 @@ public class AssetServiceImpl implements AssetService {
             LocationRepository locationRepository,
             SupplierRepository supplierRepository,
             UserRepository userRepository,
-            PurchaseOrderRepository purchaseOrderRepository) {
+            PurchaseOrderRepository purchaseOrderRepository,
+            EntityManager entityManager) {
         this.assetRepository = assetRepository;
         this.departmentRepository = departmentRepository;
         this.organisationRepository = organisationRepository;
@@ -46,6 +49,7 @@ public class AssetServiceImpl implements AssetService {
         this.supplierRepository = supplierRepository;
         this.userRepository = userRepository;
         this.purchaseOrderRepository = purchaseOrderRepository;
+        this.entityManager = entityManager;
     }
 
     // ────────────────────────────────────────────────────
@@ -88,8 +92,7 @@ public class AssetServiceImpl implements AssetService {
                     .orElseThrow(() -> new IllegalArgumentException("Department not found in your organisation"));
         }
 
-        // Uniqueness check: scoped to org + department when provided, or just org when
-        // no department
+        // Uniqueness check: scoped to org + department when provided, or just org when no department
         boolean duplicate;
         if (department != null) {
             duplicate = assetRepository.existsByNameIgnoreCaseAndOrganisationAndDepartmentAndDeletedAtIsNull(
@@ -151,7 +154,40 @@ public class AssetServiceImpl implements AssetService {
         }
 
         try {
-            return toDto(assetRepository.save(asset));
+            Asset saved = assetRepository.save(asset);
+            // Create DTO directly without loading related entities to avoid deep joins
+            AssetDto result = new AssetDto();
+            result.setId(saved.getId());
+            result.setName(saved.getName());
+            result.setAssetTag(saved.getAssetTag());
+            result.setSerialNumber(saved.getSerialNumber());
+            result.setBarcodeQrCode(saved.getBarcodeQrCode());
+            result.setDescription(saved.getDescription());
+            result.setAssetType(saved.getAssetType());
+            result.setManufacturer(saved.getManufacturer());
+            result.setModel(saved.getModel());
+            result.setPurchaseDate(saved.getPurchaseDate());
+            result.setPurchaseCost(saved.getPurchaseCost());
+            result.setCurrency(saved.getCurrency());
+            result.setDepreciationMethod(saved.getDepreciationMethod());
+            result.setUsefulLifeMonths(saved.getUsefulLifeMonths());
+            result.setResidualValue(saved.getResidualValue());
+            result.setWarrantyExpiryDate(saved.getWarrantyExpiryDate());
+            result.setStatus(saved.getStatus());
+            result.setCondition(saved.getCondition());
+            result.setInvoiceId(saved.getInvoiceId());
+            result.setInsurancePolicyId(saved.getInsurancePolicyId());
+
+            // Set IDs from the DTO input or saved entity
+            result.setCategoryId(dto.getCategoryId());
+            result.setDepartmentId(dto.getDepartmentId());
+            result.setOrganisationId(organisation.getId());
+            result.setLocationId(dto.getLocationId());
+            result.setSupplierId(dto.getSupplierId());
+            result.setAssignedUserId(dto.getAssignedUserId());
+            result.setPurchaseOrderId(dto.getPurchaseOrderId());
+
+            return result;
         } catch (DataIntegrityViolationException ex) {
             throw new IllegalStateException("Asset with the same name already exists in this department");
         }
@@ -187,6 +223,38 @@ public class AssetServiceImpl implements AssetService {
         Department dept = departmentRepository.findByIdAndOrganisationAndDeletedAtIsNull(departmentId, org)
                 .orElseThrow(() -> new IllegalArgumentException("Department not found in your organisation"));
         asset.setDepartment(dept);
+        return toDto(assetRepository.save(asset));
+    }
+
+    @Override
+    public AssetDto assignToUser(UUID assetId, UUID userId) {
+        Organisation org = requireTenantOrg();
+        if (!isAdmin()) {
+            throw new AccessDeniedException("Only administrators can assign assets to users");
+        }
+
+        Asset asset = assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(assetId, org)
+                .orElseThrow(() -> new IllegalArgumentException("Asset not found"));
+        User user = userRepository.findByIdAndOrganisation(userId, org)
+                .orElseThrow(() -> new IllegalArgumentException("User not found in your organisation"));
+
+        asset.setAssignedUser(user);
+        if (asset.getStatus() == AssetStatus.IN_STOCK || asset.getStatus() == AssetStatus.RESERVED) {
+            asset.setStatus(AssetStatus.IN_USE);
+        }
+        return toDto(assetRepository.save(asset));
+    }
+
+    @Override
+    public AssetDto unassignUser(UUID assetId) {
+        Organisation org = requireTenantOrg();
+        if (!isAdmin()) {
+            throw new AccessDeniedException("Only administrators can unassign assets from users");
+        }
+
+        Asset asset = assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(assetId, org)
+                .orElseThrow(() -> new IllegalArgumentException("Asset not found"));
+        asset.setAssignedUser(null);
         return toDto(assetRepository.save(asset));
     }
 
@@ -266,6 +334,12 @@ public class AssetServiceImpl implements AssetService {
         }
 
         return toDto(assetRepository.save(asset));
+    }
+
+    @Override
+    @Transactional
+    public AssetDto patch(UUID id, AssetDto dto) {
+        return update(id, dto);
     }
 
     @Override

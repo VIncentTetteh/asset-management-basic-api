@@ -9,7 +9,7 @@ public interface RoleService {
     RoleDto getRoleById(UUID id);
     Set<RoleDto> getRolesByOrganisation(UUID organisationId);
     RoleDto updateRole(UUID id, RoleDto roleDto);
+    RoleDto patchRole(UUID id, RoleDto roleDto);
     void deleteRole(UUID id);
     RoleDto getRoleByNameAndOrganisation(String name, UUID organisationId);
 }
-

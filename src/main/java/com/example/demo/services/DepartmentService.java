@@ -10,6 +10,6 @@ public interface DepartmentService {
     DepartmentDto get(UUID id);
     List<DepartmentDto> list();
     DepartmentDto update(UUID id, DepartmentDto dto);
+    DepartmentDto patch(UUID id, DepartmentDto dto);
     void delete(UUID id);
 }
-

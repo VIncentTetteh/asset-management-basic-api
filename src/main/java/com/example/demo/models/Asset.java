@@ -2,20 +2,25 @@ package com.example.demo.models;
 
 import com.example.demo.enums.*;
 import jakarta.persistence.*;
+import lombok.Data;
+import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.Setter;
+
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
 
-@Setter
-@Getter
 @Entity
 @Table(name = "asset", uniqueConstraints = {
         @UniqueConstraint(columnNames = { "asset_tag", "organisation_id" }, name = "uk_asset_tag_per_organisation"),
         @UniqueConstraint(columnNames = { "serial_number",
                 "organisation_id" }, name = "uk_serial_number_per_organisation")
 })
+@Data
+@Setter
+@Getter
+@EqualsAndHashCode(callSuper = true)
 public class Asset extends BaseEntity {
 
     @Column(nullable = false)

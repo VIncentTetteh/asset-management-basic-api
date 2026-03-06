@@ -2,6 +2,8 @@ package com.example.demo.models;
 
 import com.example.demo.enums.SsoProvider;
 import jakarta.persistence.*;
+import lombok.Data;
+import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -10,9 +12,9 @@ import lombok.Setter;
  * Admins use the API to set clientId/clientSecret/issuerUri for OAuth2
  * or idpMetadataUrl/spEntityId for SAML, then toggle enabled=true.
  */
-@Getter
-@Setter
 @Entity
+@Setter
+@Getter
 @Table(name = "org_sso_config", uniqueConstraints = @UniqueConstraint(columnNames = "organisation_id", name = "uk_sso_org"))
 public class OrgSsoConfig extends BaseEntity {
 

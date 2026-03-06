@@ -1,14 +1,13 @@
 package com.example.demo.models;
 
 import jakarta.persistence.*;
-import lombok.Getter;
-import lombok.Setter;
+import lombok.Data;
+
 
 import java.util.UUID;
 
-@Getter
-@Setter
 @Entity
+@Data
 @Table(name = "audit_item")
 public class AuditItem {
 

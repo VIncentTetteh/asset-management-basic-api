@@ -5,12 +5,13 @@ import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
 
+
 import java.math.BigDecimal;
 import java.time.Instant;
 
+@Entity
 @Getter
 @Setter
-@Entity
 @Table(name = "purchase_order", uniqueConstraints = {
         @UniqueConstraint(columnNames = { "po_number", "organisation_id" }, name = "uk_po_number_per_org")
 })

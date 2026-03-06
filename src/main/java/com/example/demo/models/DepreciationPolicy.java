@@ -2,16 +2,16 @@ package com.example.demo.models;
 
 import com.example.demo.enums.DepreciationMethod;
 import jakarta.persistence.*;
-import lombok.Getter;
-import lombok.Setter;
+import lombok.Data;
+import lombok.EqualsAndHashCode;
 
 import java.math.BigDecimal;
 import java.util.Set;
 
-@Getter
-@Setter
 @Entity
 @Table(name = "depreciation_policy")
+@Data
+@EqualsAndHashCode(callSuper = true)
 public class DepreciationPolicy extends BaseEntity {
 
     @Column(nullable = false)

@@ -8,14 +8,17 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 public class WebMvcConfig implements WebMvcConfigurer {
 
     private final RequestCorrelationIdInterceptor correlationIdInterceptor;
+    private final ApiAuditInterceptor apiAuditInterceptor;
 
-    public WebMvcConfig(RequestCorrelationIdInterceptor correlationIdInterceptor) {
+    public WebMvcConfig(RequestCorrelationIdInterceptor correlationIdInterceptor,
+            ApiAuditInterceptor apiAuditInterceptor) {
         this.correlationIdInterceptor = correlationIdInterceptor;
+        this.apiAuditInterceptor = apiAuditInterceptor;
     }
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(correlationIdInterceptor);
+        registry.addInterceptor(apiAuditInterceptor);
     }
 }
-

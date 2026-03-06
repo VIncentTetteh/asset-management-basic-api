@@ -9,6 +9,6 @@ public interface DepreciationPolicyService {
     DepreciationPolicyDto getPolicyById(UUID id);
     Set<DepreciationPolicyDto> getPoliciesByOrganisation(UUID organisationId);
     DepreciationPolicyDto updatePolicy(UUID id, DepreciationPolicyDto policyDto);
+    DepreciationPolicyDto patchPolicy(UUID id, DepreciationPolicyDto policyDto);
     void deletePolicy(UUID id);
 }
-

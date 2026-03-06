@@ -6,9 +6,12 @@ import com.example.demo.models.PurchaseOrder;
 import com.example.demo.models.Organisation;
 import com.example.demo.models.Department;
 import com.example.demo.models.Supplier;
+import com.example.demo.models.User;
 import com.example.demo.repositories.*;
 import com.example.demo.services.PurchaseOrderService;
 import com.example.demo.services.TenantAwareService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
@@ -22,6 +25,8 @@ import java.util.stream.Collectors;
 @Service
 @Transactional
 public class PurchaseOrderServiceImpl extends TenantAwareService implements PurchaseOrderService {
+
+    private static final Logger logger = LoggerFactory.getLogger(PurchaseOrderServiceImpl.class);
 
     private final PurchaseOrderRepository poRepository;
     private final DepartmentRepository departmentRepository;
@@ -62,7 +67,9 @@ public class PurchaseOrderServiceImpl extends TenantAwareService implements Purc
         po.setDepartment(department);
         po.setSupplier(supplier);
 
-        return mapToDto(poRepository.save(po));
+        PurchaseOrder saved = poRepository.save(po);
+        logger.info("Created Purchase Order {} (PO Number: {})", saved.getId(), saved.getPoNumber());
+        return mapToDto(saved);
     }
 
     @Override
@@ -135,16 +142,67 @@ public class PurchaseOrderServiceImpl extends TenantAwareService implements Purc
     }
 
     @Override
+    public PurchaseOrderDto patchPurchaseOrder(UUID id, PurchaseOrderDto poDto) {
+        Organisation org = requireTenantOrg();
+        PurchaseOrder po = poRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
+                .orElseThrow(() -> new IllegalArgumentException("Purchase order not found"));
+
+        if (po.getStatus() != POStatus.DRAFT) {
+            throw new IllegalStateException("Cannot update a non-draft purchase order");
+        }
+
+        if (poDto.getPoNumber() != null) {
+            po.setPoNumber(poDto.getPoNumber());
+        }
+        if (poDto.getTotalAmount() != null) {
+            po.setTotalAmount(poDto.getTotalAmount());
+        }
+        if (poDto.getCurrency() != null) {
+            po.setCurrency(poDto.getCurrency());
+        }
+        if (poDto.getRemarks() != null) {
+            po.setRemarks(poDto.getRemarks());
+        }
+        if (poDto.getDepartmentId() != null) {
+            Department department = departmentRepository.findByIdAndOrganisationAndDeletedAtIsNull(
+                    poDto.getDepartmentId(), org)
+                    .orElseThrow(() -> new IllegalArgumentException("Department not found in your organisation"));
+            po.setDepartment(department);
+        }
+        if (poDto.getSupplierId() != null) {
+            Supplier supplier = supplierRepository.findByIdAndOrganisationAndDeletedAtIsNull(
+                    poDto.getSupplierId(), org)
+                    .orElseThrow(() -> new IllegalArgumentException("Supplier not found in your organisation"));
+            po.setSupplier(supplier);
+        }
+
+        return mapToDto(poRepository.save(po));
+    }
+
+    @Override
     public PurchaseOrderDto approvePurchaseOrder(UUID id) {
         Organisation org = requireTenantOrg();
         PurchaseOrder po = poRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
                 .orElseThrow(() -> new IllegalArgumentException("Purchase order not found"));
 
+        if (po.getStatus() == POStatus.APPROVED) {
+            logger.warn("Purchase Order {} is already approved", id);
+            return mapToDto(po);
+        }
+
+        if (po.getStatus() == POStatus.REJECTED) {
+            throw new IllegalStateException("Cannot approve a rejected purchase order. Create a new one instead.");
+        }
+
         // C4 fix: resolve approver from authenticated user
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         if (auth != null && auth.getName() != null) {
-            userRepository.findByEmailAndOrganisationId(auth.getName(), org.getId())
-                    .ifPresent(po::setApprovedBy);
+            User approver = userRepository.findByEmailAndOrganisationId(auth.getName(), org.getId())
+                    .orElse(null);
+            if (approver != null) {
+                po.setApprovedBy(approver);
+                logger.info("Purchase Order {} approved by user {}", id, approver.getEmail());
+            }
         }
         po.setStatus(POStatus.APPROVED);
         po.setApprovedAt(Instant.now());
@@ -157,7 +215,18 @@ public class PurchaseOrderServiceImpl extends TenantAwareService implements Purc
         Organisation org = requireTenantOrg();
         PurchaseOrder po = poRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
                 .orElseThrow(() -> new IllegalArgumentException("Purchase order not found"));
+
+        if (po.getStatus() == POStatus.APPROVED) {
+            throw new IllegalStateException("Cannot reject an already approved purchase order");
+        }
+
+        if (po.getStatus() == POStatus.REJECTED) {
+            logger.warn("Purchase Order {} is already rejected", id);
+            return mapToDto(po);
+        }
+
         po.setStatus(POStatus.REJECTED);
+        logger.info("Purchase Order {} rejected", id);
         return mapToDto(poRepository.save(po));
     }
 
@@ -168,6 +237,7 @@ public class PurchaseOrderServiceImpl extends TenantAwareService implements Purc
                 .orElseThrow(() -> new IllegalArgumentException("Purchase order not found"));
         po.setDeletedAt(Instant.now());
         poRepository.save(po);
+        logger.info("Soft-deleted Purchase Order {} (PO Number: {})", id, po.getPoNumber());
     }
 
     private PurchaseOrderDto mapToDto(PurchaseOrder po) {

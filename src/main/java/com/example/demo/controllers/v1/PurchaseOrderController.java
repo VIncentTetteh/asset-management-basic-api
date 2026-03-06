@@ -63,6 +63,14 @@ public class PurchaseOrderController {
         return ResponseEntity.ok(updatedPo);
     }
 
+    @PatchMapping("/{id}")
+    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    public ResponseEntity<PurchaseOrderDto> patchPurchaseOrder(@PathVariable UUID id,
+            @RequestBody PurchaseOrderDto poDto) {
+        PurchaseOrderDto updatedPo = poService.patchPurchaseOrder(id, poDto);
+        return ResponseEntity.ok(updatedPo);
+    }
+
     @PostMapping("/{id}/approve")
     @PreAuthorize("hasAuthority('ROLE_ADMIN')")
     // C4 fix: approver resolved from SecurityContext in service — no approvedById

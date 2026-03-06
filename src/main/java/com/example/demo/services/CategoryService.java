@@ -10,6 +10,6 @@ public interface CategoryService {
     Set<CategoryDto> getCategoriesByOrganisation(UUID organisationId);
     Set<CategoryDto> getSubCategories(UUID parentCategoryId);
     CategoryDto updateCategory(UUID id, CategoryDto categoryDto);
+    CategoryDto patchCategory(UUID id, CategoryDto categoryDto);
     void deleteCategory(UUID id);
 }
-

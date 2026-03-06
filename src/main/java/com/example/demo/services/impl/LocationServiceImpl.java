@@ -115,6 +115,47 @@ public class LocationServiceImpl extends TenantAwareService implements LocationS
     }
 
     @Override
+    public LocationDto patchLocation(UUID id, LocationDto locationDto) {
+        Organisation org = requireTenantOrg();
+        Location location = locationRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
+                .orElseThrow(() -> new IllegalArgumentException("Location not found"));
+
+        if (locationDto.getName() != null) {
+            location.setName(locationDto.getName());
+        }
+        if (locationDto.getBuilding() != null) {
+            location.setBuilding(locationDto.getBuilding());
+        }
+        if (locationDto.getFloor() != null) {
+            location.setFloor(locationDto.getFloor());
+        }
+        if (locationDto.getRoom() != null) {
+            location.setRoom(locationDto.getRoom());
+        }
+        if (locationDto.getCity() != null) {
+            location.setCity(locationDto.getCity());
+        }
+        if (locationDto.getCountry() != null) {
+            location.setCountry(locationDto.getCountry());
+        }
+        if (locationDto.getGeoCoordinates() != null) {
+            location.setGeoCoordinates(locationDto.getGeoCoordinates());
+        }
+
+        if (locationDto.getParentLocationId() != null) {
+            Location parentLocation = locationRepository.findByIdAndOrganisationAndDeletedAtIsNull(
+                    locationDto.getParentLocationId(), org)
+                    .orElseThrow(() -> new IllegalArgumentException("Parent location not found in your organisation"));
+            if (parentLocation.getId().equals(id)) {
+                throw new IllegalArgumentException("A location cannot be its own parent");
+            }
+            location.setParentLocation(parentLocation);
+        }
+
+        return mapToDto(locationRepository.save(location));
+    }
+
+    @Override
     public void deleteLocation(UUID id) {
         Organisation org = requireTenantOrg();
         Location location = locationRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)

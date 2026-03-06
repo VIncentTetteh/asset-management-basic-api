@@ -2,15 +2,17 @@ package com.example.demo.models;
 
 import com.example.demo.enums.OrganisationStatus;
 import jakarta.persistence.*;
-import lombok.Getter;
-import lombok.Setter;
+import lombok.Data;
+import lombok.EqualsAndHashCode;
+
+
 
 import java.util.Set;
 
-@Getter
-@Setter
 @Entity
 @Table(name = "organisation")
+@Data
+@EqualsAndHashCode(callSuper = true)
 public class Organisation extends BaseEntity {
 
     @Column(nullable = false, unique = true)

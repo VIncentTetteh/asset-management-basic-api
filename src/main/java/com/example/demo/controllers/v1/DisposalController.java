@@ -64,6 +64,14 @@ public class DisposalController {
         return ResponseEntity.ok(updatedRecord);
     }
 
+    @PatchMapping("/{id}")
+    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    public ResponseEntity<DisposalRecordDto> patchDisposalRecord(@PathVariable UUID id,
+            @RequestBody DisposalRecordDto recordDto) {
+        DisposalRecordDto updatedRecord = disposalService.patchDisposalRecord(id, recordDto);
+        return ResponseEntity.ok(updatedRecord);
+    }
+
     @DeleteMapping("/{id}")
     @PreAuthorize("hasAuthority('ROLE_ADMIN')")
     public ResponseEntity<Void> deleteDisposalRecord(@PathVariable UUID id) {

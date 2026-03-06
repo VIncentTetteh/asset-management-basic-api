@@ -152,6 +152,11 @@ public class DepartmentServiceImpl implements DepartmentService {
     }
 
     @Override
+    public DepartmentDto patch(UUID id, DepartmentDto dto) {
+        return update(id, dto);
+    }
+
+    @Override
     public void delete(UUID id) {
         if (!TenantContext.hasOrganisationId()) {
             throw new IllegalArgumentException("Organisation context is required (X-Organisation-Id header missing)");

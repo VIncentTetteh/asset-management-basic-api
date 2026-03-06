@@ -19,6 +19,7 @@ public interface PurchaseOrderService {
     Set<PurchaseOrderDto> getPurchaseOrdersByStatus(POStatus status);
 
     PurchaseOrderDto updatePurchaseOrder(UUID id, PurchaseOrderDto poDto);
+    PurchaseOrderDto patchPurchaseOrder(UUID id, PurchaseOrderDto poDto);
 
     PurchaseOrderDto approvePurchaseOrder(UUID id); // C4: approver from SecurityContext
 

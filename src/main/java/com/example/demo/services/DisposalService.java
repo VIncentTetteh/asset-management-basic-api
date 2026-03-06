@@ -13,6 +13,6 @@ public interface DisposalService {
     Set<DisposalRecordDto> getDisposalsByDateRange(LocalDate startDate, LocalDate endDate);
     Set<DisposalRecordDto> getDisposalsByApprover(UUID userId);
     DisposalRecordDto updateDisposalRecord(UUID id, DisposalRecordDto recordDto);
+    DisposalRecordDto patchDisposalRecord(UUID id, DisposalRecordDto recordDto);
     void deleteDisposalRecord(UUID id);
 }
-

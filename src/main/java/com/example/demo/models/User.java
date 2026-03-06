@@ -2,19 +2,21 @@ package com.example.demo.models;
 
 import com.example.demo.enums.UserStatus;
 import jakarta.persistence.*;
-import lombok.Getter;
-import lombok.Setter;
+import lombok.Data;
+import lombok.EqualsAndHashCode;
+
+
 
 import java.time.Instant;
 import java.util.Set;
 
-@Getter
-@Setter
 @Entity
 @Table(name = "app_user", uniqueConstraints = {
         @UniqueConstraint(columnNames = { "email", "organisation_id" }, name = "uk_user_email_per_org"),
         @UniqueConstraint(columnNames = { "employee_id", "organisation_id" }, name = "uk_user_employeeid_per_org")
 })
+@Data
+@EqualsAndHashCode(callSuper = true)
 public class User extends BaseEntity {
 
     @Column(nullable = false)

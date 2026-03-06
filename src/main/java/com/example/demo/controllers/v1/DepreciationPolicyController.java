@@ -46,10 +46,16 @@ public class DepreciationPolicyController {
         return ResponseEntity.ok(updatedPolicy);
     }
 
+    @PatchMapping("/{id}")
+    public ResponseEntity<DepreciationPolicyDto> patchPolicy(@PathVariable UUID id,
+            @RequestBody DepreciationPolicyDto policyDto) {
+        DepreciationPolicyDto updatedPolicy = policyService.patchPolicy(id, policyDto);
+        return ResponseEntity.ok(updatedPolicy);
+    }
+
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> deletePolicy(@PathVariable UUID id) {
         policyService.deletePolicy(id);
         return ResponseEntity.noContent().build();
     }
 }
-

@@ -21,8 +21,11 @@ public interface AssetService {
     Set<AssetDto> listByCategory(UUID categoryId);
 
     AssetDto assignToDepartment(UUID assetId, UUID departmentId);
+    AssetDto assignToUser(UUID assetId, UUID userId);
+    AssetDto unassignUser(UUID assetId);
 
     AssetDto update(UUID id, AssetDto dto);
+    AssetDto patch(UUID id, AssetDto dto);
 
     void delete(UUID id);
 }

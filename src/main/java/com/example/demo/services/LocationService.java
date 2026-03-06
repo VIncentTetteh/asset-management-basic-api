@@ -10,6 +10,6 @@ public interface LocationService {
     Set<LocationDto> getLocationsByOrganisation(UUID organisationId);
     Set<LocationDto> getSubLocations(UUID parentLocationId);
     LocationDto updateLocation(UUID id, LocationDto locationDto);
+    LocationDto patchLocation(UUID id, LocationDto locationDto);
     void deleteLocation(UUID id);
 }
-

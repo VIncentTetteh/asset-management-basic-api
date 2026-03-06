@@ -74,6 +74,25 @@ public class RoleServiceImpl extends TenantAwareService implements RoleService {
     }
 
     @Override
+    public RoleDto patchRole(UUID id, RoleDto roleDto) {
+        Organisation org = requireTenantOrg();
+        Role role = roleRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
+                .orElseThrow(() -> new IllegalArgumentException("Role not found"));
+
+        if (roleDto.getName() != null) {
+            role.setName(roleDto.getName());
+        }
+        if (roleDto.getDescription() != null) {
+            role.setDescription(roleDto.getDescription());
+        }
+        if (roleDto.getPermissions() != null) {
+            role.setPermissions(roleDto.getPermissions());
+        }
+
+        return mapToDto(roleRepository.save(role));
+    }
+
+    @Override
     public void deleteRole(UUID id) {
         Organisation org = requireTenantOrg();
         Role role = roleRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)

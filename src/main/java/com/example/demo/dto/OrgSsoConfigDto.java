@@ -1,9 +1,10 @@
 package com.example.demo.dto;
 
 import com.example.demo.enums.SsoProvider;
-import lombok.Data;
+
 
 import jakarta.validation.constraints.NotNull;
+import lombok.Data;
 
 /**
  * DTO for reading/writing per-organisation SSO configuration.

@@ -50,6 +50,16 @@ public class OrganisationController {
         }
     }
 
+    @PatchMapping("/{id}")
+    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    public ResponseEntity<OrganisationDto> patch(@PathVariable UUID id, @RequestBody OrganisationDto dto) {
+        try {
+            return ResponseEntity.ok(organisationService.patch(id, dto));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
     @DeleteMapping("/{id}")
     @PreAuthorize("hasAuthority('ROLE_ADMIN')")
     public ResponseEntity<Void> delete(@PathVariable UUID id) {

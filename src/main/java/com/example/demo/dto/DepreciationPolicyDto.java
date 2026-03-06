@@ -4,6 +4,7 @@ import com.example.demo.enums.DepreciationMethod;
 import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
+
 import java.math.BigDecimal;
 import java.util.UUID;
 

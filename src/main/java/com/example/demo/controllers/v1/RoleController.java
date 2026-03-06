@@ -46,6 +46,13 @@ public class RoleController {
         return ResponseEntity.ok(updatedRole);
     }
 
+    @PatchMapping("/{id}")
+    public ResponseEntity<RoleDto> patchRole(@PathVariable UUID id,
+            @RequestBody RoleDto roleDto) {
+        RoleDto updatedRole = roleService.patchRole(id, roleDto);
+        return ResponseEntity.ok(updatedRole);
+    }
+
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> deleteRole(@PathVariable UUID id) {
         roleService.deleteRole(id);
@@ -59,4 +66,3 @@ public class RoleController {
         return ResponseEntity.ok(role);
     }
 }
-

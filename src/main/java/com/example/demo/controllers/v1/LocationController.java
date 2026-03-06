@@ -58,6 +58,14 @@ public class LocationController {
         return ResponseEntity.ok(updatedLocation);
     }
 
+    @PatchMapping("/{id}")
+    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    public ResponseEntity<LocationDto> patchLocation(@PathVariable UUID id,
+            @RequestBody LocationDto locationDto) {
+        LocationDto updatedLocation = locationService.patchLocation(id, locationDto);
+        return ResponseEntity.ok(updatedLocation);
+    }
+
     @DeleteMapping("/{id}")
     @PreAuthorize("hasAuthority('ROLE_ADMIN')")
     public ResponseEntity<Void> deleteLocation(@PathVariable UUID id) {

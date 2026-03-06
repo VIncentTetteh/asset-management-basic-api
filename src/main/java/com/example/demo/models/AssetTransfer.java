@@ -2,15 +2,17 @@ package com.example.demo.models;
 
 import com.example.demo.enums.TransferStatus;
 import jakarta.persistence.*;
-import lombok.Getter;
-import lombok.Setter;
+import lombok.Data;
+import lombok.EqualsAndHashCode;
+
+
 
 import java.time.LocalDate;
 
-@Getter
-@Setter
 @Entity
 @Table(name = "asset_transfer")
+@Data
+@EqualsAndHashCode(callSuper = true)
 public class AssetTransfer extends BaseEntity {
 
     @ManyToOne

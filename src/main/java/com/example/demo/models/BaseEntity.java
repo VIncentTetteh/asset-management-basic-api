@@ -1,8 +1,8 @@
 package com.example.demo.models;
 
 import jakarta.persistence.*;
-import lombok.Getter;
-import lombok.Setter;
+
+
 
 import java.time.Instant;
 import java.util.UUID;
@@ -11,6 +11,8 @@ import org.springframework.data.annotation.CreatedBy;
 import org.springframework.data.annotation.LastModifiedBy;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.LastModifiedDate;
+import lombok.Getter;
+import lombok.Setter;
 
 @MappedSuperclass
 @Getter
@@ -55,3 +57,4 @@ public abstract class BaseEntity {
         return this.deletedAt != null;
     }
 }
+

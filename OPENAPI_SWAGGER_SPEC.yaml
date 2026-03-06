@@ -1,0 +1,1205 @@
+openapi: 3.0.0
+info:
+  title: Asset Management Enterprise SaaS API
+  description: Complete API documentation for Asset Management system with enterprise features
+  version: 1.0.0
+  contact:
+    name: API Support
+    url: https://example.com/support
+    email: api-support@example.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:8085/api/v1
+    description: Local Development
+  - url: https://api.example.com/api/v1
+    description: Production
+
+paths:
+  /auth/login:
+    post:
+      summary: User login
+      operationId: login
+      tags:
+        - Authentication
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - password
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  format: password
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/refresh:
+    post:
+      summary: Refresh JWT token
+      operationId: refreshToken
+      tags:
+        - Authentication
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Token refreshed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '401':
+          description: Invalid or expired token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /assets:
+    post:
+      summary: Create new asset
+      operationId: createAsset
+      tags:
+        - Assets
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssetRequest'
+      responses:
+        '201':
+          description: Asset created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Asset'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Insufficient permissions
+
+    get:
+      summary: List assets
+      operationId: listAssets
+      tags:
+        - Assets
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          description: Filter by status
+          schema:
+            type: string
+            enum: [IN_STOCK, IN_USE, RETIRED]
+        - name: departmentId
+          in: query
+          description: Filter by department UUID
+          schema:
+            type: string
+        - name: categoryId
+          in: query
+          description: Filter by category UUID
+          schema:
+            type: string
+        - name: page
+          in: query
+          description: Page number (0-indexed)
+          schema:
+            type: integer
+            default: 0
+        - name: size
+          in: query
+          description: Page size
+          schema:
+            type: integer
+            default: 20
+        - name: sort
+          in: query
+          description: Sort field and direction (e.g., createdAt,desc)
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Asset list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Asset'
+        '401':
+          description: Unauthorized
+
+  /assets/{assetId}:
+    get:
+      summary: Get asset by ID
+      operationId: getAsset
+      tags:
+        - Assets
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: assetId
+          in: path
+          required: true
+          description: Asset UUID
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Asset details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Asset'
+        '404':
+          description: Asset not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    put:
+      summary: Update asset
+      operationId: updateAsset
+      tags:
+        - Assets
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: assetId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssetRequest'
+      responses:
+        '200':
+          description: Asset updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Asset'
+        '404':
+          description: Asset not found
+        '400':
+          description: Validation error
+
+    delete:
+      summary: Delete asset
+      operationId: deleteAsset
+      tags:
+        - Assets
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: assetId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Asset deleted
+        '404':
+          description: Asset not found
+
+  /purchase-orders:
+    post:
+      summary: Create purchase order
+      operationId: createPurchaseOrder
+      tags:
+        - Purchase Orders
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PurchaseOrderRequest'
+      responses:
+        '201':
+          description: PO created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PurchaseOrder'
+        '400':
+          description: Validation error
+
+    get:
+      summary: List purchase orders
+      operationId: listPurchaseOrders
+      tags:
+        - Purchase Orders
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: departmentId
+          in: query
+          schema:
+            type: string
+        - name: supplierId
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [DRAFT, APPROVED, REJECTED]
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: PO list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PurchaseOrder'
+
+  /purchase-orders/{poId}:
+    get:
+      summary: Get purchase order details
+      operationId: getPurchaseOrder
+      tags:
+        - Purchase Orders
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: poId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: PO details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PurchaseOrder'
+        '404':
+          description: PO not found
+
+  /purchase-orders/{poId}/approve:
+    post:
+      summary: Approve purchase order
+      operationId: approvePurchaseOrder
+      tags:
+        - Purchase Orders
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: poId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: PO approved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PurchaseOrder'
+        '404':
+          description: PO not found
+        '422':
+          description: Cannot approve this PO
+
+  /dashboard/summary:
+    get:
+      summary: Get dashboard summary
+      operationId: getDashboardSummary
+      tags:
+        - Dashboard
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Dashboard summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardSummary'
+
+  /analytics/assets:
+    get:
+      summary: Get asset analytics
+      operationId: getAssetAnalytics
+      tags:
+        - Analytics
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: period
+          in: query
+          schema:
+            type: string
+            enum: [month, quarter, year]
+            default: month
+        - name: groupBy
+          in: query
+          schema:
+            type: string
+            enum: [status, department, category, condition]
+      responses:
+        '200':
+          description: Analytics data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalyticsData'
+
+  /reports/assets:
+    post:
+      summary: Generate asset report
+      operationId: generateAssetReport
+      tags:
+        - Reports
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReportRequest'
+      responses:
+        '201':
+          description: Report generation started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportResponse'
+
+  /reports/{reportId}/download:
+    get:
+      summary: Download report
+      operationId: downloadReport
+      tags:
+        - Reports
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: reportId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Report file
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: Report not found
+
+  /bulk/assets/import:
+    post:
+      summary: Bulk import assets
+      operationId: bulkImportAssets
+      tags:
+        - Bulk Operations
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: CSV or EXCEL file
+                dryRun:
+                  type: boolean
+                  description: Validate without importing
+      responses:
+        '202':
+          description: Import job started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkJobResponse'
+
+  /bulk/assets/import/{jobId}:
+    get:
+      summary: Get import job status
+      operationId: getImportStatus
+      tags:
+        - Bulk Operations
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Job status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkJobStatus'
+
+  /webhooks:
+    post:
+      summary: Create webhook
+      operationId: createWebhook
+      tags:
+        - Webhooks
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebhookRequest'
+      responses:
+        '201':
+          description: Webhook created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Webhook'
+
+    get:
+      summary: List webhooks
+      operationId: listWebhooks
+      tags:
+        - Webhooks
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Webhook list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookList'
+
+  /webhooks/{webhookId}:
+    get:
+      summary: Get webhook details
+      operationId: getWebhook
+      tags:
+        - Webhooks
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: webhookId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Webhook details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Webhook'
+
+    patch:
+      summary: Update webhook
+      operationId: updateWebhook
+      tags:
+        - Webhooks
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: webhookId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebhookRequest'
+      responses:
+        '200':
+          description: Webhook updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Webhook'
+
+    delete:
+      summary: Delete webhook
+      operationId: deleteWebhook
+      tags:
+        - Webhooks
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: webhookId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Webhook deleted
+
+  /webhooks/{webhookId}/test:
+    post:
+      summary: Test webhook delivery
+      operationId: testWebhook
+      tags:
+        - Webhooks
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: webhookId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Test result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookTestResult'
+
+  /notifications:
+    get:
+      summary: Get user notifications
+      operationId: getNotifications
+      tags:
+        - Notifications
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: type
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [unread, read, all]
+            default: unread
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Notifications list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  totalNotifications:
+                    type: integer
+                  unreadCount:
+                    type: integer
+                  notifications:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Notification'
+
+  /notifications/{notificationId}/read:
+    patch:
+      summary: Mark notification as read
+      operationId: markNotificationAsRead
+      tags:
+        - Notifications
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: notificationId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Notification marked as read
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+
+  /notifications/mark-all-read:
+    patch:
+      summary: Mark all notifications as read
+      operationId: markAllNotificationsAsRead
+      tags:
+        - Notifications
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: All notifications marked as read
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  markedAsRead:
+                    type: integer
+                  markedAt:
+                    type: string
+                    format: date-time
+
+  /health:
+    get:
+      summary: Get system health
+      operationId: getHealth
+      tags:
+        - Health & Monitoring
+      responses:
+        '200':
+          description: System healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+
+  /health/detailed:
+    get:
+      summary: Get detailed health information
+      operationId: getDetailedHealth
+      tags:
+        - Health & Monitoring
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Detailed health status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DetailedHealthStatus'
+
+  /metrics:
+    get:
+      summary: Get API metrics
+      operationId: getMetrics
+      tags:
+        - Health & Monitoring
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: period
+          in: query
+          schema:
+            type: string
+            enum: [day, week, month]
+            default: day
+        - name: metric
+          in: query
+          schema:
+            type: string
+            enum: [requests, errors, latency]
+      responses:
+        '200':
+          description: API metrics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiMetrics'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    LoginResponse:
+      type: object
+      required:
+        - token
+        - expiresIn
+        - tokenType
+        - user
+      properties:
+        token:
+          type: string
+        expiresIn:
+          type: integer
+          description: Token expiry in seconds
+        tokenType:
+          type: string
+          default: Bearer
+        user:
+          $ref: '#/components/schemas/User'
+
+    TokenResponse:
+      type: object
+      properties:
+        token:
+          type: string
+        expiresIn:
+          type: integer
+        tokenType:
+          type: string
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        firstName:
+          type: string
+        lastName:
+          type: string
+        role:
+          type: string
+        organisationId:
+          type: string
+          format: uuid
+
+    AssetRequest:
+      type: object
+      required:
+        - name
+        - assetTag
+        - categoryId
+        - departmentId
+        - purchaseCost
+        - currency
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        assetTag:
+          type: string
+        assetType:
+          type: string
+        serialNumber:
+          type: string
+        categoryId:
+          type: string
+          format: uuid
+        departmentId:
+          type: string
+          format: uuid
+        locationId:
+          type: string
+          format: uuid
+        supplierId:
+          type: string
+          format: uuid
+        purchaseCost:
+          type: number
+          format: double
+        currency:
+          type: string
+          enum: [USD, EUR, GBP]
+        status:
+          type: string
+          enum: [IN_STOCK, IN_USE, RETIRED]
+        condition:
+          type: string
+          enum: [POOR, FAIR, GOOD, EXCELLENT]
+
+    Asset:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        assetTag:
+          type: string
+        status:
+          type: string
+        condition:
+          type: string
+        purchaseCost:
+          type: number
+        currentBookValue:
+          type: number
+        organisationId:
+          type: string
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    PurchaseOrderRequest:
+      type: object
+      required:
+        - poNumber
+        - totalAmount
+        - currency
+        - departmentId
+        - supplierId
+      properties:
+        poNumber:
+          type: string
+        totalAmount:
+          type: number
+          format: double
+        currency:
+          type: string
+        departmentId:
+          type: string
+          format: uuid
+        supplierId:
+          type: string
+          format: uuid
+        remarks:
+          type: string
+        status:
+          type: string
+          enum: [DRAFT, APPROVED, REJECTED]
+
+    PurchaseOrder:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        poNumber:
+          type: string
+        totalAmount:
+          type: number
+        status:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    DashboardSummary:
+      type: object
+      properties:
+        totalAssets:
+          type: integer
+        assetsInUse:
+          type: integer
+        assetsInStock:
+          type: integer
+        assetsRetired:
+          type: integer
+        totalAssetValue:
+          type: number
+        maintenanceAlerts:
+          type: integer
+        pendingPurchaseOrders:
+          type: integer
+
+    AnalyticsData:
+      type: object
+      properties:
+        period:
+          type: string
+        groupBy:
+          type: string
+        data:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              count:
+                type: integer
+              value:
+                type: number
+              percentage:
+                type: number
+
+    ReportRequest:
+      type: object
+      required:
+        - format
+      properties:
+        format:
+          type: string
+          enum: [PDF, EXCEL, CSV]
+        includeDetails:
+          type: boolean
+        filters:
+          type: object
+        columns:
+          type: array
+          items:
+            type: string
+
+    ReportResponse:
+      type: object
+      properties:
+        reportId:
+          type: string
+          format: uuid
+        format:
+          type: string
+        status:
+          type: string
+        downloadUrl:
+          type: string
+        generatedAt:
+          type: string
+          format: date-time
+
+    BulkJobResponse:
+      type: object
+      properties:
+        jobId:
+          type: string
+          format: uuid
+        status:
+          type: string
+        totalRows:
+          type: integer
+        successCount:
+          type: integer
+        errorCount:
+          type: integer
+
+    BulkJobStatus:
+      type: object
+      properties:
+        jobId:
+          type: string
+          format: uuid
+        status:
+          type: string
+        totalRows:
+          type: integer
+        successCount:
+          type: integer
+        errorCount:
+          type: integer
+        warnings:
+          type: array
+          items:
+            type: object
+
+    WebhookRequest:
+      type: object
+      required:
+        - name
+        - url
+        - events
+      properties:
+        name:
+          type: string
+        url:
+          type: string
+          format: uri
+        events:
+          type: array
+          items:
+            type: string
+        active:
+          type: boolean
+        secret:
+          type: string
+
+    Webhook:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        url:
+          type: string
+        events:
+          type: array
+          items:
+            type: string
+        active:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        lastTriggeredAt:
+          type: string
+          format: date-time
+        deliveryCount:
+          type: integer
+
+    WebhookList:
+      type: object
+      properties:
+        totalWebhooks:
+          type: integer
+        activeWebhooks:
+          type: integer
+        webhooks:
+          type: array
+          items:
+            $ref: '#/components/schemas/Webhook'
+
+    WebhookTestResult:
+      type: object
+      properties:
+        webhookId:
+          type: string
+          format: uuid
+        testStatus:
+          type: string
+        statusCode:
+          type: integer
+        responseTime:
+          type: integer
+
+    Notification:
+      type: object
+      properties:
+        notificationId:
+          type: string
+          format: uuid
+        type:
+          type: string
+        title:
+          type: string
+        message:
+          type: string
+        read:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [UP, DOWN]
+        timestamp:
+          type: string
+          format: date-time
+        components:
+          type: object
+
+    DetailedHealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        components:
+          type: object
+        uptime:
+          type: string
+        version:
+          type: string
+
+    ApiMetrics:
+      type: object
+      properties:
+        period:
+          type: string
+        totalRequests:
+          type: integer
+        successfulRequests:
+          type: integer
+        failedRequests:
+          type: integer
+        successRate:
+          type: string
+        averageLatency:
+          type: number
+
+    Error:
+      type: object
+      properties:
+        status:
+          type: integer
+        message:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    ValidationError:
+      type: object
+      properties:
+        status:
+          type: integer
+        message:
+          type: string
+        errors:
+          type: object
+          additionalProperties:
+            type: string
+

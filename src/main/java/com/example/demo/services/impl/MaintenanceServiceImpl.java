@@ -149,6 +149,45 @@ public class MaintenanceServiceImpl extends TenantAwareService implements Mainte
     }
 
     @Override
+    public MaintenanceRecordDto patchMaintenanceRecord(UUID id, MaintenanceRecordDto recordDto) {
+        Organisation org = requireTenantOrg();
+        MaintenanceRecord record = recordRepository.findByIdAndDeletedAtIsNull(id)
+                .orElseThrow(() -> new IllegalArgumentException("Maintenance record not found"));
+        if (!record.getAsset().getOrganisation().getId().equals(org.getId())) {
+            throw new IllegalArgumentException("Maintenance record not found");
+        }
+
+        if (recordDto.getMaintenanceType() != null) {
+            record.setMaintenanceType(recordDto.getMaintenanceType());
+        }
+        if (recordDto.getDescription() != null) {
+            record.setDescription(recordDto.getDescription());
+        }
+        if (recordDto.getScheduledDate() != null) {
+            record.setScheduledDate(recordDto.getScheduledDate());
+        }
+        if (recordDto.getPerformedDate() != null) {
+            record.setPerformedDate(recordDto.getPerformedDate());
+        }
+        if (recordDto.getCost() != null) {
+            record.setCost(recordDto.getCost());
+        }
+        if (recordDto.getStatus() != null) {
+            record.setStatus(recordDto.getStatus());
+        }
+        if (recordDto.getNextDueDate() != null) {
+            record.setNextDueDate(recordDto.getNextDueDate());
+        }
+        if (recordDto.getVendorId() != null) {
+            record.setVendor(supplierRepository.findByIdAndOrganisationAndDeletedAtIsNull(recordDto.getVendorId(), org)
+                    .orElseThrow(() -> new IllegalArgumentException("Vendor not found in your organisation")));
+        }
+
+        MaintenanceRecord updatedRecord = recordRepository.save(record);
+        return mapToDto(updatedRecord);
+    }
+
+    @Override
     public MaintenanceRecordDto completeMaintenanceRecord(UUID id) {
         Organisation org = requireTenantOrg();
         MaintenanceRecord record = recordRepository.findByIdAndDeletedAtIsNull(id)

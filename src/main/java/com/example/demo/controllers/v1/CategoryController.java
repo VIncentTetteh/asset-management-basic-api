@@ -58,6 +58,14 @@ public class CategoryController {
         return ResponseEntity.ok(updatedCategory);
     }
 
+    @PatchMapping("/{id}")
+    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    public ResponseEntity<CategoryDto> patchCategory(@PathVariable UUID id,
+            @RequestBody CategoryDto categoryDto) {
+        CategoryDto updatedCategory = categoryService.patchCategory(id, categoryDto);
+        return ResponseEntity.ok(updatedCategory);
+    }
+
     @DeleteMapping("/{id}")
     @PreAuthorize("hasAuthority('ROLE_ADMIN')")
     public ResponseEntity<Void> deleteCategory(@PathVariable UUID id) {

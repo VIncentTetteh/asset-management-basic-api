@@ -14,6 +14,7 @@ public interface UserService {
     Set<UserDto> listUsersByDepartment(UUID departmentId);
 
     UserDto updateUser(UUID id, UserDto dto);
+    UserDto patchUser(UUID id, UserDto dto);
 
     UserDto deactivateUser(UUID id);
 

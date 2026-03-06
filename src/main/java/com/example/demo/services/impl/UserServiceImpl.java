@@ -126,6 +126,39 @@ public class UserServiceImpl extends TenantAwareService implements UserService {
     }
 
     @Override
+    public UserDto patchUser(UUID id, UserDto dto) {
+        Organisation org = requireTenantOrg();
+        User user = userRepository.findByIdAndOrganisation(id, org)
+                .orElseThrow(() -> new IllegalArgumentException("User not found in your organisation"));
+
+        if (dto.getFirstName() != null) {
+            user.setFirstName(dto.getFirstName());
+        }
+        if (dto.getLastName() != null) {
+            user.setLastName(dto.getLastName());
+        }
+        if (dto.getPhone() != null) {
+            user.setPhone(dto.getPhone());
+        }
+        if (dto.getEmployeeId() != null) {
+            user.setEmployeeId(dto.getEmployeeId());
+        }
+        if (dto.getJobTitle() != null) {
+            user.setJobTitle(dto.getJobTitle());
+        }
+        if (dto.getDepartmentId() != null) {
+            Department dept = departmentRepository.findByIdAndOrganisationAndDeletedAtIsNull(dto.getDepartmentId(), org)
+                    .orElseThrow(() -> new IllegalArgumentException("Department not found in your organisation"));
+            user.setDepartment(dept);
+        }
+        if (dto.getStatus() != null) {
+            user.setStatus(dto.getStatus());
+        }
+
+        return toDto(userRepository.save(user));
+    }
+
+    @Override
     public UserDto deactivateUser(UUID id) {
         Organisation org = requireTenantOrg();
         User user = userRepository.findByIdAndOrganisation(id, org)

@@ -56,6 +56,13 @@ public class UserController {
         return ResponseEntity.ok(userService.updateUser(id, dto));
     }
 
+    @PatchMapping("/{id}")
+    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    public ResponseEntity<UserDto> patchUser(@PathVariable UUID id,
+            @RequestBody UserDto dto) {
+        return ResponseEntity.ok(userService.patchUser(id, dto));
+    }
+
     @PutMapping("/{id}/deactivate")
     @PreAuthorize("hasAuthority('ROLE_ADMIN')")
     public ResponseEntity<UserDto> deactivateUser(@PathVariable UUID id) {

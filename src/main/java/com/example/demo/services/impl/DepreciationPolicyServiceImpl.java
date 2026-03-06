@@ -78,6 +78,31 @@ public class DepreciationPolicyServiceImpl extends TenantAwareService implements
     }
 
     @Override
+    public DepreciationPolicyDto patchPolicy(UUID id, DepreciationPolicyDto policyDto) {
+        Organisation org = requireTenantOrg();
+        DepreciationPolicy policy = policyRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
+                .orElseThrow(() -> new IllegalArgumentException("Policy not found"));
+
+        if (policyDto.getName() != null) {
+            policy.setName(policyDto.getName());
+        }
+        if (policyDto.getDescription() != null) {
+            policy.setDescription(policyDto.getDescription());
+        }
+        if (policyDto.getMethod() != null) {
+            policy.setMethod(policyDto.getMethod());
+        }
+        if (policyDto.getUsefulLifeMonths() != null) {
+            policy.setUsefulLifeMonths(policyDto.getUsefulLifeMonths());
+        }
+        if (policyDto.getSalvageValuePercent() != null) {
+            policy.setSalvageValuePercent(policyDto.getSalvageValuePercent());
+        }
+
+        return mapToDto(policyRepository.save(policy));
+    }
+
+    @Override
     public void deletePolicy(UUID id) {
         Organisation org = requireTenantOrg();
         DepreciationPolicy policy = policyRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)

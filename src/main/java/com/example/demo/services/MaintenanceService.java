@@ -19,6 +19,7 @@ public interface MaintenanceService {
     Set<MaintenanceRecordDto> getMaintenanceRecordsDueBy(LocalDate date);
 
     MaintenanceRecordDto updateMaintenanceRecord(UUID id, MaintenanceRecordDto recordDto);
+    MaintenanceRecordDto patchMaintenanceRecord(UUID id, MaintenanceRecordDto recordDto);
 
     MaintenanceRecordDto completeMaintenanceRecord(UUID id);
 

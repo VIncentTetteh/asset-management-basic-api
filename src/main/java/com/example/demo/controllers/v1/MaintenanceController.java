@@ -63,6 +63,14 @@ public class MaintenanceController {
         return ResponseEntity.ok(updatedRecord);
     }
 
+    @PatchMapping("/{id}")
+    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    public ResponseEntity<MaintenanceRecordDto> patchMaintenanceRecord(@PathVariable UUID id,
+            @RequestBody MaintenanceRecordDto recordDto) {
+        MaintenanceRecordDto updatedRecord = maintenanceService.patchMaintenanceRecord(id, recordDto);
+        return ResponseEntity.ok(updatedRecord);
+    }
+
     @PostMapping("/{id}/complete")
     @PreAuthorize("hasAuthority('ROLE_ADMIN')")
     public ResponseEntity<MaintenanceRecordDto> completeMaintenanceRecord(@PathVariable UUID id) {

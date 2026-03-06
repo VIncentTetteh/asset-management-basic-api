@@ -134,6 +134,32 @@ public class DisposalServiceImpl extends TenantAwareService implements DisposalS
     }
 
     @Override
+    public DisposalRecordDto patchDisposalRecord(UUID id, DisposalRecordDto recordDto) {
+        Organisation org = requireTenantOrg();
+        DisposalRecord record = disposalRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
+                .orElseThrow(() -> new IllegalArgumentException("Disposal record not found"));
+
+        if (recordDto.getDisposalMethod() != null) {
+            record.setDisposalMethod(recordDto.getDisposalMethod());
+        }
+        if (recordDto.getDisposalDate() != null) {
+            record.setDisposalDate(recordDto.getDisposalDate());
+        }
+        if (recordDto.getSaleValue() != null) {
+            record.setSaleValue(recordDto.getSaleValue());
+        }
+        if (recordDto.getReason() != null) {
+            record.setReason(recordDto.getReason());
+        }
+        if (recordDto.getComplianceDocumentUrl() != null) {
+            record.setComplianceDocumentUrl(recordDto.getComplianceDocumentUrl());
+        }
+
+        DisposalRecord updatedRecord = disposalRepository.save(record);
+        return mapToDto(updatedRecord);
+    }
+
+    @Override
     public void deleteDisposalRecord(UUID id) {
         Organisation org = requireTenantOrg();
         DisposalRecord record = disposalRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)

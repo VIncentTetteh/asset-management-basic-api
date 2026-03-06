@@ -2,13 +2,12 @@ package com.example.demo.models;
 
 import com.example.demo.enums.SupplierStatus;
 import jakarta.persistence.*;
-import lombok.Getter;
-import lombok.Setter;
+import lombok.Data;
+import lombok.EqualsAndHashCode;
+import lombok.ToString;
 
 import java.util.Set;
 
-@Getter
-@Setter
 @Entity
 @Table(name = "supplier", uniqueConstraints = {
         @UniqueConstraint(columnNames = { "registration_number",
@@ -16,6 +15,8 @@ import java.util.Set;
         @UniqueConstraint(columnNames = { "email", "organisation_id" }, name = "uk_supplier_email_per_org"),
         @UniqueConstraint(columnNames = { "tax_id", "organisation_id" }, name = "uk_supplier_taxid_per_org")
 })
+@Data
+@EqualsAndHashCode(callSuper = true)
 public class Supplier extends BaseEntity {
 
     @Column(nullable = false)
@@ -45,12 +46,18 @@ public class Supplier extends BaseEntity {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(nullable = false)
+    @EqualsAndHashCode.Exclude
+    @ToString.Exclude
     private Organisation organisation;
 
     @OneToMany(mappedBy = "supplier")
+    @EqualsAndHashCode.Exclude
+    @ToString.Exclude
     private Set<Asset> assets;
 
     @OneToMany(mappedBy = "supplier")
+    @EqualsAndHashCode.Exclude
+    @ToString.Exclude
     private Set<PurchaseOrder> purchaseOrders;
 
 }

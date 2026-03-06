@@ -2,19 +2,21 @@ package com.example.demo.models;
 
 import com.example.demo.enums.DepartmentStatus;
 import jakarta.persistence.*;
-import lombok.Getter;
-import lombok.Setter;
+import lombok.Data;
+import lombok.EqualsAndHashCode;
+
+
 
 import java.math.BigDecimal;
 import java.util.Set;
 
-@Setter
-@Getter
 @Entity
 @Table(name = "department", uniqueConstraints = {
         @UniqueConstraint(columnNames = { "department_code", "organisation_id" }, name = "uk_dept_code_per_org"),
         @UniqueConstraint(columnNames = { "cost_center_code", "organisation_id" }, name = "uk_dept_costcenter_per_org")
 })
+@Data
+@EqualsAndHashCode(callSuper = true)
 public class Department extends BaseEntity {
 
     @Column(nullable = false)
