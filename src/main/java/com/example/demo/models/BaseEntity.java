@@ -2,8 +2,6 @@ package com.example.demo.models;
 
 import jakarta.persistence.*;
 
-
-
 import java.time.Instant;
 import java.util.UUID;
 
@@ -21,6 +19,10 @@ public abstract class BaseEntity {
 
     @Id
     private UUID id = UUID.randomUUID();
+
+//    @Version
+//    @Column(name = "version")
+//    private Long version;
 
     @Column(name = "created_at", updatable = false)
     @CreatedDate

@@ -4,6 +4,7 @@ import com.example.demo.enums.AssetStatus;
 import com.example.demo.models.Asset;
 import com.example.demo.models.Department;
 import com.example.demo.models.Organisation;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;
@@ -29,7 +30,8 @@ public interface AssetRepository extends JpaRepository<Asset, UUID> {
 
         boolean existsByNameIgnoreCaseAndOrganisationAndDeletedAtIsNull(String name, Organisation organisation);
 
-        // Organisation-scoped queries
+        // Organisation-scoped queries — EntityGraph prevents N+1 on common relationships
+        @EntityGraph(attributePaths = {"organisation", "department", "category", "location", "assignedUser", "supplier"})
         List<Asset> findAllByOrganisationAndDeletedAtIsNull(Organisation organisation);
 
         List<Asset> findAllByOrganisationAndCreatedByAndDeletedAtIsNull(Organisation organisation, String createdBy);
@@ -57,4 +59,8 @@ public interface AssetRepository extends JpaRepository<Asset, UUID> {
         Set<Asset> findByOrganisationIdAndStatusAndDeletedAtIsNull(UUID organisationId, AssetStatus status);
 
         Set<Asset> findByCategoryIdAndDeletedAtIsNull(UUID categoryId);
+
+        Set<Asset> findByOrganisationAndCategoryIdAndDeletedAtIsNull(Organisation organisation, UUID categoryId);
+
+        long countByOrganisationAndDeletedAtIsNull(Organisation organisation);
 }

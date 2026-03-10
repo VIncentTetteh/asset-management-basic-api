@@ -6,6 +6,7 @@ import com.example.demo.models.Role;
 import com.example.demo.repositories.UserRepository;
 import com.example.demo.repositories.OrganisationRepository;
 import com.example.demo.repositories.RoleRepository;
+import com.example.demo.security.JwtBlacklist;
 import com.example.demo.security.JwtUtil;
 import com.example.demo.enums.UserStatus;
 import org.springframework.http.HttpStatus;
@@ -17,6 +18,10 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
+import org.springframework.beans.factory.annotation.Value;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.*;
 
@@ -29,14 +34,20 @@ public class AuthController {
     private final RoleRepository roleRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
+    private final JwtBlacklist jwtBlacklist;
+
+    @Value("${app.jwt.expiration:86400000}")
+    private long jwtExpirationMillis;
 
     public AuthController(UserRepository userRepository, OrganisationRepository organisationRepository,
-            RoleRepository roleRepository, PasswordEncoder passwordEncoder, JwtUtil jwtUtil) {
+            RoleRepository roleRepository, PasswordEncoder passwordEncoder, JwtUtil jwtUtil,
+            JwtBlacklist jwtBlacklist) {
         this.userRepository = userRepository;
         this.organisationRepository = organisationRepository;
         this.roleRepository = roleRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtUtil = jwtUtil;
+        this.jwtBlacklist = jwtBlacklist;
     }
 
     /**
@@ -147,8 +158,7 @@ public class AuthController {
             claims.put("departmentId", user.getDepartment().getId().toString());
         }
 
-        // Generate JWT token (24 hours expiration)
-        String token = jwtUtil.generateToken(user.getEmail(), claims, 1000L * 60 * 60 * 24);
+        String token = jwtUtil.generateToken(user.getEmail(), claims, jwtExpirationMillis);
 
         return ResponseEntity.ok(Map.of(
                 "token", token,
@@ -158,7 +168,7 @@ public class AuthController {
                         "firstName", user.getFirstName(),
                         "lastName", user.getLastName(),
                         "role", user.getRole() != null ? user.getRole().getName() : "NONE"),
-                "expiresIn", 86400));
+                "expiresIn", jwtExpirationMillis / 1000));
     }
 
     /**
@@ -201,11 +211,11 @@ public class AuthController {
             claims.put("organisationId", user.getOrganisation().getId().toString());
         }
 
-        String newToken = jwtUtil.generateToken(email, claims, 1000L * 60 * 60 * 24);
+        String newToken = jwtUtil.generateToken(email, claims, jwtExpirationMillis);
 
         return ResponseEntity.ok(Map.of(
                 "token", newToken,
-                "expiresIn", 86400));
+                "expiresIn", jwtExpirationMillis / 1000));
     }
 
     /**
@@ -213,26 +223,24 @@ public class AuthController {
      */
     @PostMapping("/forgot-password")
     public ResponseEntity<?> forgotPassword(@Valid @RequestBody ForgotPasswordRequest request) {
+        // Always return the same response to prevent user-enumeration attacks.
+        // The reset token is delivered via email only — never exposed in the HTTP response.
         var userOpt = userRepository.findByEmail(request.getEmail());
-        if (userOpt.isEmpty()) {
-            return ResponseEntity.badRequest().body(Map.of("error", "User with this email not found"));
+        if (userOpt.isPresent()) {
+            User user = userOpt.get();
+            String rawToken = UUID.randomUUID().toString();
+
+            // Store only the SHA-256 hash — protects against DB breach exposing usable tokens.
+            user.setResetPasswordToken(sha256Hex(rawToken));
+            user.setResetPasswordTokenExpiry(Instant.now().plusSeconds(24 * 60 * 60));
+            userRepository.save(user);
+
+            // TODO: Send rawToken to user.getEmail() via email service.
+            // rawToken must NEVER be logged or returned in the HTTP response.
         }
 
-        User user = userOpt.get();
-        // Generate a random token
-        String token = UUID.randomUUID().toString();
-
-        // Set token and expiry (24 hours from now)
-        user.setResetPasswordToken(token);
-        user.setResetPasswordTokenExpiry(Instant.now().plusSeconds(24 * 60 * 60));
-        userRepository.save(user);
-
-        // In a real application, we would send an email with the link here
-        // For demonstration, we simply return it or pretend it was sent.
         return ResponseEntity.ok(Map.of(
-                "message", "Password reset instructions sent to email",
-                "token", token // Returning token for easy testing
-        ));
+                "message", "If an account with that email exists, password reset instructions have been sent"));
     }
 
     /**
@@ -240,7 +248,7 @@ public class AuthController {
      */
     @PostMapping("/reset-password")
     public ResponseEntity<?> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
-        var userOpt = userRepository.findByResetPasswordToken(request.getToken());
+        var userOpt = userRepository.findByResetPasswordToken(sha256Hex(request.getToken()));
         if (userOpt.isEmpty()) {
             return ResponseEntity.badRequest().body(Map.of("error", "Invalid reset token"));
         }
@@ -292,11 +300,23 @@ public class AuthController {
     }
 
     /**
-     * Logout user (client-side should discard token)
+     * Logout user — blacklists the current JWT so it cannot be reused.
      */
     @PostMapping("/logout")
-    public ResponseEntity<?> logout() {
-        return ResponseEntity.ok(Map.of("message", "Logout successful. Please discard your token."));
+    public ResponseEntity<?> logout(@RequestHeader(value = "Authorization", required = false) String authHeader) {
+        if (authHeader != null && authHeader.startsWith("Bearer ")) {
+            String token = authHeader.substring(7);
+            try {
+                java.util.Date expiry = jwtUtil.getExpiration(token);
+                long ttlMillis = expiry.getTime() - System.currentTimeMillis();
+                if (ttlMillis > 0) {
+                    jwtBlacklist.invalidate(token, java.time.Duration.ofMillis(ttlMillis));
+                }
+            } catch (Exception ignored) {
+                // Token may already be expired or invalid — still respond with success
+            }
+        }
+        return ResponseEntity.ok(Map.of("message", "Logout successful."));
     }
 
     // Request/Response classes
@@ -440,6 +460,18 @@ public class AuthController {
 
         public String getNewPassword() {
             return newPassword;
+        }
+    }
+
+    private static String sha256Hex(String input) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(input.getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder(hash.length * 2);
+            for (byte b : hash) sb.append(String.format("%02x", b));
+            return sb.toString();
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 not available", e);
         }
     }
 

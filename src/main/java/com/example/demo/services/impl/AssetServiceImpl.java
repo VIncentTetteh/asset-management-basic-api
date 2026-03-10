@@ -6,6 +6,7 @@ import com.example.demo.models.*;
 import com.example.demo.multitenancy.TenantContext;
 import com.example.demo.repositories.*;
 import com.example.demo.services.AssetService;
+import com.example.demo.services.UsageLimitService;
 import jakarta.persistence.EntityManager;
 import jakarta.transaction.Transactional;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -31,6 +32,7 @@ public class AssetServiceImpl implements AssetService {
     private final UserRepository userRepository;
     private final PurchaseOrderRepository purchaseOrderRepository;
     private final EntityManager entityManager;
+    private final UsageLimitService usageLimitService;
 
     public AssetServiceImpl(AssetRepository assetRepository,
             DepartmentRepository departmentRepository,
@@ -40,7 +42,8 @@ public class AssetServiceImpl implements AssetService {
             SupplierRepository supplierRepository,
             UserRepository userRepository,
             PurchaseOrderRepository purchaseOrderRepository,
-            EntityManager entityManager) {
+            EntityManager entityManager,
+            UsageLimitService usageLimitService) {
         this.assetRepository = assetRepository;
         this.departmentRepository = departmentRepository;
         this.organisationRepository = organisationRepository;
@@ -50,6 +53,7 @@ public class AssetServiceImpl implements AssetService {
         this.userRepository = userRepository;
         this.purchaseOrderRepository = purchaseOrderRepository;
         this.entityManager = entityManager;
+        this.usageLimitService = usageLimitService;
     }
 
     // ────────────────────────────────────────────────────
@@ -83,6 +87,7 @@ public class AssetServiceImpl implements AssetService {
         }
 
         Organisation organisation = requireTenantOrg();
+        usageLimitService.assertCanCreateAsset(organisation);
         String name = dto.getName().trim();
 
         Department department = null;
@@ -383,7 +388,7 @@ public class AssetServiceImpl implements AssetService {
         // Ensure category belongs to this tenant
         categoryRepository.findByIdAndOrganisationAndDeletedAtIsNull(categoryId, org)
                 .orElseThrow(() -> new IllegalArgumentException("Category not found in your organisation"));
-        return assetRepository.findByCategoryIdAndDeletedAtIsNull(categoryId)
+        return assetRepository.findByOrganisationAndCategoryIdAndDeletedAtIsNull(org, categoryId)
                 .stream().map(this::toDto).collect(Collectors.toSet());
     }
 

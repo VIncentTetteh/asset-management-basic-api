@@ -14,7 +14,7 @@ public interface UserRepository extends JpaRepository<User, UUID> {
 
     Optional<User> findByEmailAndOrganisationId(String email, UUID organisationId);
 
-    Optional<User> findByEmployeeId(String employeeId);
+    Optional<User> findByEmployeeIdAndDeletedAtIsNull(String employeeId);
 
     Set<User> findByOrganisationId(UUID organisationId);
 
@@ -26,7 +26,14 @@ public interface UserRepository extends JpaRepository<User, UUID> {
 
     Optional<User> findByIdAndOrganisation(UUID id, com.example.demo.models.Organisation organisation);
 
+    Optional<User> findByIdAndOrganisationAndDeletedAtIsNull(UUID id, Organisation organisation);
+
     Set<User> findByOrganisationAndDeletedAtIsNull(Organisation organisation);
 
     Optional<User> findByResetPasswordToken(String resetPasswordToken);
+
+    long countByOrganisationAndDeletedAtIsNull(Organisation organisation);
+
+    Optional<User> findByEmployeeId(String userEmployeeId);
+
 }

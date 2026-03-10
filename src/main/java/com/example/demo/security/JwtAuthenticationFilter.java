@@ -1,6 +1,5 @@
 package com.example.demo.security;
 
-import com.example.demo.models.User;
 import com.example.demo.repositories.UserRepository;
 import io.jsonwebtoken.Claims;
 import org.springframework.http.HttpHeaders;
@@ -21,10 +20,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtUtil jwtUtil;
     private final UserRepository userRepository;
+    private final JwtBlacklist jwtBlacklist;
 
-    public JwtAuthenticationFilter(JwtUtil jwtUtil, UserRepository userRepository) {
+    public JwtAuthenticationFilter(JwtUtil jwtUtil, UserRepository userRepository, JwtBlacklist jwtBlacklist) {
         this.jwtUtil = jwtUtil;
         this.userRepository = userRepository;
+        this.jwtBlacklist = jwtBlacklist;
     }
 
     @Override
@@ -34,6 +35,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         if (StringUtils.hasText(header) && header.startsWith("Bearer ")) {
             String token = header.substring(7);
             try {
+                // Reject blacklisted tokens (e.g. tokens invalidated by logout)
+                if (jwtBlacklist.isBlacklisted(token)) {
+                    response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Token has been invalidated");
+                    return;
+                }
+
                 Claims claims = jwtUtil.parseToken(token);
                 String username = claims.getSubject();
                 // JWT is written with key 'role' (singular), e.g. "ROLE_ADMIN"
@@ -50,11 +57,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
                 UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(username, null,
                         authorities);
-                // attach claims as details
                 auth.setDetails(claims);
                 SecurityContextHolder.getContext().setAuthentication(auth);
             } catch (Exception ex) {
-                // ignore invalid token and continue as unauthenticated
+                // Ignore invalid/expired tokens and continue as unauthenticated
             }
         }
         filterChain.doFilter(request, response);

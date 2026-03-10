@@ -22,18 +22,20 @@ public class SecurityConfig {
     private final UserRepository userRepository;
     private final TenantFilter tenantFilter;
     private final CorsConfigurationSource corsConfigurationSource;
+    private final JwtBlacklist jwtBlacklist;
 
     public SecurityConfig(JwtUtil jwtUtil, UserRepository userRepository, TenantFilter tenantFilter,
-            CorsConfigurationSource corsConfigurationSource) {
+            CorsConfigurationSource corsConfigurationSource, JwtBlacklist jwtBlacklist) {
         this.jwtUtil = jwtUtil;
         this.userRepository = userRepository;
         this.tenantFilter = tenantFilter;
         this.corsConfigurationSource = corsConfigurationSource;
+        this.jwtBlacklist = jwtBlacklist;
     }
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
-        JwtAuthenticationFilter jwtFilter = new JwtAuthenticationFilter(jwtUtil, userRepository);
+        JwtAuthenticationFilter jwtFilter = new JwtAuthenticationFilter(jwtUtil, userRepository, jwtBlacklist);
 
         http
                 .cors(cors -> cors.configurationSource(corsConfigurationSource))
@@ -42,8 +44,9 @@ public class SecurityConfig {
                 .authorizeHttpRequests((authz) -> authz
                         .requestMatchers("/api/v1/tenant/**").permitAll()
                         .requestMatchers("/api/v1/auth/**").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/billing/webhooks/paystack").permitAll()
                         .requestMatchers("/api/info", "/api/cache/ping", "/api/db/hits").permitAll()
-                        .requestMatchers("/swagger-ui/**", "/v3/api-docs/**", "/actuator/health", "/error").permitAll()
+                        .requestMatchers("/swagger-ui.html/**", "/v3/api-docs/**", "/actuator/health", "/error").permitAll()
                         .anyRequest().authenticated())
                 .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterAfter(tenantFilter, JwtAuthenticationFilter.class);

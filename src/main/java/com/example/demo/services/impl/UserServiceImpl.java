@@ -8,6 +8,7 @@ import com.example.demo.models.Role;
 import com.example.demo.models.User;
 import com.example.demo.repositories.*;
 import com.example.demo.services.TenantAwareService;
+import com.example.demo.services.UsageLimitService;
 import com.example.demo.services.UserService;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -25,22 +26,26 @@ public class UserServiceImpl extends TenantAwareService implements UserService {
     private final RoleRepository roleRepository;
     private final DepartmentRepository departmentRepository;
     private final PasswordEncoder passwordEncoder;
+    private final UsageLimitService usageLimitService;
 
     public UserServiceImpl(UserRepository userRepository,
             RoleRepository roleRepository,
             DepartmentRepository departmentRepository,
             OrganisationRepository organisationRepository,
-            PasswordEncoder passwordEncoder) {
+            PasswordEncoder passwordEncoder,
+            UsageLimitService usageLimitService) {
         super(organisationRepository);
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
         this.departmentRepository = departmentRepository;
         this.passwordEncoder = passwordEncoder;
+        this.usageLimitService = usageLimitService;
     }
 
     @Override
     public UserDto createUser(UserDto dto) {
         Organisation org = requireTenantOrg();
+        usageLimitService.assertCanCreateEmployee(org);
 
         // Prevent duplicate email within this org
         userRepository.findByEmailAndOrganisationId(dto.getEmail(), org.getId()).ifPresent(u -> {

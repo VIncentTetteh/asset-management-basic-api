@@ -1,156 +1,146 @@
 package com.example.demo.controllers.v1;
 
+import com.example.demo.services.impl.ReportGeneratorService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
+import java.io.IOException;
 import java.time.Instant;
 import java.util.*;
 
-/**
- * Reports Controller
- * Handles report generation and management
- */
 @RestController
 @RequestMapping("/api/v1/reports")
 public class ReportsController {
 
-    /**
-     * POST /api/v1/reports/assets
-     * Generates asset report in specified format
-     */
+    private static final Logger log = LoggerFactory.getLogger(ReportsController.class);
+
+    private final ReportGeneratorService reportGeneratorService;
+
+    public ReportsController(ReportGeneratorService reportGeneratorService) {
+        this.reportGeneratorService = reportGeneratorService;
+    }
+
+    // ── Generate endpoints ────────────────────────────────────────────────────
+
     @PostMapping("/assets")
     @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN')")
     public ResponseEntity<?> generateAssetReport(@RequestBody Map<String, Object> request) {
-        Map<String, Object> response = new HashMap<>();
-
-        String format = (String) request.getOrDefault("format", "PDF");
-        UUID reportId = UUID.randomUUID();
-
-        response.put("reportId", reportId.toString());
-        response.put("format", format);
-        response.put("status", "COMPLETED");
-        response.put("downloadUrl", "/api/v1/reports/assets/" + reportId + "/download");
-        response.put("generatedAt", Instant.now().toString());
-        response.put("rowCount", 150);
-        response.put("size", "2.5 MB");
-
-        return ResponseEntity.status(201).body(response);
+        String format = formatOf(request);
+        try {
+            UUID reportId = reportGeneratorService.generateAssetReport(format);
+            return ResponseEntity.status(HttpStatus.CREATED).body(reportMeta(reportId, "assets", format));
+        } catch (IOException e) {
+            log.error("Failed to generate asset report", e);
+            return ResponseEntity.internalServerError()
+                    .body(Map.of("error", "Failed to generate report. Please try again later."));
+        }
     }
 
-    /**
-     * POST /api/v1/reports/financial
-     * Generates financial report
-     */
     @PostMapping("/financial")
     @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN')")
     public ResponseEntity<?> generateFinancialReport(@RequestBody Map<String, Object> request) {
-        Map<String, Object> response = new HashMap<>();
-
-        String format = (String) request.getOrDefault("format", "PDF");
-        UUID reportId = UUID.randomUUID();
-
-        response.put("reportId", reportId.toString());
-        response.put("format", format);
-        response.put("reportType", "FINANCIAL");
-        response.put("status", "COMPLETED");
-        response.put("downloadUrl", "/api/v1/reports/financial/" + reportId + "/download");
-        response.put("generatedAt", Instant.now().toString());
-        response.put("pages", 45);
-        response.put("size", "3.2 MB");
-
-        return ResponseEntity.status(201).body(response);
+        String format = formatOf(request);
+        try {
+            UUID reportId = reportGeneratorService.generateFinancialReport(format);
+            return ResponseEntity.status(HttpStatus.CREATED).body(reportMeta(reportId, "financial", format));
+        } catch (IOException e) {
+            log.error("Failed to generate financial report", e);
+            return ResponseEntity.internalServerError()
+                    .body(Map.of("error", "Failed to generate report. Please try again later."));
+        }
     }
 
-    /**
-     * POST /api/v1/reports/maintenance
-     * Generates maintenance report
-     */
     @PostMapping("/maintenance")
     @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN')")
     public ResponseEntity<?> generateMaintenanceReport(@RequestBody Map<String, Object> request) {
-        Map<String, Object> response = new HashMap<>();
-
-        String format = (String) request.getOrDefault("format", "PDF");
-        UUID reportId = UUID.randomUUID();
-
-        response.put("reportId", reportId.toString());
-        response.put("format", format);
-        response.put("reportType", "MAINTENANCE");
-        response.put("status", "COMPLETED");
-        response.put("downloadUrl", "/api/v1/reports/maintenance/" + reportId + "/download");
-        response.put("generatedAt", Instant.now().toString());
-        response.put("maintenanceRecords", 145);
-        response.put("size", "1.8 MB");
-
-        return ResponseEntity.status(201).body(response);
+        String format = formatOf(request);
+        try {
+            UUID reportId = reportGeneratorService.generateMaintenanceReport(format);
+            return ResponseEntity.status(HttpStatus.CREATED).body(reportMeta(reportId, "maintenance", format));
+        } catch (IOException e) {
+            log.error("Failed to generate maintenance report", e);
+            return ResponseEntity.internalServerError()
+                    .body(Map.of("error", "Failed to generate report. Please try again later."));
+        }
     }
 
-    /**
-     * GET /api/v1/reports/{report_id}/download
-     * Downloads the generated report
-     */
+    // ── Download endpoints ────────────────────────────────────────────────────
+
+    @GetMapping("/assets/{reportId}/download")
+    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_USER','ROLE_ADMIN')")
+    public ResponseEntity<?> downloadAssetReport(@PathVariable UUID reportId) {
+        return serveReport(reportId);
+    }
+
+    @GetMapping("/financial/{reportId}/download")
+    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_USER','ROLE_ADMIN')")
+    public ResponseEntity<?> downloadFinancialReport(@PathVariable UUID reportId) {
+        return serveReport(reportId);
+    }
+
+    @GetMapping("/maintenance/{reportId}/download")
+    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_USER','ROLE_ADMIN')")
+    public ResponseEntity<?> downloadMaintenanceReport(@PathVariable UUID reportId) {
+        return serveReport(reportId);
+    }
+
     @GetMapping("/{reportId}/download")
     @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_USER','ROLE_ADMIN')")
-    public ResponseEntity<?> downloadReport(@PathVariable String reportId) {
-        // In production, would retrieve actual file from storage
-        byte[] fileContent = "Sample PDF Report Content".getBytes();
-
-        return ResponseEntity.ok()
-            .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"asset-report-" + reportId + ".pdf\"")
-            .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_PDF_VALUE)
-            .body(fileContent);
+    public ResponseEntity<?> downloadReport(@PathVariable UUID reportId) {
+        return serveReport(reportId);
     }
 
-    /**
-     * GET /api/v1/reports/history
-     * Returns report generation history
-     */
+    // ── History / delete ──────────────────────────────────────────────────────
+
     @GetMapping("/history")
     @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN')")
     public ResponseEntity<?> getReportHistory(
             @RequestParam(defaultValue = "10") int limit,
             @RequestParam(defaultValue = "0") int offset) {
-
-        List<Map<String, Object>> reports = new ArrayList<>();
-
-        reports.add(createReportEntry("assets", "PDF", "2026-03-05T10:30:00Z", "user@example.com", 150));
-        reports.add(createReportEntry("financial", "EXCEL", "2026-03-04T14:15:00Z", "admin@example.com", 45));
-        reports.add(createReportEntry("maintenance", "PDF", "2026-03-03T09:00:00Z", "user@example.com", 145));
-        reports.add(createReportEntry("assets", "CSV", "2026-03-02T16:30:00Z", "admin@example.com", 150));
-
         Map<String, Object> response = new HashMap<>();
-        response.put("totalReports", 4);
+        response.put("totalReports", 0);
         response.put("limit", limit);
         response.put("offset", offset);
-        response.put("reports", reports);
-
+        response.put("reports", List.of());
         return ResponseEntity.ok(response);
     }
 
-    /**
-     * DELETE /api/v1/reports/{report_id}
-     * Deletes report from storage
-     */
     @DeleteMapping("/{reportId}")
     @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN')")
-    public ResponseEntity<?> deleteReport(@PathVariable String reportId) {
+    public ResponseEntity<?> deleteReport(@PathVariable UUID reportId) {
         return ResponseEntity.noContent().build();
     }
 
-    private Map<String, Object> createReportEntry(String type, String format, String generatedAt, String generatedBy, int rowCount) {
-        Map<String, Object> entry = new HashMap<>();
-        entry.put("reportId", UUID.randomUUID().toString());
-        entry.put("type", type);
-        entry.put("format", format);
-        entry.put("generatedAt", generatedAt);
-        entry.put("generatedBy", generatedBy);
-        entry.put("rowCount", rowCount);
-        entry.put("downloadUrl", "/api/v1/reports/{reportId}/download");
-        return entry;
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private ResponseEntity<?> serveReport(UUID reportId) {
+        return reportGeneratorService.get(reportId)
+                .map(entry -> ResponseEntity.ok()
+                        .header(HttpHeaders.CONTENT_DISPOSITION,
+                                "attachment; filename=\"" + entry.filename() + "\"")
+                        .header(HttpHeaders.CONTENT_TYPE, entry.contentType())
+                        .<byte[]>body(entry.bytes()))
+                .orElse(ResponseEntity.notFound().<byte[]>build());
+    }
+
+    private static String formatOf(Map<String, Object> request) {
+        Object fmt = request == null ? null : request.get("format");
+        return fmt == null ? "PDF" : fmt.toString().toUpperCase();
+    }
+
+    private static Map<String, Object> reportMeta(UUID reportId, String type, String format) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("reportId",    reportId.toString());
+        m.put("format",      format);
+        m.put("reportType",  type.toUpperCase());
+        m.put("status",      "COMPLETED");
+        m.put("downloadUrl", "/api/v1/reports/" + type + "/" + reportId + "/download");
+        m.put("generatedAt", Instant.now().toString());
+        return m;
     }
 }
-
-

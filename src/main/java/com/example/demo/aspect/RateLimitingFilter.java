@@ -10,6 +10,9 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 
 import static com.example.demo.config.RateLimitingConfig.resolveBucket;
 import static com.example.demo.config.RateLimitingConfig.RateLimitConfig.*;
@@ -45,8 +48,22 @@ public class RateLimitingFilter extends OncePerRequestFilter {
         }
 
         String authHeader = request.getHeader("Authorization");
-        if (authHeader != null && !authHeader.isEmpty()) {
-            return authHeader.replace("Bearer ", "").substring(0, Math.min(20, authHeader.length()));
+        if (authHeader != null && authHeader.startsWith("Bearer ")) {
+            String token = authHeader.substring(7);
+            try {
+                // Hash the token so the bucket key is unique per user but not guessable
+                MessageDigest digest = MessageDigest.getInstance("SHA-256");
+                byte[] hash = digest.digest(token.getBytes(StandardCharsets.UTF_8));
+                StringBuilder sb = new StringBuilder(16);
+                for (int i = 0; i < 8; i++) {
+                    sb.append(String.format("%02x", hash[i]));
+                }
+                return "jwt:" + sb;
+            } catch (NoSuchAlgorithmException e) {
+                // Fallback: use last 16 chars of token (signature portion, unique per user)
+                int len = token.length();
+                return "jwt:" + token.substring(Math.max(0, len - 16));
+            }
         }
 
         return request.getRemoteAddr();

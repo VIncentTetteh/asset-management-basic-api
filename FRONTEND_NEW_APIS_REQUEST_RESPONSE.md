@@ -4,6 +4,7 @@ This document covers the newly added APIs:
 - `PATCH` partial-update endpoints
 - Asset employee assignment endpoints
 - Organisation audit-event endpoints
+- Billing/Subscription endpoints (Paystack integration)
 
 ## Common Request Headers
 
@@ -462,3 +463,219 @@ or
 
 Use canonical enum values in UI requests where possible.
 
+---
+
+## 6) Billing & Subscription APIs (New)
+
+## 6.1 List Plans
+
+`GET /api/v1/billing/plans`
+
+Response `200 OK`:
+```json
+[
+  {
+    "code": "FREEMIUM",
+    "name": "Freemium",
+    "tier": "FREEMIUM",
+    "interval": "MONTHLY",
+    "amountMinor": 0,
+    "currency": "NGN",
+    "maxAssets": 50,
+    "maxEmployees": 5,
+    "analyticsEnabled": false,
+    "auditRetentionDays": 7
+  },
+  {
+    "code": "BASIC",
+    "name": "Basic",
+    "tier": "BASIC",
+    "interval": "MONTHLY",
+    "amountMinor": 2000000,
+    "currency": "NGN",
+    "maxAssets": 1000,
+    "maxEmployees": 50,
+    "analyticsEnabled": true,
+    "auditRetentionDays": 90
+  }
+]
+```
+
+## 6.2 Get Current Subscription
+
+`GET /api/v1/billing/subscription`
+
+Response `200 OK`:
+```json
+{
+  "id": "311cc749-6f22-4f24-bd57-4b4f5159dc95",
+  "organisationId": "94dc0c14-3bd2-40fb-b36b-cc74b7cbd165",
+  "plan": {
+    "code": "FREEMIUM",
+    "name": "Freemium",
+    "tier": "FREEMIUM",
+    "interval": "MONTHLY",
+    "amountMinor": 0,
+    "currency": "NGN",
+    "maxAssets": 50,
+    "maxEmployees": 5,
+    "analyticsEnabled": false,
+    "auditRetentionDays": 7
+  },
+  "status": "ACTIVE",
+  "autoRenew": false,
+  "currentPeriodStart": "2026-03-06T16:35:10.000Z",
+  "currentPeriodEnd": "2027-03-06T16:35:10.000Z",
+  "nextBillingAt": null,
+  "currentAssetCount": 21,
+  "currentEmployeeCount": 4
+}
+```
+
+## 6.3 Initialize Checkout
+
+`POST /api/v1/billing/checkout`
+
+Request:
+```json
+{
+  "planCode": "BASIC",
+  "callbackUrl": "https://app.yourfrontend.com/billing/callback"
+}
+```
+
+Response `201 Created`:
+```json
+{
+  "authorizationUrl": "https://checkout.paystack.com/abcxyz",
+  "accessCode": "ACCESS_xxxxxx",
+  "reference": "BILL_94DC0C14_1772826075000"
+}
+```
+
+## 6.4 Verify Checkout
+
+`POST /api/v1/billing/checkout/verify?reference={reference}`
+
+Response `200 OK`:
+```json
+{
+  "id": "311cc749-6f22-4f24-bd57-4b4f5159dc95",
+  "organisationId": "94dc0c14-3bd2-40fb-b36b-cc74b7cbd165",
+  "plan": {
+    "code": "BASIC",
+    "name": "Basic",
+    "tier": "BASIC",
+    "interval": "MONTHLY",
+    "amountMinor": 2000000,
+    "currency": "NGN",
+    "maxAssets": 1000,
+    "maxEmployees": 50,
+    "analyticsEnabled": true,
+    "auditRetentionDays": 90
+  },
+  "status": "ACTIVE",
+  "autoRenew": true,
+  "currentPeriodStart": "2026-03-06T16:36:12.000Z",
+  "currentPeriodEnd": "2026-04-05T16:36:12.000Z",
+  "nextBillingAt": "2026-04-05T16:36:12.000Z",
+  "currentAssetCount": 21,
+  "currentEmployeeCount": 4
+}
+```
+
+## 6.5 Toggle Auto-Renew
+
+`PATCH /api/v1/billing/subscription/auto-renew`
+
+Request:
+```json
+{
+  "enabled": false
+}
+```
+
+Response `200 OK`:
+```json
+{
+  "id": "311cc749-6f22-4f24-bd57-4b4f5159dc95",
+  "organisationId": "94dc0c14-3bd2-40fb-b36b-cc74b7cbd165",
+  "status": "ACTIVE",
+  "autoRenew": false
+}
+```
+
+## 6.6 Paystack Webhook (Backend-to-Backend)
+
+`POST /api/v1/billing/webhooks/paystack`
+
+Headers required from Paystack:
+```http
+x-paystack-signature: <sha512_signature>
+Content-Type: application/json
+```
+
+Response `200 OK`:
+```json
+{}
+```
+
+---
+
+## 7) Frontend Screens to Create
+
+Create these screens and flows to support the new APIs and updates:
+
+1. **Subscription & Billing Page**
+- Show current plan, status, usage meters (`assets`, `employees`)
+- Show available plans (`GET /billing/plans`)
+- Upgrade CTA (initialize checkout)
+- Verify payment result page/state (`/billing/callback` + verify endpoint)
+- Auto-renew toggle control
+
+2. **Checkout Redirect Callback Screen**
+- Read `reference` from query string
+- Call verify endpoint
+- Show success/failure state + updated plan details
+
+3. **Usage Limits Banner/Modal**
+- Global warning when near plan limits
+- Blocking modal on `403` plan-limit errors with “Upgrade Plan” action
+
+4. **Asset Details / Edit Screen (Updated)**
+- Add “Assign to Employee” action
+- Add “Unassign Employee” action
+- Keep PATCH-based partial save
+
+5. **Audit Events List Screen**
+- Table columns:
+  - timestamp, actor, method, path, responseStatus, success, requestId
+- Filters:
+  - actorId, start, end, success, method
+- Row click -> detail view
+
+6. **Audit Event Detail Drawer/Page**
+- Full payload display:
+  - handler, query, IP, user-agent, error message (if any)
+
+7. **All Edit Forms Converted to PATCH**
+- Assets, Categories, Departments, Policies, Disposals, Locations, Maintenance,
+  Organisations, Purchase Orders, Roles, Suppliers, Users
+- Send changed fields only
+
+8. **Analytics Access Guard**
+- If analytics endpoint returns `403`, show paywall card:
+  - “Advanced analytics available on paid plans”
+  - CTA to Billing screen
+
+---
+
+## 8) Frontend Integration Sequence (Billing)
+
+1. Load current subscription (`GET /billing/subscription`)
+2. Load plans (`GET /billing/plans`)
+3. User selects plan -> initialize checkout (`POST /billing/checkout`)
+4. Redirect user to `authorizationUrl`
+5. On callback, call verify (`POST /billing/checkout/verify`)
+6. Refresh subscription UI
+7. User can toggle auto-renew (`PATCH /billing/subscription/auto-renew`)

@@ -52,5 +52,9 @@ public class JwtUtil {
             return false;
         }
     }
+
+    public java.util.Date getExpiration(String token) {
+        return parseToken(token).getExpiration();
+    }
 }
 

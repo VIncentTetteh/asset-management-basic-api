@@ -42,6 +42,7 @@ public class TenantFilter extends OncePerRequestFilter {
         String path = request.getRequestURI();
         log.debug("[TENANT_FILTER] Checking path: {}", path);
         if (path.startsWith("/api/v1/tenant") || path.startsWith("/api/v1/auth") ||
+                path.startsWith("/api/v1/billing/webhooks") ||
                 path.equals("/api/info") || path.equals("/api/cache/ping") || path.equals("/api/db/hits")) {
             log.debug("[TENANT_FILTER] Skipping for path: {}", path);
             filterChain.doFilter(request, response);
@@ -50,7 +51,9 @@ public class TenantFilter extends OncePerRequestFilter {
 
         // If user is authenticated and not anonymous, do a DB-backed lookup
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth != null && auth.isAuthenticated() && !(auth instanceof AnonymousAuthenticationToken)) {
+        boolean isAuthenticated = auth != null && auth.isAuthenticated() && !(auth instanceof AnonymousAuthenticationToken);
+
+        if (isAuthenticated) {
             Object principal = auth.getPrincipal();
             String username = null;
             if (principal instanceof String) {
@@ -66,17 +69,17 @@ public class TenantFilter extends OncePerRequestFilter {
                     response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "User not found");
                     return;
                 }
-                if (user.getOrganisation() != null) {
+                if (user.getOrganisation() != null && user.getOrganisation().getId() != null) {
                     UUID orgId = user.getOrganisation().getId();
                     if (organisationRepository.existsById(orgId)) {
                         TenantContext.setOrganisationId(orgId);
                     }
                 }
             }
-        }
-
-        // if tenant still not set from user lookup, fall back to header
-        if (!TenantContext.hasOrganisationId()) {
+            // For authenticated users, NEVER fall back to header-based tenant resolution.
+            // If org could not be resolved from the user's account, deny the request below.
+        } else {
+            // For non-authenticated requests (e.g. public webhook callbacks), allow header-based resolution.
             String header = request.getHeader(tenantHeader);
             if (header != null && !header.isBlank()) {
                 try {
@@ -93,12 +96,9 @@ public class TenantFilter extends OncePerRequestFilter {
 
         // For authenticated requests to protected paths: require a resolved tenant
         boolean isPublicPath = path.startsWith("/api/v1/tenant") || path.startsWith("/api/v1/auth")
+                || path.startsWith("/api/v1/billing/webhooks")
                 || path.startsWith("/swagger-ui") || path.startsWith("/v3/api-docs")
                 || path.startsWith("/actuator");
-
-        Authentication finalAuth = SecurityContextHolder.getContext().getAuthentication();
-        boolean isAuthenticated = finalAuth != null && finalAuth.isAuthenticated()
-                && !(finalAuth instanceof AnonymousAuthenticationToken);
 
         if (isAuthenticated && !isPublicPath && !TenantContext.hasOrganisationId()) {
             log.warn("[TENANT_FILTER] Tenant context could not be resolved for authenticated request to {}", path);

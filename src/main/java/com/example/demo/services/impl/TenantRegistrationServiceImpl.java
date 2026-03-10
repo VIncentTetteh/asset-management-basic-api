@@ -5,10 +5,14 @@ import com.example.demo.dto.TenantRegisterResponse;
 import com.example.demo.enums.Permission;
 import com.example.demo.enums.UserStatus;
 import com.example.demo.models.Organisation;
+import com.example.demo.models.OrganisationSubscription;
 import com.example.demo.models.Role;
+import com.example.demo.models.SubscriptionPlan;
 import com.example.demo.models.User;
+import com.example.demo.repositories.OrganisationSubscriptionRepository;
 import com.example.demo.repositories.OrganisationRepository;
 import com.example.demo.repositories.RoleRepository;
+import com.example.demo.repositories.SubscriptionPlanRepository;
 import com.example.demo.repositories.UserRepository;
 import com.example.demo.security.JwtUtil;
 import com.example.demo.services.TenantRegistrationService;
@@ -27,17 +31,23 @@ public class TenantRegistrationServiceImpl implements TenantRegistrationService 
     private final OrganisationRepository organisationRepository;
     private final RoleRepository roleRepository;
     private final UserRepository userRepository;
+    private final SubscriptionPlanRepository subscriptionPlanRepository;
+    private final OrganisationSubscriptionRepository organisationSubscriptionRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
 
     public TenantRegistrationServiceImpl(OrganisationRepository organisationRepository,
             RoleRepository roleRepository,
             UserRepository userRepository,
+            SubscriptionPlanRepository subscriptionPlanRepository,
+            OrganisationSubscriptionRepository organisationSubscriptionRepository,
             PasswordEncoder passwordEncoder,
             JwtUtil jwtUtil) {
         this.organisationRepository = organisationRepository;
         this.roleRepository = roleRepository;
         this.userRepository = userRepository;
+        this.subscriptionPlanRepository = subscriptionPlanRepository;
+        this.organisationSubscriptionRepository = organisationSubscriptionRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtUtil = jwtUtil;
     }
@@ -113,6 +123,19 @@ public class TenantRegistrationServiceImpl implements TenantRegistrationService 
         user.setOrganisation(savedOrg);
         user.setCreatedBy(request.getAdminEmail()); // Manually set for ownership filtering
         User savedUser = userRepository.save(user);
+
+        // Provision default freemium subscription for every new organisation
+        SubscriptionPlan freemiumPlan = subscriptionPlanRepository.findByCodeAndDeletedAtIsNull("FREEMIUM")
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
+                        "Default FREEMIUM plan is not configured"));
+        OrganisationSubscription subscription = new OrganisationSubscription();
+        subscription.setOrganisation(savedOrg);
+        subscription.setPlan(freemiumPlan);
+        subscription.setStatus(com.example.demo.enums.SubscriptionStatus.ACTIVE);
+        subscription.setAutoRenew(false);
+        subscription.setCurrentPeriodStart(java.time.Instant.now());
+        subscription.setCurrentPeriodEnd(java.time.Instant.now().plus(java.time.Duration.ofDays(365)));
+        organisationSubscriptionRepository.save(subscription);
 
         // Build JWT claims similar to login
         Map<String, Object> claims = new HashMap<>();
