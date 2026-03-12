@@ -3,10 +3,14 @@ package com.example.demo.services.impl;
 import com.example.demo.models.Asset;
 import com.example.demo.models.MaintenanceRecord;
 import com.example.demo.models.Organisation;
+import com.example.demo.models.PurchaseOrder;
+import com.example.demo.models.Supplier;
 import com.example.demo.multitenancy.TenantContext;
 import com.example.demo.repositories.AssetRepository;
 import com.example.demo.repositories.MaintenanceRecordRepository;
 import com.example.demo.repositories.OrganisationRepository;
+import com.example.demo.repositories.PurchaseOrderRepository;
+import com.example.demo.repositories.SupplierRepository;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
@@ -30,16 +34,22 @@ public class ReportGeneratorService {
     private final AssetRepository assetRepository;
     private final MaintenanceRecordRepository maintenanceRecordRepository;
     private final OrganisationRepository organisationRepository;
+    private final PurchaseOrderRepository purchaseOrderRepository;
+    private final SupplierRepository supplierRepository;
 
     // In-memory cache: reportId → (contentType, bytes)
     private final Map<UUID, ReportEntry> cache = new ConcurrentHashMap<>();
 
     public ReportGeneratorService(AssetRepository assetRepository,
                                   MaintenanceRecordRepository maintenanceRecordRepository,
-                                  OrganisationRepository organisationRepository) {
+                                  OrganisationRepository organisationRepository,
+                                  PurchaseOrderRepository purchaseOrderRepository,
+                                  SupplierRepository supplierRepository) {
         this.assetRepository = assetRepository;
         this.maintenanceRecordRepository = maintenanceRecordRepository;
         this.organisationRepository = organisationRepository;
+        this.purchaseOrderRepository = purchaseOrderRepository;
+        this.supplierRepository = supplierRepository;
     }
 
     public record ReportEntry(String contentType, String filename, byte[] bytes) {}
@@ -90,8 +100,41 @@ public class ReportGeneratorService {
         return store(contentType, filename, bytes);
     }
 
-    public Optional<ReportEntry> get(UUID reportId) {
-        return Optional.ofNullable(cache.get(reportId));
+    public ReportEntry get(UUID reportId) {
+        return cache.get(reportId);
+    }
+
+    public UUID generatePurchaseOrderReport(String format) throws IOException {
+        Organisation org = requireOrg();
+        List<PurchaseOrder> orders = new ArrayList<>(
+                purchaseOrderRepository.findByOrganisationAndDeletedAtIsNull(org));
+        orders.sort(Comparator.comparing(po -> po.getCreatedAt() == null
+                ? java.time.Instant.EPOCH : po.getCreatedAt()));
+        byte[] bytes;
+        String contentType;
+        String filename;
+        switch (format.toUpperCase()) {
+            case "EXCEL" -> { bytes = poExcel(orders); contentType = EXCEL_MIME; filename = "purchase-orders.xlsx"; }
+            case "CSV"   -> { bytes = poCsv(orders);   contentType = CSV_MIME;   filename = "purchase-orders.csv";  }
+            default      -> { bytes = poPdf(orders, org.getName()); contentType = PDF_MIME; filename = "purchase-orders.pdf"; }
+        }
+        return store(contentType, filename, bytes);
+    }
+
+    public UUID generateSupplierReport(String format) throws IOException {
+        Organisation org = requireOrg();
+        List<Supplier> suppliers = new ArrayList<>(
+                supplierRepository.findByOrganisationAndDeletedAtIsNull(org));
+        suppliers.sort(Comparator.comparing(s -> s.getName() == null ? "" : s.getName()));
+        byte[] bytes;
+        String contentType;
+        String filename;
+        switch (format.toUpperCase()) {
+            case "EXCEL" -> { bytes = supplierExcel(suppliers); contentType = EXCEL_MIME; filename = "suppliers.xlsx"; }
+            case "CSV"   -> { bytes = supplierCsv(suppliers);   contentType = CSV_MIME;   filename = "suppliers.csv";  }
+            default      -> { bytes = supplierPdf(suppliers, org.getName()); contentType = PDF_MIME; filename = "suppliers.pdf"; }
+        }
+        return store(contentType, filename, bytes);
     }
 
     // ── MIME types ────────────────────────────────────────────────────────────
@@ -224,6 +267,71 @@ public class ReportGeneratorService {
 
     private byte[] financialCsv(List<Asset> assets) {
         return buildCsv(FIN_HEADERS, assets.stream().map(this::finRow).toList());
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // PURCHASE ORDER REPORT
+    // ══════════════════════════════════════════════════════════════════════════
+
+    private static final String[] PO_HEADERS = {
+            "PO Number", "Status", "Total Amount", "Currency",
+            "Supplier", "Department", "Approved By", "Approved At", "Remarks"
+    };
+
+    private String[] poRow(PurchaseOrder po) {
+        return new String[]{
+                safe(po.getPoNumber()), safe(po.getStatus()),
+                money(po.getTotalAmount()), safe(po.getCurrency()),
+                po.getSupplier() == null ? "" : safe(po.getSupplier().getName()),
+                po.getDepartment() == null ? "" : safe(po.getDepartment().getName()),
+                po.getApprovedBy() == null ? "" : safe(po.getApprovedBy().getEmail()),
+                safe(po.getApprovedAt()), safe(po.getRemarks())
+        };
+    }
+
+    private byte[] poPdf(List<PurchaseOrder> orders, String orgName) throws IOException {
+        return buildPdf("Purchase Order Report", orgName, PO_HEADERS,
+                orders.stream().map(this::poRow).toList());
+    }
+
+    private byte[] poExcel(List<PurchaseOrder> orders) throws IOException {
+        return buildExcel("Purchase Orders", PO_HEADERS,
+                orders.stream().map(this::poRow).toList());
+    }
+
+    private byte[] poCsv(List<PurchaseOrder> orders) {
+        return buildCsv(PO_HEADERS, orders.stream().map(this::poRow).toList());
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // SUPPLIER REPORT
+    // ══════════════════════════════════════════════════════════════════════════
+
+    private static final String[] SUPPLIER_HEADERS = {
+            "Name", "Registration No.", "Contact Person", "Email", "Phone",
+            "Address", "Tax ID", "Status"
+    };
+
+    private String[] supplierRow(Supplier s) {
+        return new String[]{
+                safe(s.getName()), safe(s.getRegistrationNumber()),
+                safe(s.getContactPerson()), safe(s.getEmail()), safe(s.getPhone()),
+                safe(s.getAddress()), safe(s.getTaxId()), safe(s.getStatus())
+        };
+    }
+
+    private byte[] supplierPdf(List<Supplier> suppliers, String orgName) throws IOException {
+        return buildPdf("Supplier Report", orgName, SUPPLIER_HEADERS,
+                suppliers.stream().map(this::supplierRow).toList());
+    }
+
+    private byte[] supplierExcel(List<Supplier> suppliers) throws IOException {
+        return buildExcel("Suppliers", SUPPLIER_HEADERS,
+                suppliers.stream().map(this::supplierRow).toList());
+    }
+
+    private byte[] supplierCsv(List<Supplier> suppliers) {
+        return buildCsv(SUPPLIER_HEADERS, suppliers.stream().map(this::supplierRow).toList());
     }
 
     // ══════════════════════════════════════════════════════════════════════════

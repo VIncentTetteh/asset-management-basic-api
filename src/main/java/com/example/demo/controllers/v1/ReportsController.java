@@ -119,13 +119,12 @@ public class ReportsController {
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private ResponseEntity<?> serveReport(UUID reportId) {
-        return reportGeneratorService.get(reportId)
-                .map(entry -> ResponseEntity.ok()
-                        .header(HttpHeaders.CONTENT_DISPOSITION,
-                                "attachment; filename=\"" + entry.filename() + "\"")
-                        .header(HttpHeaders.CONTENT_TYPE, entry.contentType())
-                        .<byte[]>body(entry.bytes()))
-                .orElse(ResponseEntity.notFound().<byte[]>build());
+        ReportGeneratorService.ReportEntry entry = reportGeneratorService.get(reportId);
+        if (entry == null) return ResponseEntity.notFound().<byte[]>build();
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + entry.filename() + "\"")
+                .header(HttpHeaders.CONTENT_TYPE, entry.contentType())
+                .body(entry.bytes());
     }
 
     private static String formatOf(Map<String, Object> request) {
