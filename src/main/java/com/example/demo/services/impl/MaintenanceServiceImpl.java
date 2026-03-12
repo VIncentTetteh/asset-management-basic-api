@@ -10,8 +10,10 @@ import com.example.demo.repositories.MaintenanceRecordRepository;
 import com.example.demo.repositories.AssetRepository;
 import com.example.demo.repositories.OrganisationRepository;
 import com.example.demo.repositories.SupplierRepository;
-import com.example.demo.services.TenantAwareService;
+import com.example.demo.enums.NotificationType;
 import com.example.demo.services.MaintenanceService;
+import com.example.demo.services.NotificationService;
+import com.example.demo.services.TenantAwareService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,15 +30,18 @@ public class MaintenanceServiceImpl extends TenantAwareService implements Mainte
     private final MaintenanceRecordRepository recordRepository;
     private final AssetRepository assetRepository;
     private final SupplierRepository supplierRepository;
+    private final NotificationService notificationService;
 
     public MaintenanceServiceImpl(MaintenanceRecordRepository recordRepository,
             AssetRepository assetRepository,
             SupplierRepository supplierRepository,
-            OrganisationRepository organisationRepository) {
+            OrganisationRepository organisationRepository,
+            NotificationService notificationService) {
         super(organisationRepository);
         this.recordRepository = recordRepository;
         this.assetRepository = assetRepository;
         this.supplierRepository = supplierRepository;
+        this.notificationService = notificationService;
     }
 
     @Override
@@ -69,6 +74,11 @@ public class MaintenanceServiceImpl extends TenantAwareService implements Mainte
         asset.setStatus(AssetStatus.MAINTENANCE);
         assetRepository.save(asset);
 
+        notificationService.notifyOrgAdmins(org, NotificationType.MAINTENANCE,
+                "Maintenance Record Created",
+                "A maintenance record has been created for asset '" + asset.getName() + "' ("
+                        + record.getMaintenanceType() + ").",
+                savedRecord.getId(), "/api/v1/maintenance/" + savedRecord.getId());
         return mapToDto(savedRecord);
     }
 

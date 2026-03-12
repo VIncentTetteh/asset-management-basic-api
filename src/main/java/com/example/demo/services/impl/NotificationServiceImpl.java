@@ -10,6 +10,7 @@ import com.example.demo.models.Organisation;
 import com.example.demo.models.User;
 import com.example.demo.repositories.NotificationPreferencesRepository;
 import com.example.demo.repositories.NotificationRepository;
+import com.example.demo.repositories.UserRepository;
 import com.example.demo.services.NotificationService;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.data.domain.Page;
@@ -21,6 +22,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.*;
+import java.util.List;
 
 @Service
 @Transactional
@@ -28,11 +30,14 @@ public class NotificationServiceImpl implements NotificationService {
 
     private final NotificationRepository notificationRepository;
     private final NotificationPreferencesRepository preferencesRepository;
+    private final UserRepository userRepository;
 
     public NotificationServiceImpl(NotificationRepository notificationRepository,
-                                   NotificationPreferencesRepository preferencesRepository) {
+                                   NotificationPreferencesRepository preferencesRepository,
+                                   UserRepository userRepository) {
         this.notificationRepository = notificationRepository;
         this.preferencesRepository = preferencesRepository;
+        this.userRepository = userRepository;
     }
 
     @Override
@@ -150,6 +155,27 @@ public class NotificationServiceImpl implements NotificationService {
         summary.put("unreadNotifications", unread);
         summary.put("byType", byType);
         return summary;
+    }
+
+    // ── Admin notification dispatch ────────────────────────────────────────────
+
+    @Override
+    public void notifyOrgAdmins(Organisation org, NotificationType type,
+                                String title, String message, UUID entityId, String actionUrl) {
+        // Notify both ORG_ADMIN and ADMIN users within the organisation
+        List<User> admins = userRepository
+                .findByOrganisationAndRole_NameContainingIgnoreCaseAndDeletedAtIsNull(org, "ADMIN");
+        for (User admin : admins) {
+            Notification n = new Notification();
+            n.setUser(admin);
+            n.setOrganisation(org);
+            n.setType(type);
+            n.setTitle(title);
+            n.setMessage(message);
+            n.setEntityId(entityId);
+            n.setActionUrl(actionUrl);
+            notificationRepository.save(n);
+        }
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────────

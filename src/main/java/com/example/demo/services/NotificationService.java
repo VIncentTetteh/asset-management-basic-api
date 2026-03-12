@@ -26,4 +26,11 @@ public interface NotificationService {
     NotificationPreferencesDto updatePreferences(User user, Map<String, Object> updates);
 
     Map<String, Object> getSummary(User user, Organisation org);
+
+    /**
+     * Create an in-app notification for every ORG_ADMIN in the given organisation.
+     * Called by service impls to alert admins on CRUD and integration events.
+     */
+    void notifyOrgAdmins(Organisation org, NotificationType type,
+                         String title, String message, UUID entityId, String actionUrl);
 }

@@ -7,7 +7,9 @@ import com.example.demo.models.Organisation;
 import com.example.demo.models.User;
 import com.example.demo.enums.AssetStatus;
 import com.example.demo.repositories.*;
+import com.example.demo.enums.NotificationType;
 import com.example.demo.services.DisposalService;
+import com.example.demo.services.NotificationService;
 import com.example.demo.services.TenantAwareService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,15 +27,18 @@ public class DisposalServiceImpl extends TenantAwareService implements DisposalS
     private final DisposalRecordRepository disposalRepository;
     private final AssetRepository assetRepository;
     private final UserRepository userRepository;
+    private final NotificationService notificationService;
 
     public DisposalServiceImpl(DisposalRecordRepository disposalRepository,
             AssetRepository assetRepository,
             OrganisationRepository organisationRepository,
-            UserRepository userRepository) {
+            UserRepository userRepository,
+            NotificationService notificationService) {
         super(organisationRepository);
         this.disposalRepository = disposalRepository;
         this.assetRepository = assetRepository;
         this.userRepository = userRepository;
+        this.notificationService = notificationService;
     }
 
     @Override
@@ -48,6 +53,10 @@ public class DisposalServiceImpl extends TenantAwareService implements DisposalS
         User approver = userRepository.findByIdAndOrganisation(recordDto.getApprovedById(), org)
                 .orElseThrow(() -> new IllegalArgumentException("Approver not found in your organisation"));
 
+        if (asset.getStatus() == AssetStatus.DISPOSED) {
+            throw new IllegalArgumentException("Asset has already been disposed");
+        }
+
         DisposalRecord record = new DisposalRecord();
         record.setAsset(asset);
         record.setDisposalMethod(recordDto.getDisposalMethod());
@@ -58,11 +67,16 @@ public class DisposalServiceImpl extends TenantAwareService implements DisposalS
         record.setComplianceDocumentUrl(recordDto.getComplianceDocumentUrl());
         record.setOrganisation(org);
 
-        // Update asset status to disposed
+        // Mark asset as disposed and release it from any assigned user
         asset.setStatus(AssetStatus.DISPOSED);
+        asset.setAssignedUser(null);
         assetRepository.save(asset);
 
         DisposalRecord savedRecord = disposalRepository.save(record);
+        notificationService.notifyOrgAdmins(org, NotificationType.DISPOSAL,
+                "Asset Disposed",
+                "Asset '" + asset.getName() + "' has been disposed via " + record.getDisposalMethod() + ".",
+                savedRecord.getId(), "/api/v1/disposals/" + savedRecord.getId());
         return mapToDto(savedRecord);
     }
 

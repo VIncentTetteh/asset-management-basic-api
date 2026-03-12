@@ -8,6 +8,8 @@ import com.example.demo.models.Department;
 import com.example.demo.models.Supplier;
 import com.example.demo.models.User;
 import com.example.demo.repositories.*;
+import com.example.demo.enums.NotificationType;
+import com.example.demo.services.NotificationService;
 import com.example.demo.services.PurchaseOrderService;
 import com.example.demo.services.TenantAwareService;
 import org.slf4j.Logger;
@@ -32,17 +34,20 @@ public class PurchaseOrderServiceImpl extends TenantAwareService implements Purc
     private final DepartmentRepository departmentRepository;
     private final SupplierRepository supplierRepository;
     private final UserRepository userRepository;
+    private final NotificationService notificationService;
 
     public PurchaseOrderServiceImpl(PurchaseOrderRepository poRepository,
             OrganisationRepository organisationRepository,
             DepartmentRepository departmentRepository,
             SupplierRepository supplierRepository,
-            UserRepository userRepository) {
+            UserRepository userRepository,
+            NotificationService notificationService) {
         super(organisationRepository);
         this.poRepository = poRepository;
         this.departmentRepository = departmentRepository;
         this.supplierRepository = supplierRepository;
         this.userRepository = userRepository;
+        this.notificationService = notificationService;
     }
 
     @Override
@@ -69,6 +74,10 @@ public class PurchaseOrderServiceImpl extends TenantAwareService implements Purc
 
         PurchaseOrder saved = poRepository.save(po);
         logger.info("Created Purchase Order {} (PO Number: {})", saved.getId(), saved.getPoNumber());
+        notificationService.notifyOrgAdmins(org, NotificationType.PURCHASE_ORDER,
+                "Purchase Order Created",
+                "Purchase Order '" + saved.getPoNumber() + "' has been created for " + supplier.getName() + ".",
+                saved.getId(), "/api/v1/purchase-orders/" + saved.getId());
         return mapToDto(saved);
     }
 
@@ -207,7 +216,12 @@ public class PurchaseOrderServiceImpl extends TenantAwareService implements Purc
         po.setStatus(POStatus.APPROVED);
         po.setApprovedAt(Instant.now());
 
-        return mapToDto(poRepository.save(po));
+        PurchaseOrder approved = poRepository.save(po);
+        notificationService.notifyOrgAdmins(org, NotificationType.APPROVAL,
+                "Purchase Order Approved",
+                "Purchase Order '" + approved.getPoNumber() + "' has been approved.",
+                approved.getId(), "/api/v1/purchase-orders/" + approved.getId());
+        return mapToDto(approved);
     }
 
     @Override
@@ -227,7 +241,12 @@ public class PurchaseOrderServiceImpl extends TenantAwareService implements Purc
 
         po.setStatus(POStatus.REJECTED);
         logger.info("Purchase Order {} rejected", id);
-        return mapToDto(poRepository.save(po));
+        PurchaseOrder rejected = poRepository.save(po);
+        notificationService.notifyOrgAdmins(org, NotificationType.APPROVAL,
+                "Purchase Order Rejected",
+                "Purchase Order '" + rejected.getPoNumber() + "' has been rejected.",
+                rejected.getId(), "/api/v1/purchase-orders/" + rejected.getId());
+        return mapToDto(rejected);
     }
 
     @Override

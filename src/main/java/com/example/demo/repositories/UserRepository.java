@@ -12,6 +12,8 @@ import java.util.UUID;
 public interface UserRepository extends JpaRepository<User, UUID> {
     Optional<User> findByEmail(String email);
 
+    List<User> findAllByEmail(String email);
+
     Optional<User> findByEmailAndOrganisationId(String email, UUID organisationId);
 
     Optional<User> findByEmployeeIdAndDeletedAtIsNull(String employeeId);
@@ -28,12 +30,14 @@ public interface UserRepository extends JpaRepository<User, UUID> {
 
     Optional<User> findByIdAndOrganisationAndDeletedAtIsNull(UUID id, Organisation organisation);
 
-    Set<User> findByOrganisationAndDeletedAtIsNull(Organisation organisation);
+    List<User> findByOrganisationAndDeletedAtIsNull(Organisation organisation);
 
     Optional<User> findByResetPasswordToken(String resetPasswordToken);
 
     long countByOrganisationAndDeletedAtIsNull(Organisation organisation);
 
     Optional<User> findByEmployeeId(String userEmployeeId);
+
+    List<User> findByOrganisationAndRole_NameContainingIgnoreCaseAndDeletedAtIsNull(Organisation org, String roleName);
 
 }

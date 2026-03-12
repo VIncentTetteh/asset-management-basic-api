@@ -1,11 +1,14 @@
 package com.example.demo.services.impl;
 
 import com.example.demo.dto.AssetDto;
+import com.example.demo.dto.AssetHistoryEventDto;
 import com.example.demo.enums.AssetStatus;
 import com.example.demo.models.*;
 import com.example.demo.multitenancy.TenantContext;
 import com.example.demo.repositories.*;
+import com.example.demo.enums.NotificationType;
 import com.example.demo.services.AssetService;
+import com.example.demo.services.NotificationService;
 import com.example.demo.services.UsageLimitService;
 import jakarta.persistence.EntityManager;
 import jakarta.transaction.Transactional;
@@ -16,6 +19,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.*;
 import java.util.stream.Collectors;
 import java.util.EnumSet;
@@ -33,6 +37,11 @@ public class AssetServiceImpl implements AssetService {
     private final PurchaseOrderRepository purchaseOrderRepository;
     private final EntityManager entityManager;
     private final UsageLimitService usageLimitService;
+    private final AuditEventRepository auditEventRepository;
+    private final AssetTransferRepository assetTransferRepository;
+    private final MaintenanceRecordRepository maintenanceRecordRepository;
+    private final DisposalRecordRepository disposalRecordRepository;
+    private final NotificationService notificationService;
 
     public AssetServiceImpl(AssetRepository assetRepository,
             DepartmentRepository departmentRepository,
@@ -43,7 +52,12 @@ public class AssetServiceImpl implements AssetService {
             UserRepository userRepository,
             PurchaseOrderRepository purchaseOrderRepository,
             EntityManager entityManager,
-            UsageLimitService usageLimitService) {
+            UsageLimitService usageLimitService,
+            AuditEventRepository auditEventRepository,
+            AssetTransferRepository assetTransferRepository,
+            MaintenanceRecordRepository maintenanceRecordRepository,
+            DisposalRecordRepository disposalRecordRepository,
+            NotificationService notificationService) {
         this.assetRepository = assetRepository;
         this.departmentRepository = departmentRepository;
         this.organisationRepository = organisationRepository;
@@ -54,6 +68,11 @@ public class AssetServiceImpl implements AssetService {
         this.purchaseOrderRepository = purchaseOrderRepository;
         this.entityManager = entityManager;
         this.usageLimitService = usageLimitService;
+        this.auditEventRepository = auditEventRepository;
+        this.assetTransferRepository = assetTransferRepository;
+        this.maintenanceRecordRepository = maintenanceRecordRepository;
+        this.disposalRecordRepository = disposalRecordRepository;
+        this.notificationService = notificationService;
     }
 
     // ────────────────────────────────────────────────────
@@ -136,6 +155,8 @@ public class AssetServiceImpl implements AssetService {
             asset.setCondition(dto.getCondition());
         asset.setInvoiceId(dto.getInvoiceId());
         asset.setInsurancePolicyId(dto.getInsurancePolicyId());
+        asset.setProcurementType(dto.getProcurementType());
+        asset.setCostCenter(dto.getCostCenter());
 
         if (dto.getCategoryId() != null) {
             categoryRepository.findByIdAndOrganisationAndDeletedAtIsNull(dto.getCategoryId(), organisation)
@@ -150,6 +171,9 @@ public class AssetServiceImpl implements AssetService {
                     .ifPresent(asset::setSupplier);
         }
         if (dto.getAssignedUserId() != null) {
+            if (dto.getStatus() == AssetStatus.DISPOSED) {
+                throw new IllegalArgumentException("Cannot assign a disposed asset to a user");
+            }
             userRepository.findByIdAndOrganisation(dto.getAssignedUserId(), organisation)
                     .ifPresent(asset::setAssignedUser);
         }
@@ -160,6 +184,10 @@ public class AssetServiceImpl implements AssetService {
 
         try {
             Asset saved = assetRepository.save(asset);
+            notificationService.notifyOrgAdmins(organisation, NotificationType.SYSTEM,
+                    "New Asset Created",
+                    "Asset '" + saved.getName() + "' (tag: " + saved.getAssetTag() + ") has been added to the inventory.",
+                    saved.getId(), "/api/v1/assets/" + saved.getId());
             // Create DTO directly without loading related entities to avoid deep joins
             AssetDto result = new AssetDto();
             result.setId(saved.getId());
@@ -182,6 +210,8 @@ public class AssetServiceImpl implements AssetService {
             result.setCondition(saved.getCondition());
             result.setInvoiceId(saved.getInvoiceId());
             result.setInsurancePolicyId(saved.getInsurancePolicyId());
+            result.setProcurementType(saved.getProcurementType());
+            result.setCostCenter(saved.getCostCenter());
 
             // Set IDs from the DTO input or saved entity
             result.setCategoryId(dto.getCategoryId());
@@ -240,6 +270,11 @@ public class AssetServiceImpl implements AssetService {
 
         Asset asset = assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(assetId, org)
                 .orElseThrow(() -> new IllegalArgumentException("Asset not found"));
+
+        if (asset.getStatus() == AssetStatus.DISPOSED) {
+            throw new IllegalArgumentException("Cannot assign a disposed asset to a user");
+        }
+
         User user = userRepository.findByIdAndOrganisation(userId, org)
                 .orElseThrow(() -> new IllegalArgumentException("User not found in your organisation"));
 
@@ -312,6 +347,10 @@ public class AssetServiceImpl implements AssetService {
             asset.setInvoiceId(dto.getInvoiceId());
         if (dto.getInsurancePolicyId() != null)
             asset.setInsurancePolicyId(dto.getInsurancePolicyId());
+        if (dto.getProcurementType() != null)
+            asset.setProcurementType(dto.getProcurementType());
+        if (dto.getCostCenter() != null)
+            asset.setCostCenter(dto.getCostCenter());
 
         if (dto.getCategoryId() != null) {
             categoryRepository.findByIdAndOrganisationAndDeletedAtIsNull(dto.getCategoryId(), org)
@@ -330,6 +369,10 @@ public class AssetServiceImpl implements AssetService {
                     .ifPresent(asset::setSupplier);
         }
         if (dto.getAssignedUserId() != null) {
+            AssetStatus effectiveStatus = dto.getStatus() != null ? dto.getStatus() : asset.getStatus();
+            if (effectiveStatus == AssetStatus.DISPOSED) {
+                throw new IllegalArgumentException("Cannot assign a disposed asset to a user");
+            }
             userRepository.findByIdAndOrganisation(dto.getAssignedUserId(), org)
                     .ifPresent(asset::setAssignedUser);
         }
@@ -338,7 +381,12 @@ public class AssetServiceImpl implements AssetService {
                     .ifPresent(asset::setPurchaseOrder);
         }
 
-        return toDto(assetRepository.save(asset));
+        Asset saved = assetRepository.save(asset);
+        notificationService.notifyOrgAdmins(org, NotificationType.SYSTEM,
+                "Asset Updated",
+                "Asset '" + saved.getName() + "' has been updated.",
+                saved.getId(), "/api/v1/assets/" + saved.getId());
+        return toDto(saved);
     }
 
     @Override
@@ -357,8 +405,14 @@ public class AssetServiceImpl implements AssetService {
         }
         Asset asset = assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
                 .orElseThrow(() -> new IllegalArgumentException("Asset not found"));
+        String assetName = asset.getName();
+        UUID assetId = asset.getId();
         asset.setDeletedAt(Instant.now());
         assetRepository.save(asset);
+        notificationService.notifyOrgAdmins(org, NotificationType.SYSTEM,
+                "Asset Deleted",
+                "Asset '" + assetName + "' has been removed from the inventory.",
+                assetId, "/api/v1/assets");
     }
 
     // ────────────────────────────────────────────────────
@@ -419,6 +473,8 @@ public class AssetServiceImpl implements AssetService {
         d.setCondition(a.getCondition());
         d.setInvoiceId(a.getInvoiceId());
         d.setInsurancePolicyId(a.getInsurancePolicyId());
+        d.setProcurementType(a.getProcurementType());
+        d.setCostCenter(a.getCostCenter());
         if (a.getCategory() != null)
             d.setCategoryId(a.getCategory().getId());
         if (a.getDepartment() != null)
@@ -434,5 +490,68 @@ public class AssetServiceImpl implements AssetService {
         if (a.getPurchaseOrder() != null)
             d.setPurchaseOrderId(a.getPurchaseOrder().getId());
         return d;
+    }
+
+    // ────────────────────────────────────────────────────
+    // Asset History Timeline
+    // ────────────────────────────────────────────────────
+
+    @Override
+    public List<AssetHistoryEventDto> getHistory(UUID assetId) {
+        Organisation org = requireTenantOrg();
+
+        // Validate the asset belongs to this org
+        assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(assetId, org)
+                .orElseThrow(() -> new IllegalArgumentException("Asset not found: " + assetId));
+
+        List<AssetHistoryEventDto> timeline = new ArrayList<>();
+
+        // 1. Audit events where path contains the asset UUID
+        auditEventRepository
+                .findByOrganisationAndAssetIdInPath(org, assetId.toString())
+                .forEach(e -> timeline.add(AssetHistoryEventDto.ofAudit(
+                        e.getId(),
+                        e.getCreatedAt() != null ? e.getCreatedAt().atZone(ZoneOffset.UTC).toLocalDateTime() : null,
+                        e.getActorEmail(),
+                        e.getMethod(),
+                        e.getPath(),
+                        e.getResponseStatus())));
+
+        // 2. Transfers
+        assetTransferRepository.findByAssetIdAndDeletedAtIsNull(assetId)
+                .forEach(t -> timeline.add(AssetHistoryEventDto.ofTransfer(
+                        t.getId(),
+                        t.getCreatedAt() != null ? t.getCreatedAt().atZone(ZoneOffset.UTC).toLocalDateTime() : null,
+                        t.getRequestedBy() != null ? t.getRequestedBy().getEmail() : null,
+                        t.getFromDepartment() != null ? t.getFromDepartment().getName() : null,
+                        t.getToDepartment() != null ? t.getToDepartment().getName() : null,
+                        t.getFromLocation() != null ? t.getFromLocation().getName() : null,
+                        t.getToLocation() != null ? t.getToLocation().getName() : null,
+                        t.getStatus() != null ? t.getStatus().name() : null)));
+
+        // 3. Maintenance records
+        maintenanceRecordRepository.findByAssetIdAndDeletedAtIsNull(assetId)
+                .forEach(m -> timeline.add(AssetHistoryEventDto.ofMaintenance(
+                        m.getId(),
+                        m.getCreatedAt() != null ? m.getCreatedAt().atZone(ZoneOffset.UTC).toLocalDateTime() : null,
+                        m.getMaintenanceType() != null ? m.getMaintenanceType().name() : null,
+                        m.getStatus() != null ? m.getStatus().name() : null,
+                        m.getScheduledDate(),
+                        m.getPerformedDate())));
+
+        // 4. Disposal records
+        disposalRecordRepository.findByAssetIdAndDeletedAtIsNull(assetId)
+                .forEach(d -> timeline.add(AssetHistoryEventDto.ofDisposal(
+                        d.getId(),
+                        d.getCreatedAt() != null ? d.getCreatedAt().atZone(ZoneOffset.UTC).toLocalDateTime() : null,
+                        d.getApprovedBy() != null ? d.getApprovedBy().getEmail() : null,
+                        d.getDisposalMethod() != null ? d.getDisposalMethod().name() : null,
+                        d.getDisposalDate())));
+
+        // Sort chronologically descending (most recent first)
+        timeline.sort(Comparator.comparing(AssetHistoryEventDto::getOccurredAt,
+                Comparator.nullsLast(Comparator.reverseOrder())));
+
+        return timeline;
     }
 }

@@ -9,7 +9,9 @@ import com.example.demo.models.Location;
 import com.example.demo.models.Organisation;
 import com.example.demo.models.User;
 import com.example.demo.repositories.*;
+import com.example.demo.enums.NotificationType;
 import com.example.demo.services.AssetTransferService;
+import com.example.demo.services.NotificationService;
 import com.example.demo.services.TenantAwareService;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -31,19 +33,22 @@ public class AssetTransferServiceImpl extends TenantAwareService implements Asse
     private final DepartmentRepository departmentRepository;
     private final LocationRepository locationRepository;
     private final UserRepository userRepository;
+    private final NotificationService notificationService;
 
     public AssetTransferServiceImpl(AssetTransferRepository transferRepository,
             AssetRepository assetRepository,
             DepartmentRepository departmentRepository,
             LocationRepository locationRepository,
             UserRepository userRepository,
-            OrganisationRepository organisationRepository) {
+            OrganisationRepository organisationRepository,
+            NotificationService notificationService) {
         super(organisationRepository);
         this.transferRepository = transferRepository;
         this.assetRepository = assetRepository;
         this.departmentRepository = departmentRepository;
         this.locationRepository = locationRepository;
         this.userRepository = userRepository;
+        this.notificationService = notificationService;
     }
 
     @Override
@@ -88,6 +93,11 @@ public class AssetTransferServiceImpl extends TenantAwareService implements Asse
 
         transfer.setOrganisation(org);
         AssetTransfer savedTransfer = transferRepository.save(transfer);
+        notificationService.notifyOrgAdmins(org, NotificationType.TRANSFER,
+                "Asset Transfer Requested",
+                "A transfer request has been submitted for asset '" + asset.getName() + "' from "
+                        + fromDept.getName() + " to " + toDept.getName() + ".",
+                savedTransfer.getId(), "/api/v1/transfers/" + savedTransfer.getId());
         return mapToDto(savedTransfer);
     }
 
