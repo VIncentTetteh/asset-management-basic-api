@@ -16,7 +16,7 @@ import java.util.Set;
         @UniqueConstraint(columnNames = { "cost_center_code", "organisation_id" }, name = "uk_dept_costcenter_per_org")
 })
 @Data
-@EqualsAndHashCode(callSuper = true)
+@EqualsAndHashCode(callSuper = true, onlyExplicitlyIncluded = true)
 public class Department extends BaseEntity {
 
     @Column(nullable = false)

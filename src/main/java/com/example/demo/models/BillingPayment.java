@@ -11,7 +11,7 @@ import java.time.Instant;
 @Entity
 @Getter
 @Setter
-@EqualsAndHashCode(callSuper = true)
+@EqualsAndHashCode(callSuper = true, onlyExplicitlyIncluded = true)
 @Table(name = "billing_payment", uniqueConstraints = {
         @UniqueConstraint(name = "uk_billing_payment_reference", columnNames = "reference")
 }, indexes = {

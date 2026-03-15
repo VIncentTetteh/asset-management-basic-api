@@ -2,6 +2,7 @@ package com.example.demo.security;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
@@ -18,10 +19,10 @@ public class JwtBlacklist {
     private static final Logger log = LoggerFactory.getLogger(JwtBlacklist.class);
     private static final String PREFIX = "jwt:blacklist:";
 
-    private final StringRedisTemplate redisTemplate;
+    private final ObjectProvider<StringRedisTemplate> redisTemplateProvider;
 
-    public JwtBlacklist(StringRedisTemplate redisTemplate) {
-        this.redisTemplate = redisTemplate;
+    public JwtBlacklist(ObjectProvider<StringRedisTemplate> redisTemplateProvider) {
+        this.redisTemplateProvider = redisTemplateProvider;
     }
 
     /**
@@ -29,6 +30,11 @@ public class JwtBlacklist {
      * After TTL expires, Redis automatically removes the entry.
      */
     public void invalidate(String tokenId, Duration ttl) {
+        StringRedisTemplate redisTemplate = redisTemplateProvider.getIfAvailable();
+        if (redisTemplate == null) {
+            log.warn("[JWT_BLACKLIST] Redis unavailable; skipping token invalidation");
+            return;
+        }
         try {
             redisTemplate.opsForValue().set(PREFIX + tokenId, "1", ttl);
             log.debug("[JWT_BLACKLIST] Token invalidated: {}", tokenId.substring(0, Math.min(12, tokenId.length())));
@@ -41,6 +47,10 @@ public class JwtBlacklist {
      * Returns true if the given token ID has been blacklisted.
      */
     public boolean isBlacklisted(String tokenId) {
+        StringRedisTemplate redisTemplate = redisTemplateProvider.getIfAvailable();
+        if (redisTemplate == null) {
+            return false;
+        }
         try {
             return Boolean.TRUE.equals(redisTemplate.hasKey(PREFIX + tokenId));
         } catch (Exception e) {

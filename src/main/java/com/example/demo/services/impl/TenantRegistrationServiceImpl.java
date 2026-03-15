@@ -15,7 +15,9 @@ import com.example.demo.repositories.RoleRepository;
 import com.example.demo.repositories.SubscriptionPlanRepository;
 import com.example.demo.repositories.UserRepository;
 import com.example.demo.security.JwtUtil;
+import com.example.demo.services.EmailService;
 import com.example.demo.services.TenantRegistrationService;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -35,6 +37,10 @@ public class TenantRegistrationServiceImpl implements TenantRegistrationService 
     private final OrganisationSubscriptionRepository organisationSubscriptionRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
+    private final EmailService emailService;
+
+    @Value("${app.email.base-url:http://localhost:3000}")
+    private String emailBaseUrl;
 
     public TenantRegistrationServiceImpl(OrganisationRepository organisationRepository,
             RoleRepository roleRepository,
@@ -42,7 +48,8 @@ public class TenantRegistrationServiceImpl implements TenantRegistrationService 
             SubscriptionPlanRepository subscriptionPlanRepository,
             OrganisationSubscriptionRepository organisationSubscriptionRepository,
             PasswordEncoder passwordEncoder,
-            JwtUtil jwtUtil) {
+            JwtUtil jwtUtil,
+            EmailService emailService) {
         this.organisationRepository = organisationRepository;
         this.roleRepository = roleRepository;
         this.userRepository = userRepository;
@@ -50,6 +57,7 @@ public class TenantRegistrationServiceImpl implements TenantRegistrationService 
         this.organisationSubscriptionRepository = organisationSubscriptionRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtUtil = jwtUtil;
+        this.emailService = emailService;
     }
 
     @Override
@@ -160,6 +168,15 @@ public class TenantRegistrationServiceImpl implements TenantRegistrationService 
         response.setRole(adminRole.getName());
         response.setToken(token);
         response.setExpiresIn(expiresMillis / 1000);
+
+        Map<String, Object> model = new HashMap<>();
+        model.put("firstName", savedUser.getFirstName());
+        model.put("lastName", savedUser.getLastName());
+        model.put("organisationName", savedOrg.getName());
+        model.put("email", savedUser.getEmail());
+        model.put("loginUrl", emailBaseUrl.replaceAll("/+$", "") + "/login");
+        emailService.sendTemplate(savedUser.getEmail(), "Welcome to AssetIQ", "email/tenant-welcome", model);
+
         return response;
     }
 

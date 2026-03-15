@@ -3,6 +3,7 @@ package com.example.demo.multitenancy;
 import com.example.demo.models.User;
 import com.example.demo.repositories.OrganisationRepository;
 import com.example.demo.repositories.UserRepository;
+import io.jsonwebtoken.Claims;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -38,7 +39,6 @@ public class TenantFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
 
-        // Skip for public registration path
         String path = request.getRequestURI();
         log.debug("[TENANT_FILTER] Checking path: {}", path);
         if (path.startsWith("/api/v1/tenant") || path.startsWith("/api/v1/auth") ||
@@ -49,25 +49,30 @@ public class TenantFilter extends OncePerRequestFilter {
             return;
         }
 
-        // If user is authenticated and not anonymous, do a DB-backed lookup
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         boolean isAuthenticated = auth != null && auth.isAuthenticated() && !(auth instanceof AnonymousAuthenticationToken);
 
         if (isAuthenticated) {
-            Object principal = auth.getPrincipal();
-            String username = null;
-            if (principal instanceof String) {
-                username = (String) principal;
-            } else if (principal != null) {
-                username = principal.toString();
-            }
+            // Primary: read organisationId from the JWT claim stored by JwtAuthenticationFilter
+            // via auth.setDetails(claims). This is O(0) DB calls and is multi-tenant safe —
+            // findByEmail alone fails when the same email exists in multiple organisations.
+            UUID orgIdFromToken = extractOrgIdFromToken(auth);
 
-            if (username != null) {
-                User user = userRepository.findByEmail(username).orElse(null);
-                if (user == null) {
-                    // Token valid but user no longer exists
-                    response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "User not found");
+            if (orgIdFromToken != null) {
+                if (organisationRepository.existsById(orgIdFromToken)) {
+                    TenantContext.setOrganisationId(orgIdFromToken);
+                } else {
+                    response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Organisation not found or inactive");
                     return;
+                }
+            } else {
+                // Fallback for tokens that pre-date the organisationId claim.
+                // Scope the lookup with the X-Organisation-Id header when present to avoid
+                // NonUniqueResultException if the same email exists across organisations.
+                String email = auth.getName();
+                User user = resolveUserFallback(request, email, response);
+                if (user == null) {
+                    return; // error already written
                 }
                 if (user.getOrganisation() != null && user.getOrganisation().getId() != null) {
                     UUID orgId = user.getOrganisation().getId();
@@ -76,10 +81,8 @@ public class TenantFilter extends OncePerRequestFilter {
                     }
                 }
             }
-            // For authenticated users, NEVER fall back to header-based tenant resolution.
-            // If org could not be resolved from the user's account, deny the request below.
         } else {
-            // For non-authenticated requests (e.g. public webhook callbacks), allow header-based resolution.
+            // Unauthenticated requests (e.g. public webhook callbacks): header-based resolution only.
             String header = request.getHeader(tenantHeader);
             if (header != null && !header.isBlank()) {
                 try {
@@ -94,11 +97,11 @@ public class TenantFilter extends OncePerRequestFilter {
             }
         }
 
-        // For authenticated requests to protected paths: require a resolved tenant
         boolean isPublicPath = path.startsWith("/api/v1/tenant") || path.startsWith("/api/v1/auth")
                 || path.startsWith("/api/v1/billing/webhooks")
                 || path.startsWith("/swagger-ui") || path.startsWith("/v3/api-docs")
-                || path.startsWith("/actuator");
+                || path.startsWith("/actuator") || path.startsWith("/webjars")
+                || path.startsWith("/error") || path.equals("/");
 
         if (isAuthenticated && !isPublicPath && !TenantContext.hasOrganisationId()) {
             log.warn("[TENANT_FILTER] Tenant context could not be resolved for authenticated request to {}", path);
@@ -111,6 +114,53 @@ public class TenantFilter extends OncePerRequestFilter {
             filterChain.doFilter(request, response);
         } finally {
             TenantContext.clear();
+        }
+    }
+
+    private UUID extractOrgIdFromToken(Authentication auth) {
+        Object details = auth.getDetails();
+        if (details instanceof Claims jwtClaims) {
+            String orgIdStr = jwtClaims.get("organisationId", String.class);
+            if (orgIdStr != null && !orgIdStr.isBlank()) {
+                try {
+                    return UUID.fromString(orgIdStr);
+                } catch (IllegalArgumentException ignored) {
+                    // malformed claim — treat as missing
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Fallback user lookup for tokens without an organisationId claim.
+     * Uses the X-Organisation-Id header to scope the query when possible to avoid
+     * NonUniqueResultException in multi-tenant deployments.
+     */
+    private User resolveUserFallback(HttpServletRequest request, String email,
+                                     HttpServletResponse response) throws IOException {
+        String orgHeader = request.getHeader(tenantHeader);
+        if (orgHeader != null && !orgHeader.isBlank()) {
+            try {
+                UUID headerOrgId = UUID.fromString(orgHeader.trim());
+                User user = userRepository.findByEmailAndOrganisationId(email, headerOrgId).orElse(null);
+                if (user != null) return user;
+            } catch (IllegalArgumentException ignored) { /* bad header UUID */ }
+        }
+
+        try {
+            User user = userRepository.findByEmail(email).orElse(null);
+            if (user == null) {
+                response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "User not found");
+                return null;
+            }
+            return user;
+        } catch (Exception e) {
+            log.warn("[TENANT_FILTER] Email '{}' exists in multiple organisations. " +
+                    "Re-authenticate or provide X-Organisation-Id header.", email);
+            response.sendError(HttpServletResponse.SC_UNAUTHORIZED,
+                    "User email exists in multiple organisations. Please re-authenticate.");
+            return null;
         }
     }
 }

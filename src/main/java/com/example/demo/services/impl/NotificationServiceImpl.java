@@ -11,8 +11,10 @@ import com.example.demo.models.User;
 import com.example.demo.repositories.NotificationPreferencesRepository;
 import com.example.demo.repositories.NotificationRepository;
 import com.example.demo.repositories.UserRepository;
+import com.example.demo.services.EmailService;
 import com.example.demo.services.NotificationService;
 import jakarta.persistence.EntityNotFoundException;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -31,13 +33,19 @@ public class NotificationServiceImpl implements NotificationService {
     private final NotificationRepository notificationRepository;
     private final NotificationPreferencesRepository preferencesRepository;
     private final UserRepository userRepository;
+    private final EmailService emailService;
+
+    @Value("${app.email.base-url:http://localhost:3000}")
+    private String emailBaseUrl;
 
     public NotificationServiceImpl(NotificationRepository notificationRepository,
                                    NotificationPreferencesRepository preferencesRepository,
-                                   UserRepository userRepository) {
+                                   UserRepository userRepository,
+                                   EmailService emailService) {
         this.notificationRepository = notificationRepository;
         this.preferencesRepository = preferencesRepository;
         this.userRepository = userRepository;
+        this.emailService = emailService;
     }
 
     @Override
@@ -80,7 +88,7 @@ public class NotificationServiceImpl implements NotificationService {
 
     @Override
     public int markAllAsRead(User user, Organisation org) {
-        return notificationRepository.markAllReadByUserAndOrganisation(user, org);
+        return notificationRepository.markAllReadByUserAndOrganisation(user, org, Instant.now());
     }
 
     @Override
@@ -175,6 +183,16 @@ public class NotificationServiceImpl implements NotificationService {
             n.setEntityId(entityId);
             n.setActionUrl(actionUrl);
             notificationRepository.save(n);
+
+            if (admin.getEmail() != null && isEmailEnabled(admin, type)) {
+                Map<String, Object> model = new HashMap<>();
+                model.put("firstName", admin.getFirstName());
+                model.put("title", title);
+                model.put("message", message);
+                model.put("type", type.name().toLowerCase());
+                model.put("actionUrl", resolveActionUrl(actionUrl));
+                emailService.sendTemplate(admin.getEmail(), title, "email/notification", model);
+            }
         }
     }
 
@@ -184,6 +202,28 @@ public class NotificationServiceImpl implements NotificationService {
         NotificationPreferences prefs = new NotificationPreferences();
         prefs.setUser(user);
         return preferencesRepository.save(prefs);
+    }
+
+    private boolean isEmailEnabled(User user, NotificationType type) {
+        NotificationPreferences prefs = preferencesRepository.findByUser(user)
+                .orElseGet(() -> buildDefaultPreferences(user));
+        return switch (type) {
+            case DEPRECATION -> prefs.isEmailDeprecation();
+            case MAINTENANCE -> prefs.isEmailMaintenance();
+            case APPROVAL -> prefs.isEmailApproval();
+            case SYSTEM -> prefs.isEmailSystem();
+            case TRANSFER -> prefs.isEmailTransfer();
+            case DISPOSAL -> prefs.isEmailDisposal();
+            case PURCHASE_ORDER -> prefs.isEmailPurchaseOrder();
+        };
+    }
+
+    private String resolveActionUrl(String actionUrl) {
+        if (actionUrl == null || actionUrl.isBlank()) return null;
+        if (actionUrl.startsWith("http://") || actionUrl.startsWith("https://")) {
+            return actionUrl;
+        }
+        return emailBaseUrl.replaceAll("/+$", "") + (actionUrl.startsWith("/") ? actionUrl : "/" + actionUrl);
     }
 
     private NotificationDto toDto(Notification n) {

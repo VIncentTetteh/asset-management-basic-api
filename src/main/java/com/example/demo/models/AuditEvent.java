@@ -8,7 +8,7 @@ import lombok.Setter;
 @Entity
 @Getter
 @Setter
-@EqualsAndHashCode(callSuper = true)
+@EqualsAndHashCode(callSuper = true, onlyExplicitlyIncluded = true)
 @Table(name = "audit_event", indexes = {
         @Index(name = "idx_audit_event_org_created_at", columnList = "organisation_id, created_at"),
         @Index(name = "idx_audit_event_actor_created_at", columnList = "actor_id, created_at")

@@ -16,7 +16,7 @@ import java.util.Set;
         @UniqueConstraint(columnNames = { "tax_id", "organisation_id" }, name = "uk_supplier_taxid_per_org")
 })
 @Data
-@EqualsAndHashCode(callSuper = true)
+@EqualsAndHashCode(callSuper = true, onlyExplicitlyIncluded = true)
 public class Supplier extends BaseEntity {
 
     @Column(nullable = false)

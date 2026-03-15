@@ -15,22 +15,28 @@ import java.util.Map;
 public class JwtUtil {
 
     private final SecretKey key;
+    private final long expirationMillis;
 
-    public JwtUtil(@Value("${app.jwt.secret}") String secret) {
+    public JwtUtil(@Value("${app.jwt.secret}") String secret,
+                   @Value("${app.jwt.expiration:86400000}") long expirationMillis) {
+        // Validate secret entropy at startup
+        JwtSecretValidator.validateSecretEntropy(secret);
+        
         byte[] keyBytes = secret.getBytes(StandardCharsets.UTF_8);
-        if (keyBytes.length < 32) {
-            throw new IllegalArgumentException(
-                    "JWT secret must be at least 32 characters (256 bits) for HS256. Current length: " + keyBytes.length);
-        }
         this.key = Keys.hmacShaKeyFor(keyBytes);
+        this.expirationMillis = expirationMillis;
     }
 
     public String generateToken(String subject, Map<String, Object> claims, long expirationMillis) {
         Date now = new Date();
+        String jti = java.util.UUID.randomUUID().toString();  // JWT ID for tracking
+        
         return Jwts.builder()
                 .claims(claims)
                 .subject(subject)
+                .id(jti)  // Unique token identifier
                 .issuedAt(now)
+                .notBefore(now)  // Not valid before now
                 .expiration(new Date(now.getTime() + expirationMillis))
                 .signWith(key)
                 .compact();
@@ -44,6 +50,10 @@ public class JwtUtil {
         return parseToken(token).getSubject();
     }
 
+    public String extractJti(String token) {
+        return parseToken(token).getId();
+    }
+
     public boolean isTokenValid(String token) {
         try {
             parseToken(token);
@@ -55,6 +65,10 @@ public class JwtUtil {
 
     public java.util.Date getExpiration(String token) {
         return parseToken(token).getExpiration();
+    }
+
+    public long getExpirationMillis() {
+        return expirationMillis;
     }
 }
 

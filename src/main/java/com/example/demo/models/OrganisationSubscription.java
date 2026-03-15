@@ -11,7 +11,7 @@ import java.time.Instant;
 @Entity
 @Getter
 @Setter
-@EqualsAndHashCode(callSuper = true)
+@EqualsAndHashCode(callSuper = true, onlyExplicitlyIncluded = true)
 @Table(name = "organisation_subscription", indexes = {
         @Index(name = "idx_org_subscription_org_status", columnList = "organisation_id,status")
 })

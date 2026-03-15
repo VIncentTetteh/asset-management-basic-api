@@ -65,10 +65,10 @@ public class ApiAuditInterceptor implements HandlerInterceptor {
             event.setHandler(resolveHandler(handler));
             event.setResponseStatus(response.getStatus());
             event.setSuccess(ex == null && response.getStatus() < 400);
-            event.setMessage(ex != null ? abbreviate(ex.getMessage(), 500) : null);
+            event.setMessage(ex != null ? abbreviate(ex.getMessage()) : null);
             event.setRequestId(response.getHeader(RequestCorrelationIdInterceptor.REQUEST_ID_HEADER));
             event.setClientIp(clientIp(request));
-            event.setUserAgent(abbreviate(request.getHeader("User-Agent"), 500));
+            event.setUserAgent(abbreviate(request.getHeader("User-Agent")));
 
             auditEventRepository.save(event);
         } catch (Exception saveEx) {
@@ -132,11 +132,11 @@ public class ApiAuditInterceptor implements HandlerInterceptor {
         return request.getRemoteAddr();
     }
 
-    private String abbreviate(String value, int maxLen) {
+    private String abbreviate(String value) {
         if (value == null) {
             return null;
         }
-        return value.length() <= maxLen ? value : value.substring(0, maxLen);
+        return value.length() <= 500 ? value : value.substring(0, 500);
     }
 }
 

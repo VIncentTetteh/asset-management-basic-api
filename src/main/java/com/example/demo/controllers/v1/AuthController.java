@@ -8,6 +8,7 @@ import com.example.demo.repositories.OrganisationRepository;
 import com.example.demo.repositories.RoleRepository;
 import com.example.demo.security.JwtBlacklist;
 import com.example.demo.security.JwtUtil;
+import com.example.demo.services.EmailService;
 import com.example.demo.enums.UserStatus;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -19,15 +20,25 @@ import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import org.springframework.beans.factory.annotation.Value;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.security.SecureRandom;
+import java.security.InvalidKeyException;
 import java.time.Instant;
 import java.util.*;
+import java.util.Base64;
 
 @RestController
 @RequestMapping("/api/v1/auth")
 public class AuthController {
+
+    private static final Logger log = LoggerFactory.getLogger(AuthController.class);
 
     private final UserRepository userRepository;
     private final OrganisationRepository organisationRepository;
@@ -35,19 +46,27 @@ public class AuthController {
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
     private final JwtBlacklist jwtBlacklist;
+    private final EmailService emailService;
 
     @Value("${app.jwt.expiration:86400000}")
     private long jwtExpirationMillis;
 
+    @Value("${app.jwt.secret}")
+    private String jwtSecret;
+
+    @Value("${app.email.base-url:http://localhost:3000}")
+    private String emailBaseUrl;
+
     public AuthController(UserRepository userRepository, OrganisationRepository organisationRepository,
             RoleRepository roleRepository, PasswordEncoder passwordEncoder, JwtUtil jwtUtil,
-            JwtBlacklist jwtBlacklist) {
+            JwtBlacklist jwtBlacklist, EmailService emailService) {
         this.userRepository = userRepository;
         this.organisationRepository = organisationRepository;
         this.roleRepository = roleRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtUtil = jwtUtil;
         this.jwtBlacklist = jwtBlacklist;
+        this.emailService = emailService;
     }
 
     /**
@@ -109,18 +128,38 @@ public class AuthController {
     }
 
     /**
-     * Login user and return JWT token
+     * Login user and return JWT token.
+     * In multi-tenant deployments the same email can exist in multiple organisations.
+     * Supply {@code organisationId} to disambiguate; it is required when the email
+     * belongs to more than one organisation.
      */
     @PostMapping("/login")
     public ResponseEntity<?> login(@Valid @RequestBody LoginRequest request) {
-        // Find user by email
-        var userOpt = userRepository.findByEmail(request.getEmail());
-        if (userOpt.isEmpty()) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("error", "Invalid email or password"));
+        User user;
+        if (request.getOrganisationId() != null) {
+            // Scoped lookup — unambiguous even in multi-tenant deployments
+            var userOpt = userRepository.findByEmailAndOrganisationId(
+                    request.getEmail(), request.getOrganisationId());
+            if (userOpt.isEmpty()) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(Map.of("error", "Invalid email or password"));
+            }
+            user = userOpt.get();
+        } else {
+            // No org hint — load all accounts for this email and match by password
+            List<User> matches = userRepository.findAllByEmail(request.getEmail());
+            if (matches.isEmpty()) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(Map.of("error", "Invalid email or password"));
+            }
+            if (matches.size() > 1) {
+                return ResponseEntity.status(HttpStatus.CONFLICT)
+                        .body(Map.of("error",
+                                "This email is registered in multiple organisations. " +
+                                "Please include 'organisationId' in your login request."));
+            }
+            user = matches.get(0);
         }
-
-        User user = userOpt.get();
 
         // Verify password
         if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
@@ -182,14 +221,27 @@ public class AuthController {
         }
 
         String token = authHeader.substring(7);
-        String email = jwtUtil.extractUsername(token);
-
-        if (email == null) {
+        io.jsonwebtoken.Claims parsedClaims;
+        try {
+            parsedClaims = jwtUtil.parseToken(token);
+        } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("error", "Invalid token"));
+                    .body(Map.of("error", "Invalid or expired token"));
         }
+        String email = parsedClaims.getSubject();
+        String orgIdStr = parsedClaims.get("organisationId", String.class);
 
-        var userOpt = userRepository.findByEmail(email);
+        Optional<User> userOpt;
+        if (orgIdStr != null && !orgIdStr.isBlank()) {
+            try {
+                userOpt = userRepository.findByEmailAndOrganisationId(
+                        email, UUID.fromString(orgIdStr));
+            } catch (IllegalArgumentException e) {
+                userOpt = Optional.empty();
+            }
+        } else {
+            userOpt = userRepository.findByEmail(email);
+        }
         if (userOpt.isEmpty()) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("error", "User not found"));
@@ -219,24 +271,36 @@ public class AuthController {
     }
 
     /**
-     * Request a password reset token
+     * Request a password reset token.
+     * In multi-tenant deployments the same email may exist in multiple organisations.
+     * A reset token is issued for every matching account so the user receives instructions
+     * regardless of which organisation they intended.
      */
     @PostMapping("/forgot-password")
     public ResponseEntity<?> forgotPassword(@Valid @RequestBody ForgotPasswordRequest request) {
         // Always return the same response to prevent user-enumeration attacks.
-        // The reset token is delivered via email only — never exposed in the HTTP response.
-        var userOpt = userRepository.findByEmail(request.getEmail());
-        if (userOpt.isPresent()) {
-            User user = userOpt.get();
-            String rawToken = UUID.randomUUID().toString();
-
-            // Store only the SHA-256 hash — protects against DB breach exposing usable tokens.
-            user.setResetPasswordToken(sha256Hex(rawToken));
-            user.setResetPasswordTokenExpiry(Instant.now().plusSeconds(24 * 60 * 60));
-            userRepository.save(user);
-
-            // TODO: Send rawToken to user.getEmail() via email service.
-            // rawToken must NEVER be logged or returned in the HTTP response.
+        // Reset tokens are delivered via email only — never exposed in the HTTP response.
+        List<User> users = userRepository.findAllByEmail(request.getEmail());
+        for (User user : users) {
+            try {
+                String resetToken = generateSecureResetToken(user);
+                // Store only the SHA-256 hash — protects against DB breach exposing usable tokens.
+                user.setResetPasswordToken(sha256Hex(resetToken));
+                user.setResetPasswordTokenExpiry(Instant.now().plusSeconds(24 * 60 * 60));
+                user.setResetPasswordTokenUsed(false);  // Mark as unused
+                userRepository.save(user);
+                String resetUrl = emailBaseUrl.replaceAll("/+$", "") +
+                        "/reset-password?token=" + resetToken;
+                Map<String, Object> model = new HashMap<>();
+                model.put("firstName", user.getFirstName());
+                model.put("email", user.getEmail());
+                model.put("resetUrl", resetUrl);
+                model.put("expiresHours", 24);
+                emailService.sendTemplate(user.getEmail(), "Reset your password", "email/password-reset", model);
+            } catch (Exception e) {
+                // Log error but continue processing other users
+                log.error("[AUTH] Failed to generate reset token for user {}", user.getId());
+            }
         }
 
         return ResponseEntity.ok(Map.of(
@@ -244,7 +308,8 @@ public class AuthController {
     }
 
     /**
-     * Reset password using the token
+     * Reset password using the token.
+     * Enforces single-use of reset tokens to prevent reuse attacks.
      */
     @PostMapping("/reset-password")
     public ResponseEntity<?> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
@@ -255,6 +320,12 @@ public class AuthController {
 
         User user = userOpt.get();
 
+        // Check if token was already used
+        if (user.getResetPasswordTokenUsed() != null && user.getResetPasswordTokenUsed()) {
+            log.warn("[AUTH] Attempt to reuse password reset token for user {}", user.getId());
+            return ResponseEntity.badRequest().body(Map.of("error", "Reset token has already been used"));
+        }
+
         // Check if token expired
         if (user.getResetPasswordTokenExpiry() == null || user.getResetPasswordTokenExpiry().isBefore(Instant.now())) {
             return ResponseEntity.badRequest().body(Map.of("error", "Reset token has expired"));
@@ -263,11 +334,13 @@ public class AuthController {
         // Encode new password
         user.setPasswordHash(passwordEncoder.encode(request.getNewPassword()));
 
-        // Clear token fields
+        // Clear token fields and mark as used
         user.setResetPasswordToken(null);
         user.setResetPasswordTokenExpiry(null);
+        user.setResetPasswordTokenUsed(true);
         userRepository.save(user);
 
+        log.info("[AUTH] Password reset successful for user {}", user.getId());
         return ResponseEntity.ok(Map.of("message", "Password has been successfully reset"));
     }
 
@@ -282,14 +355,27 @@ public class AuthController {
         }
 
         String token = authHeader.substring(7);
-        String email = jwtUtil.extractUsername(token);
-
-        if (email == null) {
+        io.jsonwebtoken.Claims profileClaims;
+        try {
+            profileClaims = jwtUtil.parseToken(token);
+        } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("error", "Invalid token"));
+                    .body(Map.of("error", "Invalid or expired token"));
         }
+        String email = profileClaims.getSubject();
+        String profileOrgIdStr = profileClaims.get("organisationId", String.class);
 
-        var userOpt = userRepository.findByEmail(email);
+        Optional<User> userOpt;
+        if (profileOrgIdStr != null && !profileOrgIdStr.isBlank()) {
+            try {
+                userOpt = userRepository.findByEmailAndOrganisationId(
+                        email, UUID.fromString(profileOrgIdStr));
+            } catch (IllegalArgumentException e) {
+                userOpt = Optional.empty();
+            }
+        } else {
+            userOpt = userRepository.findByEmail(email);
+        }
         if (userOpt.isEmpty()) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
                     .body(Map.of("error", "User not found"));
@@ -402,7 +488,12 @@ public class AuthController {
         @NotBlank(message = "Password is required")
         public String password;
 
-        // Constructor
+        /**
+         * Optional in single-tenant deployments.
+         * Required when the same email is registered in more than one organisation.
+         */
+        public UUID organisationId;
+
         public LoginRequest() {
         }
 
@@ -411,13 +502,16 @@ public class AuthController {
             this.password = password;
         }
 
-        // Getters
         public String getEmail() {
             return email;
         }
 
         public String getPassword() {
             return password;
+        }
+
+        public UUID getOrganisationId() {
+            return organisationId;
         }
     }
 
@@ -473,6 +567,33 @@ public class AuthController {
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 not available", e);
         }
+    }
+
+    /**
+     * Generate a cryptographically secure password reset token using HMAC-SHA256.
+     * Combines random bytes with HMAC signature to prevent forgery.
+     */
+    private String generateSecureResetToken(User user) throws Exception {
+        // 1. Generate 32 random bytes
+        SecureRandom random = new SecureRandom();
+        byte[] randomBytes = new byte[32];
+        random.nextBytes(randomBytes);
+
+        // 2. Create HMAC signature: HMAC-SHA256(randomBytes || userId || timestamp)
+        String data = Base64.getEncoder().encodeToString(randomBytes) + 
+                      user.getId() + 
+                      System.currentTimeMillis();
+
+        Mac mac = Mac.getInstance("HmacSHA256");
+        mac.init(new SecretKeySpec(jwtSecret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+        byte[] signature = mac.doFinal(data.getBytes(StandardCharsets.UTF_8));
+
+        // 3. Combine: randomBytes + signature (return as Base64 URL-safe)
+        byte[] combined = new byte[randomBytes.length + signature.length];
+        System.arraycopy(randomBytes, 0, combined, 0, randomBytes.length);
+        System.arraycopy(signature, 0, combined, randomBytes.length, signature.length);
+
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(combined);
     }
 
     // Helper method

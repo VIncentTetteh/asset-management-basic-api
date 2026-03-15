@@ -11,6 +11,9 @@ import com.example.demo.repositories.MaintenanceRecordRepository;
 import com.example.demo.repositories.OrganisationRepository;
 import com.example.demo.repositories.PurchaseOrderRepository;
 import com.example.demo.repositories.SupplierRepository;
+import com.example.demo.storage.FileStorageService;
+import com.example.demo.storage.StoredObject;
+import org.springframework.beans.factory.annotation.Value;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
@@ -25,6 +28,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -36,23 +40,32 @@ public class ReportGeneratorService {
     private final OrganisationRepository organisationRepository;
     private final PurchaseOrderRepository purchaseOrderRepository;
     private final SupplierRepository supplierRepository;
+    private final FileStorageService storageService;
 
     // In-memory cache: reportId → (contentType, bytes)
     private final Map<UUID, ReportEntry> cache = new ConcurrentHashMap<>();
+
+    @Value("${app.storage.s3.report-prefix:reports}")
+    private String reportPrefix;
+
+    @Value("${app.storage.s3.presign-minutes:15}")
+    private long presignMinutes;
 
     public ReportGeneratorService(AssetRepository assetRepository,
                                   MaintenanceRecordRepository maintenanceRecordRepository,
                                   OrganisationRepository organisationRepository,
                                   PurchaseOrderRepository purchaseOrderRepository,
-                                  SupplierRepository supplierRepository) {
+                                  SupplierRepository supplierRepository,
+                                  FileStorageService storageService) {
         this.assetRepository = assetRepository;
         this.maintenanceRecordRepository = maintenanceRecordRepository;
         this.organisationRepository = organisationRepository;
         this.purchaseOrderRepository = purchaseOrderRepository;
         this.supplierRepository = supplierRepository;
+        this.storageService = storageService;
     }
 
-    public record ReportEntry(String contentType, String filename, byte[] bytes) {}
+    public record ReportEntry(String contentType, String filename, String storageKey) {}
 
     // ── Public generate methods ───────────────────────────────────────────────
 
@@ -104,6 +117,22 @@ public class ReportGeneratorService {
         return cache.get(reportId);
     }
 
+    public Optional<String> createDownloadUrl(UUID reportId) {
+        ReportEntry entry = cache.get(reportId);
+        if (entry == null) return Optional.empty();
+        return storageService.createPresignedGetUrl(
+                entry.storageKey(),
+                entry.filename(),
+                entry.contentType(),
+                Duration.ofMinutes(presignMinutes));
+    }
+
+    public Optional<StoredObject> download(UUID reportId) {
+        ReportEntry entry = cache.get(reportId);
+        if (entry == null) return Optional.empty();
+        return storageService.get(entry.storageKey());
+    }
+
     public UUID generatePurchaseOrderReport(String format) throws IOException {
         Organisation org = requireOrg();
         List<PurchaseOrder> orders = new ArrayList<>(
@@ -152,9 +181,20 @@ public class ReportGeneratorService {
     }
 
     private UUID store(String contentType, String filename, byte[] bytes) {
+        Organisation org = requireOrg();
         UUID id = UUID.randomUUID();
-        cache.put(id, new ReportEntry(contentType, filename, bytes));
+        String key = buildReportKey(org.getId(), id, filename);
+        storageService.store(key, bytes, contentType, filename, Map.of(
+                "organisationId", org.getId().toString(),
+                "reportId", id.toString()
+        ));
+        cache.put(id, new ReportEntry(contentType, filename, key));
         return id;
+    }
+
+    private String buildReportKey(UUID orgId, UUID reportId, String filename) {
+        String clean = filename == null ? "report.bin" : filename.replaceAll("[^A-Za-z0-9._-]", "_");
+        return reportPrefix + "/" + orgId + "/" + reportId + "/" + clean;
     }
 
     private static String safe(Object v) {

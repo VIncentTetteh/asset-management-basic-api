@@ -121,10 +121,16 @@ public class ReportsController {
     private ResponseEntity<?> serveReport(UUID reportId) {
         ReportGeneratorService.ReportEntry entry = reportGeneratorService.get(reportId);
         if (entry == null) return ResponseEntity.notFound().<byte[]>build();
-        return ResponseEntity.ok()
-                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + entry.filename() + "\"")
-                .header(HttpHeaders.CONTENT_TYPE, entry.contentType())
-                .body(entry.bytes());
+        return reportGeneratorService.createDownloadUrl(reportId)
+                .<ResponseEntity<?>>map(url -> ResponseEntity.status(HttpStatus.FOUND)
+                        .header(HttpHeaders.LOCATION, url)
+                        .build())
+                .orElseGet(() -> reportGeneratorService.download(reportId)
+                        .<ResponseEntity<?>>map(obj -> ResponseEntity.ok()
+                                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + entry.filename() + "\"")
+                                .header(HttpHeaders.CONTENT_TYPE, entry.contentType())
+                                .body(obj.bytes()))
+                        .orElseGet(() -> ResponseEntity.notFound().build()));
     }
 
     private static String formatOf(Map<String, Object> request) {

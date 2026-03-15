@@ -12,7 +12,7 @@ import java.time.LocalDate;
 @Entity
 @Table(name = "asset_transfer")
 @Data
-@EqualsAndHashCode(callSuper = true)
+@EqualsAndHashCode(callSuper = true, onlyExplicitlyIncluded = true)
 public class AssetTransfer extends BaseEntity {
 
     @ManyToOne

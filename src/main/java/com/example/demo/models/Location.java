@@ -11,7 +11,7 @@ import java.util.Set;
 @Entity
 @Table(name = "location")
 @Data
-@EqualsAndHashCode(callSuper = true)
+@EqualsAndHashCode(callSuper = true, onlyExplicitlyIncluded = true)
 public class Location extends BaseEntity {
 
     @Column(nullable = false)

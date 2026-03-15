@@ -10,7 +10,7 @@ import lombok.Setter;
 @Entity
 @Getter
 @Setter
-@EqualsAndHashCode(callSuper = true)
+@EqualsAndHashCode(callSuper = true, onlyExplicitlyIncluded = true)
 @Table(name = "subscription_plan", uniqueConstraints = {
         @UniqueConstraint(name = "uk_subscription_plan_code", columnNames = "code")
 })

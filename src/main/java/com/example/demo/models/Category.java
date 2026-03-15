@@ -9,7 +9,7 @@ import java.util.Set;
 @Entity
 @Table(name = "category")
 @Data
-@EqualsAndHashCode(callSuper = true)
+@EqualsAndHashCode(callSuper = true, onlyExplicitlyIncluded = true)
 public class Category extends BaseEntity {
 
     @Column(nullable = false)

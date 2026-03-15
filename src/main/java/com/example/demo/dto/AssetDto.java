@@ -67,4 +67,8 @@ public class AssetDto {
     private UUID organisationId;
 
     private UUID purchaseOrderId;
+
+    private com.example.demo.enums.ProcurementType procurementType;
+
+    private String costCenter;
 }

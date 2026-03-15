@@ -16,7 +16,7 @@ import java.util.Set;
         @UniqueConstraint(columnNames = { "employee_id", "organisation_id" }, name = "uk_user_employeeid_per_org")
 })
 @Data
-@EqualsAndHashCode(callSuper = true)
+@EqualsAndHashCode(callSuper = true, onlyExplicitlyIncluded = true)
 public class User extends BaseEntity {
 
     @Column(nullable = false)
@@ -54,6 +54,9 @@ public class User extends BaseEntity {
     @Column(name = "reset_password_token_expiry")
     private Instant resetPasswordTokenExpiry;
 
+    @Column(name = "reset_password_token_used", columnDefinition = "boolean default false")
+    private Boolean resetPasswordTokenUsed = false;
+
     @ManyToOne(fetch = FetchType.LAZY)
     private Organisation organisation;
 
@@ -62,5 +65,13 @@ public class User extends BaseEntity {
 
     @OneToMany(mappedBy = "assignedUser")
     private Set<Asset> assignedAssets;
+
+    /** Whether TOTP-based MFA is enabled for this user. */
+    @Column(name = "mfa_enabled", columnDefinition = "boolean default false")
+    private Boolean mfaEnabled = false;
+
+    /** Base32-encoded TOTP secret (stored encrypted in production via column-level encryption). */
+    @Column(name = "mfa_secret", length = 100)
+    private String mfaSecret;
 
 }

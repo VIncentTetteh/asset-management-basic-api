@@ -6,7 +6,10 @@ import com.example.demo.models.Department;
 import com.example.demo.models.Organisation;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -63,4 +66,12 @@ public interface AssetRepository extends JpaRepository<Asset, UUID> {
         Set<Asset> findByOrganisationAndCategoryIdAndDeletedAtIsNull(Organisation organisation, UUID categoryId);
 
         long countByOrganisationAndDeletedAtIsNull(Organisation organisation);
+
+        /** Assets whose warranty expires on or before {@code cutoff} and are not yet disposed. */
+        @Query("SELECT a FROM Asset a WHERE a.deletedAt IS NULL AND a.warrantyExpiryDate IS NOT NULL AND a.warrantyExpiryDate <= :cutoff AND a.status <> 'DISPOSED'")
+        List<Asset> findWarrantyExpiringSoon(@Param("cutoff") LocalDate cutoff);
+
+        /** Active assets with purchaseDate + usefulLifeMonths set — caller filters for EOL in Java. */
+        @Query("SELECT a FROM Asset a WHERE a.deletedAt IS NULL AND a.purchaseDate IS NOT NULL AND a.usefulLifeMonths IS NOT NULL AND a.status <> 'DISPOSED'")
+        List<Asset> findActiveAssetsWithUsefulLife();
 }

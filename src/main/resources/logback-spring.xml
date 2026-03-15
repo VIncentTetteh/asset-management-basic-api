@@ -5,6 +5,7 @@
 
     <!-- Console appender for development -->
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <filter class="com.example.demo.config.SensitiveDataFilter"/>
         <encoder>
             <pattern>${LOG_PATTERN}</pattern>
             <charset>utf8</charset>
@@ -13,6 +14,7 @@
 
     <!-- File appender -->
     <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <filter class="com.example.demo.config.SensitiveDataFilter"/>
         <file>${LOG_FILE}</file>
         <encoder>
             <pattern>${LOG_PATTERN}</pattern>

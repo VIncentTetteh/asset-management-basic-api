@@ -8,15 +8,18 @@ import com.example.demo.models.*;
 import com.example.demo.repositories.*;
 import com.example.demo.services.AssetImportService;
 import com.example.demo.services.AssetService;
+import com.example.demo.storage.FileStorageService;
 import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.io.ByteArrayInputStream;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -73,6 +76,10 @@ public class AssetImportServiceImpl extends com.example.demo.services.TenantAwar
     private final SupplierRepository supplierRepository;
     private final DepartmentRepository departmentRepository;
     private final UserRepository userRepository;
+    private final FileStorageService storageService;
+
+    @Value("${app.storage.s3.import-prefix:imports}")
+    private String importPrefix;
 
     public AssetImportServiceImpl(
             AssetService assetService,
@@ -81,7 +88,8 @@ public class AssetImportServiceImpl extends com.example.demo.services.TenantAwar
             SupplierRepository supplierRepository,
             DepartmentRepository departmentRepository,
             UserRepository userRepository,
-            OrganisationRepository organisationRepository) {
+            OrganisationRepository organisationRepository,
+            FileStorageService storageService) {
         super(organisationRepository);
         this.assetService = assetService;
         this.categoryRepository = categoryRepository;
@@ -89,6 +97,7 @@ public class AssetImportServiceImpl extends com.example.demo.services.TenantAwar
         this.supplierRepository = supplierRepository;
         this.departmentRepository = departmentRepository;
         this.userRepository = userRepository;
+        this.storageService = storageService;
     }
 
     @Override
@@ -115,7 +124,22 @@ public class AssetImportServiceImpl extends com.example.demo.services.TenantAwar
 
         LookupCache cache = buildCache(org);
 
-        try (Workbook workbook = new XSSFWorkbook(file.getInputStream())) {
+        byte[] fileBytes;
+        try {
+            fileBytes = file.getBytes();
+        } catch (IOException e) {
+            result.getErrors().add(new RowError(0, "Failed to read uploaded file"));
+            return result;
+        }
+
+        String cleanName = filename.replaceAll("[^A-Za-z0-9._-]", "_");
+        String key = importPrefix + "/" + org.getId() + "/" + UUID.randomUUID() + "/" + cleanName;
+        storageService.store(key, fileBytes, file.getContentType(), cleanName, Map.of(
+                "organisationId", org.getId().toString(),
+                "originalFilename", cleanName
+        ));
+
+        try (Workbook workbook = new XSSFWorkbook(new ByteArrayInputStream(fileBytes))) {
             Sheet sheet = workbook.getSheetAt(0);
             if (sheet == null) {
                 result.getErrors().add(new RowError(0, "Workbook has no sheets"));

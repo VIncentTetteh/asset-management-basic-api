@@ -1,6 +1,7 @@
 package com.example.demo.controllers.v1;
 
 import com.example.demo.dto.*;
+import com.example.demo.security.WebhookSignatureValidator;
 import com.example.demo.services.BillingService;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
@@ -19,9 +20,11 @@ public class BillingController {
     private static final Logger log = LoggerFactory.getLogger(BillingController.class);
 
     private final BillingService billingService;
+    private final WebhookSignatureValidator webhookSignatureValidator;
 
-    public BillingController(BillingService billingService) {
+    public BillingController(BillingService billingService, WebhookSignatureValidator webhookSignatureValidator) {
         this.billingService = billingService;
+        this.webhookSignatureValidator = webhookSignatureValidator;
     }
 
     @GetMapping("/plans")
@@ -58,12 +61,25 @@ public class BillingController {
     public ResponseEntity<Void> paystackWebhook(
             @RequestHeader(value = "x-paystack-signature", required = false) String signature,
             @RequestBody String payload) {
+        
+        // Step 1: Validate webhook signature FIRST
+        if (signature == null || signature.isBlank()) {
+            log.warn("[WEBHOOK] Rejected Paystack webhook: missing X-Paystack-Signature header");
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+        
+        if (!webhookSignatureValidator.isValidPaystackSignature(payload, signature)) {
+            log.warn("[WEBHOOK] Rejected Paystack webhook: invalid signature");
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+        
+        // Step 2: Signature is valid, process webhook
         try {
             billingService.handlePaystackWebhook(signature, payload);
+            log.info("[WEBHOOK] Paystack webhook processed successfully");
         } catch (IllegalArgumentException e) {
-            // Signature missing or invalid — log and reject so Paystack doesn't retry a bad request.
-            log.warn("[WEBHOOK] Rejected Paystack webhook: {}", e.getMessage());
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+            log.warn("[WEBHOOK] Webhook validation error: {}", e.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
         } catch (Exception e) {
             // Processing error — log it but return 200 so Paystack does not flood us with retries.
             // The handler is idempotent; Paystack will re-deliver if needed.

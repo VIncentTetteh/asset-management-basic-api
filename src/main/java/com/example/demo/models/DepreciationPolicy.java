@@ -11,7 +11,7 @@ import java.util.Set;
 @Entity
 @Table(name = "depreciation_policy")
 @Data
-@EqualsAndHashCode(callSuper = true)
+@EqualsAndHashCode(callSuper = true, onlyExplicitlyIncluded = true)
 public class DepreciationPolicy extends BaseEntity {
 
     @Column(nullable = false)

@@ -76,10 +76,12 @@ public class BulkOperationsController {
             if (entry == null) {
                 return ResponseEntity.internalServerError().build();
             }
-            return ResponseEntity.ok()
-                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + entry.filename() + "\"")
-                    .contentType(MediaType.parseMediaType(entry.contentType()))
-                    .body(entry.bytes());
+            return reportGeneratorService.download(reportId)
+                    .map(obj -> ResponseEntity.ok()
+                            .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + entry.filename() + "\"")
+                            .contentType(MediaType.parseMediaType(entry.contentType()))
+                            .body(obj.bytes()))
+                    .orElseGet(() -> ResponseEntity.internalServerError().build());
         } catch (IOException e) {
             log.error("[BulkExport] Failed to generate asset export", e);
             return ResponseEntity.internalServerError().build();
@@ -100,10 +102,12 @@ public class BulkOperationsController {
             if (entry == null) {
                 return ResponseEntity.internalServerError().build();
             }
-            return ResponseEntity.ok()
-                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + entry.filename() + "\"")
-                    .contentType(MediaType.parseMediaType(entry.contentType()))
-                    .body(entry.bytes());
+            return reportGeneratorService.download(reportId)
+                    .map(obj -> ResponseEntity.ok()
+                            .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + entry.filename() + "\"")
+                            .contentType(MediaType.parseMediaType(entry.contentType()))
+                            .body(obj.bytes()))
+                    .orElseGet(() -> ResponseEntity.internalServerError().build());
         } catch (IOException e) {
             log.error("[BulkExport] Failed to generate PO export", e);
             return ResponseEntity.internalServerError().build();
@@ -123,10 +127,12 @@ public class BulkOperationsController {
             if (entry == null) {
                 return ResponseEntity.internalServerError().build();
             }
-            return ResponseEntity.ok()
-                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + entry.filename() + "\"")
-                    .contentType(MediaType.parseMediaType(entry.contentType()))
-                    .body(entry.bytes());
+            return reportGeneratorService.download(reportId)
+                    .map(obj -> ResponseEntity.ok()
+                            .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + entry.filename() + "\"")
+                            .contentType(MediaType.parseMediaType(entry.contentType()))
+                            .body(obj.bytes()))
+                    .orElseGet(() -> ResponseEntity.internalServerError().build());
         } catch (IOException e) {
             log.error("[BulkExport] Failed to generate supplier export", e);
             return ResponseEntity.internalServerError().build();

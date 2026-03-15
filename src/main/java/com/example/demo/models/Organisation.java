@@ -12,7 +12,7 @@ import java.util.Set;
 @Entity
 @Table(name = "organisation")
 @Data
-@EqualsAndHashCode(callSuper = true)
+@EqualsAndHashCode(callSuper = true, onlyExplicitlyIncluded = true)
 public class Organisation extends BaseEntity {
 
     @Column(nullable = false, unique = true)

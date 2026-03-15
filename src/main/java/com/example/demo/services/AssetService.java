@@ -1,6 +1,7 @@
 package com.example.demo.services;
 
 import com.example.demo.dto.AssetDto;
+import com.example.demo.dto.AssetHistoryEventDto;
 import com.example.demo.enums.AssetStatus;
 
 import java.util.List;
@@ -28,4 +29,6 @@ public interface AssetService {
     AssetDto patch(UUID id, AssetDto dto);
 
     void delete(UUID id);
+
+    List<AssetHistoryEventDto> getHistory(UUID assetId);
 }

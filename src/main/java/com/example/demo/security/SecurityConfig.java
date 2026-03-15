@@ -43,12 +43,20 @@ public class SecurityConfig {
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests((authz) -> authz
+                        // Swagger UI and API Documentation
+                        .requestMatchers("/swagger-ui.html").permitAll()
+                        .requestMatchers("/swagger-ui/**").permitAll()
+                        .requestMatchers("/v3/api-docs/**").permitAll()
+                        .requestMatchers("/webjars/**").permitAll()
+                        // Public API endpoints
                         .requestMatchers("/api/v1/tenant/**").permitAll()
                         .requestMatchers("/api/v1/auth/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/billing/webhooks/paystack").permitAll()
                         .requestMatchers("/api/info", "/api/cache/ping", "/api/db/hits").permitAll()
-                        .requestMatchers("/swagger-ui.html/**", "/v3/api-docs/**", "/actuator/health", "/error").permitAll()
+                        .requestMatchers("/actuator/health").permitAll()
+                        .requestMatchers("/error").permitAll()
                         .requestMatchers("/api/v1/health", "/api/v1/health/**").permitAll()
+                        // All other requests require authentication
                         .anyRequest().authenticated())
                 .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterAfter(tenantFilter, JwtAuthenticationFilter.class);

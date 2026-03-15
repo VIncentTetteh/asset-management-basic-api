@@ -20,7 +20,7 @@ import java.time.LocalDate;
 @Data
 @Setter
 @Getter
-@EqualsAndHashCode(callSuper = true)
+@EqualsAndHashCode(callSuper = true, onlyExplicitlyIncluded = true)
 public class Asset extends BaseEntity {
 
     @Column(nullable = false)
@@ -102,5 +102,19 @@ public class Asset extends BaseEntity {
      */
     @ManyToOne(fetch = FetchType.LAZY)
     private PurchaseOrder purchaseOrder;
+
+    /**
+     * Whether this asset was acquired as CAPEX (owned/depreciated) or OPEX
+     * (leased/subscribed). Required for financial reporting in regulated institutions.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(length = 10)
+    private ProcurementType procurementType;
+
+    /**
+     * Cost centre / GL code for financial allocation (e.g. "IT-OPS-001").
+     */
+    @Column(length = 100)
+    private String costCenter;
 
 }
