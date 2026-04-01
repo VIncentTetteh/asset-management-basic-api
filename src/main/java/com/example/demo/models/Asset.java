@@ -9,6 +9,7 @@ import lombok.Setter;
 
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDate;
 
 @Entity
@@ -117,4 +118,35 @@ public class Asset extends BaseEntity {
     @Column(length = 100)
     private String costCenter;
 
+    // ── Asset Bundling ────────────────────────────────────────────────────────
+
+    /** Parent asset for bundle hierarchies (null = top-level asset). */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "parent_asset_id")
+    private Asset parentAsset;
+
+    // ── Insurance Tracking ────────────────────────────────────────────────────
+
+    /** Insurance policy expiry date — drives insurance renewal alerts. */
+    private LocalDate insurancePolicyExpiry;
+
+    /** Annual insurance premium for TCO calculation. */
+    @Column(precision = 15, scale = 2)
+    private BigDecimal insurancePremiumPerYear;
+
+    // ── TCO (Total Cost of Ownership) ─────────────────────────────────────────
+
+    /** Configurable daily downtime cost for TCO calculation. */
+    @Column(precision = 15, scale = 2)
+    private BigDecimal downtimeCostPerDay;
+
+    // ── QR Scan Audit ─────────────────────────────────────────────────────────
+
+    /** Timestamp of the most recent QR scan. */
+    private Instant lastScannedAt;
+
+    /** User who performed the most recent QR scan. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "last_scanned_by_id")
+    private User lastScannedBy;
 }

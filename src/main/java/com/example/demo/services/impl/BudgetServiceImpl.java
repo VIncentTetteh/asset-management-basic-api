@@ -80,6 +80,7 @@ public class BudgetServiceImpl extends TenantAwareService implements BudgetServi
         if (dto.getPeriodStart() != null) budget.setPeriodStart(dto.getPeriodStart());
         if (dto.getPeriodEnd() != null) budget.setPeriodEnd(dto.getPeriodEnd());
         if (dto.getStatus() != null) budget.setStatus(dto.getStatus());
+        if (dto.getFiscalYear() != null) budget.setFiscalYear(dto.getFiscalYear());
         if (dto.getDepartmentId() != null) {
             departmentRepository.findAllByOrganisationAndDeletedAtIsNull(
                             organisationRepository.findByIdAndDeletedAtIsNull(org.getId()).orElse(org))
@@ -129,6 +130,7 @@ public class BudgetServiceImpl extends TenantAwareService implements BudgetServi
         budget.setPeriodStart(dto.getPeriodStart());
         budget.setPeriodEnd(dto.getPeriodEnd());
         budget.setStatus(dto.getStatus() != null ? dto.getStatus() : BudgetStatus.DRAFT);
+        budget.setFiscalYear(dto.getFiscalYear());
         budget.setOrganisation(org);
 
         if (dto.getDepartmentId() != null) {
@@ -151,6 +153,7 @@ public class BudgetServiceImpl extends TenantAwareService implements BudgetServi
         d.setPeriodStart(b.getPeriodStart());
         d.setPeriodEnd(b.getPeriodEnd());
         d.setStatus(b.getStatus());
+        d.setFiscalYear(b.getFiscalYear());
 
         BigDecimal remaining = b.getTotalAmount().subtract(b.getSpentAmount());
         d.setRemainingAmount(remaining);

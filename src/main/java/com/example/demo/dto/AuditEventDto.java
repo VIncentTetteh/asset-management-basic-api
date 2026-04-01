@@ -21,6 +21,7 @@ public class AuditEventDto {
     private String requestId;
     private String clientIp;
     private String userAgent;
+    private Long responseTimeMs;
     private Instant createdAt;
 }
 

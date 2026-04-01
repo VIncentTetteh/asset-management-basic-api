@@ -4,12 +4,14 @@ import com.example.demo.models.Asset;
 import com.example.demo.models.MaintenanceRecord;
 import com.example.demo.models.Organisation;
 import com.example.demo.models.PurchaseOrder;
+import com.example.demo.models.ReportMetadata;
 import com.example.demo.models.Supplier;
 import com.example.demo.multitenancy.TenantContext;
 import com.example.demo.repositories.AssetRepository;
 import com.example.demo.repositories.MaintenanceRecordRepository;
 import com.example.demo.repositories.OrganisationRepository;
 import com.example.demo.repositories.PurchaseOrderRepository;
+import com.example.demo.repositories.ReportMetadataRepository;
 import com.example.demo.repositories.SupplierRepository;
 import com.example.demo.storage.FileStorageService;
 import com.example.demo.storage.StoredObject;
@@ -41,6 +43,7 @@ public class ReportGeneratorService {
     private final PurchaseOrderRepository purchaseOrderRepository;
     private final SupplierRepository supplierRepository;
     private final FileStorageService storageService;
+    private final ReportMetadataRepository reportMetadataRepository;
 
     // In-memory cache: reportId → (contentType, bytes)
     private final Map<UUID, ReportEntry> cache = new ConcurrentHashMap<>();
@@ -56,13 +59,15 @@ public class ReportGeneratorService {
                                   OrganisationRepository organisationRepository,
                                   PurchaseOrderRepository purchaseOrderRepository,
                                   SupplierRepository supplierRepository,
-                                  FileStorageService storageService) {
+                                  FileStorageService storageService,
+                                  ReportMetadataRepository reportMetadataRepository) {
         this.assetRepository = assetRepository;
         this.maintenanceRecordRepository = maintenanceRecordRepository;
         this.organisationRepository = organisationRepository;
         this.purchaseOrderRepository = purchaseOrderRepository;
         this.supplierRepository = supplierRepository;
         this.storageService = storageService;
+        this.reportMetadataRepository = reportMetadataRepository;
     }
 
     public record ReportEntry(String contentType, String filename, String storageKey) {}
@@ -72,15 +77,16 @@ public class ReportGeneratorService {
     public UUID generateAssetReport(String format) throws IOException {
         Organisation org = requireOrg();
         List<Asset> assets = assetRepository.findAllByOrganisationAndDeletedAtIsNull(org);
+        String normalized = format == null ? "PDF" : format.toUpperCase();
         byte[] bytes;
         String contentType;
         String filename;
-        switch (format.toUpperCase()) {
+        switch (normalized) {
             case "EXCEL" -> { bytes = assetExcel(assets);  contentType = EXCEL_MIME; filename = "asset-report.xlsx"; }
             case "CSV"   -> { bytes = assetCsv(assets);    contentType = CSV_MIME;   filename = "asset-report.csv";  }
             default      -> { bytes = assetPdf(assets, org.getName()); contentType = PDF_MIME; filename = "asset-report.pdf"; }
         }
-        return store(contentType, filename, bytes);
+        return store("assets", normalized, contentType, filename, bytes);
     }
 
     public UUID generateMaintenanceReport(String format) throws IOException {
@@ -91,12 +97,13 @@ public class ReportGeneratorService {
         byte[] bytes;
         String contentType;
         String filename;
-        switch (format.toUpperCase()) {
+        String normalized = format == null ? "PDF" : format.toUpperCase();
+        switch (normalized) {
             case "EXCEL" -> { bytes = maintenanceExcel(list);  contentType = EXCEL_MIME; filename = "maintenance-report.xlsx"; }
             case "CSV"   -> { bytes = maintenanceCsv(list);    contentType = CSV_MIME;   filename = "maintenance-report.csv";  }
             default      -> { bytes = maintenancePdf(list, org.getName()); contentType = PDF_MIME; filename = "maintenance-report.pdf"; }
         }
-        return store(contentType, filename, bytes);
+        return store("maintenance", normalized, contentType, filename, bytes);
     }
 
     public UUID generateFinancialReport(String format) throws IOException {
@@ -105,20 +112,31 @@ public class ReportGeneratorService {
         byte[] bytes;
         String contentType;
         String filename;
-        switch (format.toUpperCase()) {
+        String normalized = format == null ? "PDF" : format.toUpperCase();
+        switch (normalized) {
             case "EXCEL" -> { bytes = financialExcel(assets);  contentType = EXCEL_MIME; filename = "financial-report.xlsx"; }
             case "CSV"   -> { bytes = financialCsv(assets);    contentType = CSV_MIME;   filename = "financial-report.csv";  }
             default      -> { bytes = financialPdf(assets, org.getName()); contentType = PDF_MIME; filename = "financial-report.pdf"; }
         }
-        return store(contentType, filename, bytes);
+        return store("financial", normalized, contentType, filename, bytes);
     }
 
     public ReportEntry get(UUID reportId) {
-        return cache.get(reportId);
+        ReportEntry entry = cache.get(reportId);
+        if (entry != null) return entry;
+
+        Organisation org = requireOrg();
+        return reportMetadataRepository.findByIdAndOrganisationIdAndDeletedAtIsNull(reportId, org.getId())
+                .map(md -> {
+                    ReportEntry e = new ReportEntry(md.getContentType(), md.getFilename(), md.getStorageKey());
+                    cache.put(reportId, e);
+                    return e;
+                })
+                .orElse(null);
     }
 
     public Optional<String> createDownloadUrl(UUID reportId) {
-        ReportEntry entry = cache.get(reportId);
+        ReportEntry entry = get(reportId);
         if (entry == null) return Optional.empty();
         return storageService.createPresignedGetUrl(
                 entry.storageKey(),
@@ -128,9 +146,13 @@ public class ReportGeneratorService {
     }
 
     public Optional<StoredObject> download(UUID reportId) {
-        ReportEntry entry = cache.get(reportId);
+        ReportEntry entry = get(reportId);
         if (entry == null) return Optional.empty();
         return storageService.get(entry.storageKey());
+    }
+
+    public void evictFromCache(UUID reportId) {
+        cache.remove(reportId);
     }
 
     public UUID generatePurchaseOrderReport(String format) throws IOException {
@@ -142,12 +164,13 @@ public class ReportGeneratorService {
         byte[] bytes;
         String contentType;
         String filename;
-        switch (format.toUpperCase()) {
+        String normalized = format == null ? "PDF" : format.toUpperCase();
+        switch (normalized) {
             case "EXCEL" -> { bytes = poExcel(orders); contentType = EXCEL_MIME; filename = "purchase-orders.xlsx"; }
             case "CSV"   -> { bytes = poCsv(orders);   contentType = CSV_MIME;   filename = "purchase-orders.csv";  }
             default      -> { bytes = poPdf(orders, org.getName()); contentType = PDF_MIME; filename = "purchase-orders.pdf"; }
         }
-        return store(contentType, filename, bytes);
+        return store("purchase-orders", normalized, contentType, filename, bytes);
     }
 
     public UUID generateSupplierReport(String format) throws IOException {
@@ -158,12 +181,13 @@ public class ReportGeneratorService {
         byte[] bytes;
         String contentType;
         String filename;
-        switch (format.toUpperCase()) {
+        String normalized = format == null ? "PDF" : format.toUpperCase();
+        switch (normalized) {
             case "EXCEL" -> { bytes = supplierExcel(suppliers); contentType = EXCEL_MIME; filename = "suppliers.xlsx"; }
             case "CSV"   -> { bytes = supplierCsv(suppliers);   contentType = CSV_MIME;   filename = "suppliers.csv";  }
             default      -> { bytes = supplierPdf(suppliers, org.getName()); contentType = PDF_MIME; filename = "suppliers.pdf"; }
         }
-        return store(contentType, filename, bytes);
+        return store("suppliers", normalized, contentType, filename, bytes);
     }
 
     // ── MIME types ────────────────────────────────────────────────────────────
@@ -180,7 +204,7 @@ public class ReportGeneratorService {
                 .orElseThrow(() -> new IllegalStateException("Organisation not found"));
     }
 
-    private UUID store(String contentType, String filename, byte[] bytes) {
+    private UUID store(String reportType, String format, String contentType, String filename, byte[] bytes) {
         Organisation org = requireOrg();
         UUID id = UUID.randomUUID();
         String key = buildReportKey(org.getId(), id, filename);
@@ -188,6 +212,17 @@ public class ReportGeneratorService {
                 "organisationId", org.getId().toString(),
                 "reportId", id.toString()
         ));
+
+        ReportMetadata md = new ReportMetadata();
+        md.setId(id);
+        md.setOrganisation(org);
+        md.setReportType(reportType);
+        md.setFormat(format);
+        md.setFilename(filename);
+        md.setContentType(contentType);
+        md.setStorageKey(key);
+        reportMetadataRepository.save(md);
+
         cache.put(id, new ReportEntry(contentType, filename, key));
         return id;
     }

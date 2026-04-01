@@ -10,6 +10,8 @@ import com.example.demo.models.MaintenanceRecord;
 import com.example.demo.models.Organisation;
 import com.example.demo.models.PurchaseOrder;
 import com.example.demo.repositories.AssetRepository;
+import com.example.demo.repositories.BudgetRepository;
+import com.example.demo.repositories.DisposalRecordRepository;
 import com.example.demo.repositories.MaintenanceRecordRepository;
 import com.example.demo.repositories.PurchaseOrderRepository;
 import com.example.demo.services.AnalyticsService;
@@ -32,13 +34,19 @@ public class AnalyticsServiceImpl implements AnalyticsService {
     private final AssetRepository assetRepository;
     private final MaintenanceRecordRepository maintenanceRecordRepository;
     private final PurchaseOrderRepository purchaseOrderRepository;
+    private final BudgetRepository budgetRepository;
+    private final DisposalRecordRepository disposalRecordRepository;
 
     public AnalyticsServiceImpl(AssetRepository assetRepository,
                                 MaintenanceRecordRepository maintenanceRecordRepository,
-                                PurchaseOrderRepository purchaseOrderRepository) {
+                                PurchaseOrderRepository purchaseOrderRepository,
+                                BudgetRepository budgetRepository,
+                                DisposalRecordRepository disposalRecordRepository) {
         this.assetRepository = assetRepository;
         this.maintenanceRecordRepository = maintenanceRecordRepository;
         this.purchaseOrderRepository = purchaseOrderRepository;
+        this.budgetRepository = budgetRepository;
+        this.disposalRecordRepository = disposalRecordRepository;
     }
 
     // ── Asset Analytics ───────────────────────────────────────────────────────
@@ -92,7 +100,7 @@ public class AnalyticsServiceImpl implements AnalyticsService {
         BigDecimal totalAssetValue = sumPurchaseCost(assets);
 
         BigDecimal netBookValue = assets.stream()
-                .map(a -> a.getCurrentBookValue() != null ? a.getCurrentBookValue() : BigDecimal.ZERO)
+                .map(this::calculateDynamicNBV)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         BigDecimal totalDepreciation = totalAssetValue.subtract(netBookValue);
@@ -155,14 +163,46 @@ public class AnalyticsServiceImpl implements AnalyticsService {
             categoryBreakdown.put(catName, m);
         });
 
+        // Period-specific Acquisition/Disposal
+        LocalDate start = getPeriodStart(period);
+        LocalDate end = LocalDate.now();
+
+        BigDecimal totalAcquisition = assets.stream()
+                .filter(a -> a.getPurchaseDate() != null && !a.getPurchaseDate().isBefore(start) && !a.getPurchaseDate().isAfter(end))
+                .map(a -> a.getPurchaseCost() != null ? a.getPurchaseCost() : BigDecimal.ZERO)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        BigDecimal totalDisposal = disposalRecordRepository.findByOrganisationAndDisposalDateBetweenAndDeletedAtIsNull(org, start, end)
+                .stream()
+                .map(d -> d.getSaleValue() != null ? d.getSaleValue() : BigDecimal.ZERO)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        // Budget Consolidation
+        List<com.example.demo.models.Budget> budgets = budgetRepository.findByOrganisationAndDeletedAtIsNullOrderByPeriodStartDesc(org);
+        BigDecimal totalBudget = budgets.stream()
+                .map(b -> b.getTotalAmount() != null ? b.getTotalAmount() : BigDecimal.ZERO)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal actualSpend = budgets.stream()
+                .map(b -> b.getSpentAmount() != null ? b.getSpentAmount() : BigDecimal.ZERO)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        double budgetUtilization = totalBudget.signum() > 0 
+                ? actualSpend.divide(totalBudget, 4, RoundingMode.HALF_UP).doubleValue() * 100 
+                : 0.0;
+
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("period", period);
         response.put("totalAssets", assets.size());
         response.put("totalAssetValue", totalAssetValue.setScale(2, RoundingMode.HALF_UP));
         response.put("totalDepreciation", totalDepreciation.setScale(2, RoundingMode.HALF_UP));
         response.put("netBookValue", netBookValue.setScale(2, RoundingMode.HALF_UP));
-        response.put("totalMaintenanceCost", totalMaintenanceCost.setScale(2, RoundingMode.HALF_UP));
+        response.put("totalMaintenance", totalMaintenanceCost.setScale(2, RoundingMode.HALF_UP));
         response.put("monthlyDepreciation", monthlyDepreciation.setScale(2, RoundingMode.HALF_UP));
+        response.put("totalAcquisition", totalAcquisition.setScale(2, RoundingMode.HALF_UP));
+        response.put("totalDisposal", totalDisposal.setScale(2, RoundingMode.HALF_UP));
+        response.put("totalBudget", totalBudget.setScale(2, RoundingMode.HALF_UP));
+        response.put("totalActualSpend", actualSpend.setScale(2, RoundingMode.HALF_UP));
+        response.put("budgetUtilization", Math.round(budgetUtilization * 100.0) / 100.0);
         response.put("assetsFullyDepreciated", assetsFullyDepreciated);
         response.put("averageAssetAgeMonths", Math.round(averageAgeMonths * 10.0) / 10.0);
         response.put("breakdown", Map.of("byCategory", categoryBreakdown));
@@ -397,5 +437,34 @@ public class AnalyticsServiceImpl implements AnalyticsService {
 
     private long toLong(Object value) {
         return value instanceof Number n ? n.longValue() : 0L;
+    }
+
+    private LocalDate getPeriodStart(String period) {
+        LocalDate today = LocalDate.now();
+        return switch (period.toLowerCase()) {
+            case "week" -> today.minusWeeks(1);
+            case "quarter" -> today.minusMonths(3);
+            case "year" -> today.minusYears(1);
+            default -> today.withDayOfMonth(1); // month
+        };
+    }
+
+    private BigDecimal calculateDynamicNBV(Asset asset) {
+        if (asset.getPurchaseCost() == null) return BigDecimal.ZERO;
+        if (asset.getUsefulLifeMonths() == null || asset.getUsefulLifeMonths() <= 0 || asset.getPurchaseDate() == null) {
+            return asset.getCurrentBookValue() != null ? asset.getCurrentBookValue() : asset.getPurchaseCost();
+        }
+
+        long monthsElapsed = asset.getPurchaseDate().until(LocalDate.now(), ChronoUnit.MONTHS);
+        if (monthsElapsed <= 0) return asset.getPurchaseCost();
+
+        BigDecimal residual = asset.getResidualValue() != null ? asset.getResidualValue() : BigDecimal.ZERO;
+        BigDecimal depreciableAmount = asset.getPurchaseCost().subtract(residual);
+        if (depreciableAmount.signum() <= 0) return asset.getPurchaseCost();
+
+        BigDecimal monthlyDep = depreciableAmount.divide(BigDecimal.valueOf(asset.getUsefulLifeMonths()), 2, RoundingMode.HALF_UP);
+        BigDecimal accumulatedDep = monthlyDep.multiply(BigDecimal.valueOf(monthsElapsed));
+
+        return asset.getPurchaseCost().subtract(accumulatedDep).max(residual);
     }
 }

@@ -55,5 +55,8 @@ public class AuditEvent extends BaseEntity {
 
     @Column(name = "user_agent", length = 500)
     private String userAgent;
+
+    @Column(name = "response_time_ms")
+    private Long responseTimeMs;
 }
 

@@ -43,20 +43,39 @@ public class SecurityConfig {
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests((authz) -> authz
-                        // Swagger UI and API Documentation
+                        // ── Swagger / OpenAPI ──────────────────────────────────────────────
                         .requestMatchers("/swagger-ui.html").permitAll()
                         .requestMatchers("/swagger-ui/**").permitAll()
                         .requestMatchers("/v3/api-docs/**").permitAll()
                         .requestMatchers("/webjars/**").permitAll()
-                        // Public API endpoints
+
+                        // ── Tenant registration ────────────────────────────────────────────
                         .requestMatchers("/api/v1/tenant/**").permitAll()
-                        .requestMatchers("/api/v1/auth/**").permitAll()
+
+                        // ── Auth: only truly-public endpoints are permit-all ───────────────
+                        // login, register, password reset — no token needed
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/login").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/register").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/forgot-password").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/reset-password").permitAll()
+                        // SSO callbacks and initiation — called by external IdP or before login
+                        .requestMatchers("/api/v1/auth/sso/**").permitAll()
+                        // /auth/profile, /auth/refresh, /auth/logout remain AUTHENTICATED (see anyRequest below)
+
+                        // ── MFA challenge — called during login before a full JWT is issued ──
+                        .requestMatchers(HttpMethod.POST, "/api/v1/mfa/challenge").permitAll()
+
+                        // ── Billing ────────────────────────────────────────────────────────
+                        .requestMatchers(HttpMethod.GET, "/api/v1/billing/plans").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/billing/webhooks/paystack").permitAll()
+
+                        // ── Internal / infrastructure ──────────────────────────────────────
                         .requestMatchers("/api/info", "/api/cache/ping", "/api/db/hits").permitAll()
                         .requestMatchers("/actuator/health").permitAll()
                         .requestMatchers("/error").permitAll()
                         .requestMatchers("/api/v1/health", "/api/v1/health/**").permitAll()
-                        // All other requests require authentication
+
+                        // ── All other requests require a valid JWT ─────────────────────────
                         .anyRequest().authenticated())
                 .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterAfter(tenantFilter, JwtAuthenticationFilter.class);

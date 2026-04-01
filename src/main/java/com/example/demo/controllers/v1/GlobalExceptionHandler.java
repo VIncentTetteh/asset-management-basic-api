@@ -29,10 +29,11 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
-    private Map<String, Object> errorBody(int status, String message) {
+    private Map<String, Object> errorBody(int status, String message, String errorCode) {
         Map<String, Object> body = new HashMap<>();
         body.put("status", status);
         body.put("message", message != null ? message : "An error occurred");
+        body.put("errorCode", errorCode != null ? errorCode : "UNKNOWN");
         body.put("timestamp", Instant.now().toString());
         String requestId = MDC.get("requestId");
         if (requestId != null) body.put("requestId", requestId);
@@ -44,7 +45,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             org.springframework.http.converter.HttpMessageNotReadableException ex,
             HttpHeaders headers, HttpStatusCode status, WebRequest request) {
         log.warn("Malformed JSON request: {}", ex.getMessage());
-        return new ResponseEntity<>(errorBody(400, "Malformed JSON request"), HttpStatus.BAD_REQUEST);
+        return new ResponseEntity<>(errorBody(400, "Malformed JSON request", "BAD_REQUEST_MALFORMED_JSON"), HttpStatus.BAD_REQUEST);
     }
 
     @Override
@@ -52,69 +53,72 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             HttpHeaders headers, HttpStatusCode status, WebRequest request) {
         Map<String, String> fieldErrors = ex.getBindingResult().getFieldErrors().stream()
                 .collect(Collectors.toMap(f -> f.getField(), f -> f.getDefaultMessage(), (a, b) -> a));
-        Map<String, Object> body = errorBody(400, "Validation failed");
+        Map<String, Object> body = errorBody(400, "Validation failed", "VALIDATION_FAILED");
         body.put("errors", fieldErrors);
         return new ResponseEntity<>(body, HttpStatus.BAD_REQUEST);
     }
 
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<Object> handleIllegalArgument(IllegalArgumentException ex) {
-        return new ResponseEntity<>(errorBody(400, ex.getMessage()), HttpStatus.BAD_REQUEST);
+        return new ResponseEntity<>(errorBody(400, ex.getMessage(), "BAD_REQUEST"), HttpStatus.BAD_REQUEST);
     }
 
     @ExceptionHandler(PaymentGatewayException.class)
     public ResponseEntity<Object> handlePaymentGateway(PaymentGatewayException ex) {
         log.error("Payment gateway error: {}", ex.getMessage());
-        return new ResponseEntity<>(errorBody(502, ex.getMessage()), HttpStatus.BAD_GATEWAY);
+        return new ResponseEntity<>(errorBody(502, ex.getMessage(), "PAYMENT_GATEWAY_ERROR"), HttpStatus.BAD_GATEWAY);
     }
 
     @ExceptionHandler(IllegalStateException.class)
     public ResponseEntity<Object> handleIllegalState(IllegalStateException ex) {
-        return new ResponseEntity<>(errorBody(409, ex.getMessage()), HttpStatus.CONFLICT);
+        return new ResponseEntity<>(errorBody(409, ex.getMessage(), "CONFLICT"), HttpStatus.CONFLICT);
     }
 
     @ExceptionHandler(AccessDeniedException.class)
     public ResponseEntity<Object> handleAccessDenied(AccessDeniedException ex) {
-        return new ResponseEntity<>(errorBody(403, ex.getMessage() != null ? ex.getMessage() : "Access denied"),
+        return new ResponseEntity<>(errorBody(403, ex.getMessage() != null ? ex.getMessage() : "Access denied",
+                "FORBIDDEN"),
                 HttpStatus.FORBIDDEN);
     }
 
     @ExceptionHandler(EntityNotFoundException.class)
     public ResponseEntity<Object> handleEntityNotFound(EntityNotFoundException ex) {
-        return new ResponseEntity<>(errorBody(404, ex.getMessage() != null ? ex.getMessage() : "Resource not found"),
+        return new ResponseEntity<>(errorBody(404,
+                ex.getMessage() != null ? ex.getMessage() : "Resource not found",
+                "NOT_FOUND"),
                 HttpStatus.NOT_FOUND);
     }
 
     @ExceptionHandler(ObjectOptimisticLockingFailureException.class)
     public ResponseEntity<Object> handleOptimisticLocking(ObjectOptimisticLockingFailureException ex) {
         return new ResponseEntity<>(
-                errorBody(409, "This record was modified by another request. Please refresh and try again."),
+                errorBody(409, "This record was modified by another request. Please refresh and try again.", "CONFLICT_OPTIMISTIC_LOCK"),
                 HttpStatus.CONFLICT);
     }
 
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<Object> handleDataIntegrity(DataIntegrityViolationException ex) {
-        return new ResponseEntity<>(errorBody(409, "A record with this value already exists"), HttpStatus.CONFLICT);
+        return new ResponseEntity<>(errorBody(409, "A record with this value already exists", "CONFLICT_DUPLICATE"), HttpStatus.CONFLICT);
     }
 
     @ExceptionHandler(DataAccessException.class)
     public ResponseEntity<Object> handleDataAccess(DataAccessException ex) {
         log.error("Database error", ex);
-        return new ResponseEntity<>(errorBody(500, "A database error occurred. Please try again later."),
+        return new ResponseEntity<>(errorBody(500, "A database error occurred. Please try again later.", "DATABASE_ERROR"),
                 HttpStatus.INTERNAL_SERVER_ERROR);
     }
 
     @ExceptionHandler(UnsupportedOperationException.class)
     public ResponseEntity<Object> handleUnsupportedOperation(UnsupportedOperationException ex) {
         return new ResponseEntity<>(
-                errorBody(403, ex.getMessage() != null ? ex.getMessage() : "Operation not permitted"),
+                errorBody(403, ex.getMessage() != null ? ex.getMessage() : "Operation not permitted", "FORBIDDEN_UNSUPPORTED_OPERATION"),
                 HttpStatus.FORBIDDEN);
     }
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Object> handleUnexpected(Exception ex) {
         log.error("Unexpected error", ex);
-        return new ResponseEntity<>(errorBody(500, "An unexpected error occurred. Please try again later."),
+        return new ResponseEntity<>(errorBody(500, "An unexpected error occurred. Please try again later.", "INTERNAL_SERVER_ERROR_UNEXPECTED"),
                 HttpStatus.INTERNAL_SERVER_ERROR);
     }
 

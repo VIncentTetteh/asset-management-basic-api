@@ -28,7 +28,6 @@ public class BillingController {
     }
 
     @GetMapping("/plans")
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN')")
     public ResponseEntity<List<SubscriptionPlanDto>> listPlans() {
         return ResponseEntity.ok(billingService.listPlans());
     }
@@ -88,4 +87,3 @@ public class BillingController {
         return ResponseEntity.ok().build();
     }
 }
-

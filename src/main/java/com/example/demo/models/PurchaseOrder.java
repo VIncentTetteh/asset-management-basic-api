@@ -48,4 +48,9 @@ public class PurchaseOrder extends BaseEntity {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(nullable = false)
     private Supplier supplier;
+
+    /** Optional budget this PO should be charged against when approved. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "linked_budget_id")
+    private Budget linkedBudget;
 }

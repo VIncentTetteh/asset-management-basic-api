@@ -49,6 +49,23 @@ public enum Permission {
     MANAGE_SECURITY_SETTINGS,
 
     // Admin permissions
-    SYSTEM_ADMIN
+    SYSTEM_ADMIN,
+
+    // Checkout / asset custody
+    CHECKOUT_ASSET,
+
+    // Finance
+    MANAGE_EXPENSES,
+    VIEW_TCO,
+    MANAGE_EXCHANGE_RATES,
+
+    // Lease & rental
+    MANAGE_LEASES,
+
+    // QR code management
+    REGENERATE_QR,
+
+    // IAM
+    REVIEW_ACCESS
 }
 

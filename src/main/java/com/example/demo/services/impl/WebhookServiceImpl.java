@@ -17,6 +17,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -26,9 +27,13 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 
 @Service
 @Transactional
@@ -39,16 +44,25 @@ public class WebhookServiceImpl extends TenantAwareService implements WebhookSer
     private final WebhookRepository webhookRepository;
     private final WebhookDeliveryRepository deliveryRepository;
     private final HttpClient httpClient;
+    private final ObjectMapper objectMapper;
+
+    @org.springframework.beans.factory.annotation.Value("${app.webhook.delivery.max-attempts:3}")
+    private int maxDeliveryAttempts;
+
+    @org.springframework.beans.factory.annotation.Value("${app.webhook.delivery.backoff-millis:250}")
+    private long baseBackoffMillis;
 
     public WebhookServiceImpl(OrganisationRepository organisationRepository,
                               WebhookRepository webhookRepository,
-                              WebhookDeliveryRepository deliveryRepository) {
+                              WebhookDeliveryRepository deliveryRepository,
+                              ObjectMapper objectMapper) {
         super(organisationRepository);
         this.webhookRepository = webhookRepository;
         this.deliveryRepository = deliveryRepository;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(5))
                 .build();
+        this.objectMapper = objectMapper;
     }
 
     @Override
@@ -159,56 +173,92 @@ public class WebhookServiceImpl extends TenantAwareService implements WebhookSer
     }
 
     private String buildPayload(String eventName, Map<String, Object> data) {
-        StringBuilder sb = new StringBuilder("{");
-        sb.append("\"event\":\"").append(eventName).append("\",");
-        sb.append("\"timestamp\":\"").append(Instant.now()).append("\",");
-        sb.append("\"data\":{");
-        data.forEach((k, v) -> sb.append("\"").append(k).append("\":\"").append(v).append("\","));
-        if (!data.isEmpty()) sb.deleteCharAt(sb.length() - 1);
-        sb.append("}}");
-        return sb.toString();
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("event", eventName);
+        payload.put("timestamp", Instant.now().toString());
+        payload.put("data", data == null ? Map.of() : data);
+        try {
+            return objectMapper.writeValueAsString(payload);
+        } catch (Exception e) {
+            // Extremely unlikely; fall back to a minimal JSON-ish string so dispatch still works.
+            Map<String, Object> fallback = new HashMap<>(payload);
+            fallback.put("data", data == null ? Map.of() : data);
+            return fallback.toString();
+        }
     }
 
     private WebhookDelivery fireAndRecord(Webhook wh, String eventName, String payload) {
-        long start = System.currentTimeMillis();
-        int statusCode = 0;
-        String responseBody = "";
-        String deliveryStatus = "failed";
-
-        try {
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(wh.getUrl()))
-                    .timeout(Duration.ofSeconds(10))
-                    .header("Content-Type", "application/json")
-                    .header("X-Webhook-Event", eventName)
-                    .header("X-Webhook-Id", wh.getId().toString())
-                    .POST(HttpRequest.BodyPublishers.ofString(payload, StandardCharsets.UTF_8))
-                    .build();
-
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            statusCode = response.statusCode();
-            responseBody = response.body() != null ? response.body().substring(0, Math.min(response.body().length(), 500)) : "";
-            deliveryStatus = (statusCode >= 200 && statusCode < 300) ? "success" : "failed";
-        } catch (Exception e) {
-            responseBody = "Error: " + e.getMessage();
-            log.warn("[Webhook] Delivery failed for webhook {} event {}: {}", wh.getId(), eventName, e.getMessage());
-        }
-
-        long elapsed = System.currentTimeMillis() - start;
-
-        // Persist delivery record
         WebhookDelivery delivery = new WebhookDelivery();
         delivery.setWebhook(wh);
         delivery.setEventName(eventName);
         delivery.setPayload(payload);
-        delivery.setStatusCode(statusCode);
-        delivery.setResponseBody(responseBody);
-        delivery.setResponseTimeMs(elapsed);
-        delivery.setStatus(deliveryStatus);
         delivery.setOrganisation(wh.getOrganisation());
-        WebhookDelivery saved = deliveryRepository.save(delivery);
 
-        // Update webhook counters
+        int attempts = 0;
+        int statusCode = 0;
+        String responseBody = "";
+        String deliveryStatus = "failed";
+        long lastElapsedMs = 0;
+
+        for (int attempt = 1; attempt <= maxDeliveryAttempts; attempt++) {
+            attempts = attempt;
+            long start = System.currentTimeMillis();
+            try {
+                HttpRequest.Builder req = HttpRequest.newBuilder()
+                        .uri(URI.create(wh.getUrl()))
+                        .timeout(Duration.ofSeconds(10))
+                        .header("Content-Type", "application/json")
+                        .header("X-Webhook-Event", eventName)
+                        .header("X-Webhook-Id", wh.getId().toString())
+                        .POST(HttpRequest.BodyPublishers.ofString(payload, StandardCharsets.UTF_8));
+
+                String signature = computeWebhookSignature(payload, wh.getSecret());
+                if (signature != null && !signature.isBlank()) {
+                    req.header("X-Webhook-Signature", signature);
+                }
+
+                HttpResponse<String> response = httpClient.send(req.build(), HttpResponse.BodyHandlers.ofString());
+                statusCode = response.statusCode();
+                responseBody = response.body() != null
+                        ? response.body().substring(0, Math.min(response.body().length(), 500))
+                        : "";
+
+                deliveryStatus = (statusCode >= 200 && statusCode < 300) ? "success" : "failed";
+            } catch (Exception e) {
+                statusCode = 0;
+                responseBody = "Error: " + e.getMessage();
+                deliveryStatus = "failed";
+                log.warn("[Webhook] Delivery failed (attempt {}/{}): webhook {} event {}: {}",
+                        attempt, maxDeliveryAttempts, wh.getId(), eventName, e.getMessage());
+            }
+
+            lastElapsedMs = System.currentTimeMillis() - start;
+
+            delivery.setAttempts(attempts);
+            delivery.setStatusCode(statusCode);
+            delivery.setResponseBody(responseBody);
+            delivery.setResponseTimeMs(lastElapsedMs);
+            delivery.setStatus(deliveryStatus);
+
+            // Persist after each attempt so partial progress is visible.
+            delivery = deliveryRepository.save(delivery);
+
+            if ("success".equals(deliveryStatus)) {
+                break;
+            }
+
+            if (attempt < maxDeliveryAttempts) {
+                long backoff = baseBackoffMillis * (1L << Math.max(0, attempt - 1));
+                try {
+                    Thread.sleep(backoff);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        }
+
+        // Update webhook counters based on final status.
         wh.setDeliveryCount(wh.getDeliveryCount() + 1);
         wh.setLastTriggeredAt(Instant.now());
         if ("failed".equals(deliveryStatus)) {
@@ -216,7 +266,33 @@ public class WebhookServiceImpl extends TenantAwareService implements WebhookSer
         }
         webhookRepository.save(wh);
 
-        return saved;
+        return delivery;
+    }
+
+    private String computeWebhookSignature(String payload, String secret) {
+        if (payload == null || payload.isBlank() || secret == null || secret.isBlank()) {
+            return null;
+        }
+        try {
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+            byte[] digest = mac.doFinal(payload.getBytes(StandardCharsets.UTF_8));
+            return toHexLower(digest);
+        } catch (Exception e) {
+            log.warn("[Webhook] Signature computation failed: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    private static String toHexLower(byte[] bytes) {
+        char[] digits = "0123456789abcdef".toCharArray();
+        char[] hex = new char[bytes.length * 2];
+        for (int i = 0; i < bytes.length; i++) {
+            int v = bytes[i] & 0xFF;
+            hex[i * 2] = digits[v >>> 4];
+            hex[i * 2 + 1] = digits[v & 0x0F];
+        }
+        return new String(hex);
     }
 
     // ── DTOs ──────────────────────────────────────────────────────────────────

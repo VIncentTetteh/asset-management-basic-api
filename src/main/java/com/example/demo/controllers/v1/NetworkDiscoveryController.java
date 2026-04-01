@@ -2,8 +2,10 @@ package com.example.demo.controllers.v1;
 
 import com.example.demo.dto.DiscoveredDeviceDto;
 import com.example.demo.dto.NetworkScanRequestDto;
+import com.example.demo.dto.PagedResponseDto;
 import com.example.demo.services.NetworkDiscoveryService;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
@@ -44,9 +46,24 @@ public class NetworkDiscoveryController {
      * List all discovered devices for the current tenant.
      */
     @GetMapping("/devices")
-    public ResponseEntity<Page<DiscoveredDeviceDto>> list(
+    public ResponseEntity<PagedResponseDto<DiscoveredDeviceDto>> list(
+            @RequestParam(required = false) Integer limit,
+            @RequestParam(required = false) Long offset,
             @PageableDefault(size = 20, sort = "lastSeenAt") Pageable pageable) {
-        return ResponseEntity.ok(discoveryService.list(pageable));
+        int effectiveLimit = (limit != null && limit > 0) ? limit : pageable.getPageSize();
+        long effectiveOffset = (offset != null && offset >= 0)
+                ? offset
+                : (long) pageable.getPageNumber() * effectiveLimit;
+
+        Pageable effectivePageable = PageRequest.of((int) (effectiveOffset / effectiveLimit), effectiveLimit, pageable.getSort());
+        Page<DiscoveredDeviceDto> page = discoveryService.list(effectivePageable);
+
+        PagedResponseDto<DiscoveredDeviceDto> response = new PagedResponseDto<>();
+        response.setTotal(page.getTotalElements());
+        response.setLimit(effectiveLimit);
+        response.setOffset(effectiveOffset);
+        response.setItems(page.getContent());
+        return ResponseEntity.ok(response);
     }
 
     /**

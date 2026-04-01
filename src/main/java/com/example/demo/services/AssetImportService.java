@@ -13,4 +13,15 @@ public interface AssetImportService {
      * @return a summary of the import (total rows, imported, skipped, per-row errors)
      */
     AssetImportResultDto importFromExcel(MultipartFile file);
+
+    /**
+     * Import and optionally run in dry-run mode (validate without persisting assets).
+     */
+    AssetImportResultDto importFromExcel(MultipartFile file, boolean dryRun);
+
+    /**
+     * Parse and optionally validate only, using already-loaded bytes.
+     * This is useful for async import jobs where the file must survive across threads.
+     */
+    AssetImportResultDto importFromExcelBytes(String filename, String contentType, byte[] fileBytes, boolean dryRun);
 }

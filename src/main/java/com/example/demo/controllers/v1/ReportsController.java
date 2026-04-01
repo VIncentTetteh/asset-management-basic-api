@@ -1,6 +1,11 @@
 package com.example.demo.controllers.v1;
 
 import com.example.demo.services.impl.ReportGeneratorService;
+import com.example.demo.multitenancy.TenantContext;
+import com.example.demo.models.ReportMetadata;
+import com.example.demo.repositories.ReportMetadataRepository;
+import com.example.demo.dto.PagedResponseDto;
+import com.example.demo.dto.ReportHistoryItemDto;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
@@ -8,6 +13,10 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
+import com.example.demo.storage.FileStorageService;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 
 import java.io.IOException;
 import java.time.Instant;
@@ -20,9 +29,15 @@ public class ReportsController {
     private static final Logger log = LoggerFactory.getLogger(ReportsController.class);
 
     private final ReportGeneratorService reportGeneratorService;
+    private final ReportMetadataRepository reportMetadataRepository;
+    private final FileStorageService storageService;
 
-    public ReportsController(ReportGeneratorService reportGeneratorService) {
+    public ReportsController(ReportGeneratorService reportGeneratorService,
+                              ReportMetadataRepository reportMetadataRepository,
+                              FileStorageService storageService) {
         this.reportGeneratorService = reportGeneratorService;
+        this.reportMetadataRepository = reportMetadataRepository;
+        this.storageService = storageService;
     }
 
     // ── Generate endpoints ────────────────────────────────────────────────────
@@ -102,18 +117,54 @@ public class ReportsController {
     public ResponseEntity<?> getReportHistory(
             @RequestParam(defaultValue = "10") int limit,
             @RequestParam(defaultValue = "0") int offset) {
-        Map<String, Object> response = new HashMap<>();
-        response.put("totalReports", 0);
-        response.put("limit", limit);
-        response.put("offset", offset);
-        response.put("reports", List.of());
+        UUID orgId = TenantContext.getOrganisationId();
+        if (orgId == null) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Tenant context is required"));
+        }
+        if (limit <= 0) limit = 10;
+        if (offset < 0) offset = 0;
+
+        Pageable pageable = PageRequest.of(offset / limit, limit);
+        Page<ReportMetadata> page = reportMetadataRepository
+                .findByOrganisationIdAndDeletedAtIsNullOrderByCreatedAtDesc(orgId, pageable);
+
+        List<ReportHistoryItemDto> reports = page.getContent().stream()
+                .map(md -> {
+                    ReportHistoryItemDto item = new ReportHistoryItemDto();
+                    item.setReportId(md.getId().toString());
+                    item.setReportType(md.getReportType());
+                    item.setFormat(md.getFormat());
+                    item.setFilename(md.getFilename());
+                    item.setContentType(md.getContentType());
+                    item.setGeneratedAt(md.getCreatedAt() == null ? null : md.getCreatedAt().toString());
+                    item.setDownloadUrl("/api/v1/reports/" + md.getId() + "/download");
+                    return item;
+                })
+                .toList();
+
+        PagedResponseDto<ReportHistoryItemDto> response = new PagedResponseDto<>();
+        response.setTotal(page.getTotalElements());
+        response.setLimit(limit);
+        response.setOffset(offset);
+        response.setItems(reports);
         return ResponseEntity.ok(response);
     }
 
     @DeleteMapping("/{reportId}")
     @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN')")
     public ResponseEntity<?> deleteReport(@PathVariable UUID reportId) {
-        return ResponseEntity.noContent().build();
+        UUID orgId = TenantContext.getOrganisationId();
+        if (orgId == null) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+        return reportMetadataRepository.findByIdAndOrganisationIdAndDeletedAtIsNull(reportId, orgId)
+                .map(md -> {
+                    storageService.delete(md.getStorageKey());
+                    reportGeneratorService.evictFromCache(reportId);
+                    reportMetadataRepository.delete(md);
+                    return ResponseEntity.noContent().build();
+                })
+                .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

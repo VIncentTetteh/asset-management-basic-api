@@ -51,4 +51,7 @@ public class Budget extends BaseEntity {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "organisation_id", nullable = false)
     private Organisation organisation;
+
+    @Column(name = "fiscal_year")
+    private Integer fiscalYear;
 }

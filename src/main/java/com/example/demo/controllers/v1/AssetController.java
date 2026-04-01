@@ -3,10 +3,19 @@ package com.example.demo.controllers.v1;
 import com.example.demo.dto.AssetDto;
 import com.example.demo.dto.AssetHistoryEventDto;
 import com.example.demo.dto.AssetImportResultDto;
+import com.example.demo.dto.TcoDto;
 import com.example.demo.enums.AssetStatus;
+import com.example.demo.models.IdempotencyRecord;
+import com.example.demo.models.Organisation;
+import com.example.demo.multitenancy.TenantContext;
 import com.example.demo.security.TenantAuthorizationService;
 import com.example.demo.services.AssetImportService;
 import com.example.demo.services.AssetService;
+import com.example.demo.repositories.IdempotencyRecordRepository;
+import com.example.demo.repositories.OrganisationRepository;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.dao.DataIntegrityViolationException;
 import com.google.zxing.BarcodeFormat;
 import com.google.zxing.WriterException;
 import com.google.zxing.client.j2se.MatrixToImageWriter;
@@ -16,12 +25,16 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import jakarta.validation.Valid;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -33,12 +46,21 @@ public class AssetController {
     private final AssetService assetService;
     private final AssetImportService assetImportService;
     private final TenantAuthorizationService tenantAuthorizationService;
+    private final IdempotencyRecordRepository idempotencyRecordRepository;
+    private final ObjectMapper objectMapper;
+    private final OrganisationRepository organisationRepository;
 
     public AssetController(AssetService assetService, AssetImportService assetImportService,
-                          TenantAuthorizationService tenantAuthorizationService) {
+                          TenantAuthorizationService tenantAuthorizationService,
+                          IdempotencyRecordRepository idempotencyRecordRepository,
+                          ObjectMapper objectMapper,
+                          OrganisationRepository organisationRepository) {
         this.assetService = assetService;
         this.assetImportService = assetImportService;
         this.tenantAuthorizationService = tenantAuthorizationService;
+        this.idempotencyRecordRepository = idempotencyRecordRepository;
+        this.objectMapper = objectMapper;
+        this.organisationRepository = organisationRepository;
     }
 
     @PostMapping
@@ -200,6 +222,54 @@ public class AssetController {
     }
 
     /**
+     * Calculate the Total Cost of Ownership for an asset.
+     * GET /api/v1/assets/{id}/tco
+     */
+    @GetMapping("/{id}/tco")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER')")
+    public ResponseEntity<TcoDto> getTco(@PathVariable UUID id) {
+        try {
+            return ResponseEntity.ok(assetService.getTco(id));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    /**
+     * Look up an asset by the decoded QR payload (e.g. "asset:<uuid>").
+     * Useful for scanner applications that decode the QR and call this endpoint.
+     * GET /api/v1/assets/scan/{payload}
+     */
+    @GetMapping("/scan/{payload}")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER')")
+    public ResponseEntity<AssetDto> getByQrPayload(@PathVariable String payload) {
+        try {
+            return ResponseEntity.ok(assetService.getByQrPayload(payload));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    /**
+     * Generate an enriched QR payload JSON for an asset, including org context.
+     * Returns a JSON string suitable for encoding in a QR code.
+     * GET /api/v1/assets/{id}/qrcode/payload
+     */
+    @GetMapping(value = "/{id}/qrcode/payload", produces = MediaType.APPLICATION_JSON_VALUE)
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER')")
+    public ResponseEntity<java.util.Map<String, Object>> getQrPayload(@PathVariable UUID id) {
+        AssetDto asset = assetService.get(id);
+        if (asset == null) return ResponseEntity.notFound().build();
+        java.util.Map<String, Object> payload = new java.util.LinkedHashMap<>();
+        payload.put("type", "asset");
+        payload.put("id", id.toString());
+        payload.put("assetTag", asset.getAssetTag());
+        payload.put("name", asset.getName());
+        payload.put("orgId", asset.getOrganisationId() != null ? asset.getOrganisationId().toString() : null);
+        return ResponseEntity.ok(payload);
+    }
+
+    /**
      * Bulk-import assets from an Excel file (.xlsx).
      * <p>
      * Expected sheet columns (row 1 = header, data starts at row 2):
@@ -212,8 +282,115 @@ public class AssetController {
     @PostMapping(value = "/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN')")
     public ResponseEntity<AssetImportResultDto> importAssets(
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @RequestParam("file") MultipartFile file) {
+        Organisation org = requireTenantOrg();
+
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            AssetImportResultDto result = assetImportService.importFromExcel(file);
+            return ResponseEntity.ok(result);
+        }
+
+        String trimmedKey = idempotencyKey.trim();
+        String operation = "assets/import";
+
+        byte[] fileBytes;
+        String filename = file.getOriginalFilename();
+        try {
+            fileBytes = file.getBytes();
+        } catch (IOException e) {
+            throw new IllegalArgumentException("Failed to read uploaded file");
+        }
+
+        String cleanName = filename == null ? "" : filename.replaceAll("[^A-Za-z0-9._-]", "_");
+        String contentType = file.getContentType();
+        String requestHash = computeRequestHash(fileBytes, false, cleanName, contentType);
+
+        var existing = idempotencyRecordRepository.findByOrganisationAndOperationAndIdempotencyKeyAndDeletedAtIsNull(
+                org, operation, trimmedKey
+        );
+        if (existing.isPresent()) {
+            IdempotencyRecord rec = existing.get();
+            if (!rec.getRequestHash().equals(requestHash)) {
+                throw new IllegalStateException("Idempotency key already used with a different request payload");
+            }
+            if (rec.getResponseJson() != null) {
+                try {
+                    AssetImportResultDto cached = objectMapper.readValue(rec.getResponseJson(), AssetImportResultDto.class);
+                    return ResponseEntity.ok(cached);
+                } catch (JsonProcessingException e) {
+                    // Fall through to re-run import if cached response is corrupted.
+                }
+            }
+        }
+
         AssetImportResultDto result = assetImportService.importFromExcel(file);
+        String responseJson;
+        try {
+            responseJson = objectMapper.writeValueAsString(result);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Failed to serialize idempotent response", e);
+        }
+
+        try {
+            IdempotencyRecord rec = new IdempotencyRecord();
+            rec.setOrganisation(org);
+            rec.setOperation(operation);
+            rec.setIdempotencyKey(trimmedKey);
+            rec.setRequestHash(requestHash);
+            rec.setResponseJson(responseJson);
+            // responseJobId is nullable for sync operations
+            idempotencyRecordRepository.save(rec);
+        } catch (DataIntegrityViolationException e) {
+            // Another request stored the same key first.
+            IdempotencyRecord rec = idempotencyRecordRepository.findByOrganisationAndOperationAndIdempotencyKeyAndDeletedAtIsNull(
+                    org, operation, trimmedKey
+            ).orElseThrow(() -> e);
+
+            if (rec.getRequestHash() != null && !rec.getRequestHash().equals(requestHash)) {
+                throw new IllegalStateException("Idempotency key already used with a different request payload");
+            }
+            try {
+                AssetImportResultDto cached = objectMapper.readValue(rec.getResponseJson(), AssetImportResultDto.class);
+                return ResponseEntity.ok(cached);
+            } catch (JsonProcessingException ex) {
+                throw new IllegalStateException("Failed to parse cached idempotent response", ex);
+            }
+        }
+
         return ResponseEntity.ok(result);
+    }
+
+    private Organisation requireTenantOrg() {
+        UUID orgId = TenantContext.getOrganisationId();
+        if (orgId == null) {
+            throw new AccessDeniedException("Tenant context is required");
+        }
+        return organisationRepository.findByIdAndDeletedAtIsNull(orgId)
+                .orElseThrow(() -> new AccessDeniedException("Organisation not found or inactive for current tenant"));
+    }
+
+    private static String computeRequestHash(byte[] fileBytes, boolean dryRun, String cleanName, String contentType) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            digest.update((Boolean.toString(dryRun) + "|").getBytes(StandardCharsets.UTF_8));
+            digest.update((cleanName == null ? "" : cleanName).getBytes(StandardCharsets.UTF_8));
+            digest.update("|".getBytes(StandardCharsets.UTF_8));
+            digest.update((contentType == null ? "" : contentType).getBytes(StandardCharsets.UTF_8));
+            digest.update("|".getBytes(StandardCharsets.UTF_8));
+            digest.update(fileBytes);
+            return toHexLower(digest.digest());
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 not available", e);
+        }
+    }
+
+    private static String toHexLower(byte[] bytes) {
+        StringBuilder sb = new StringBuilder(bytes.length * 2);
+        for (byte b : bytes) {
+            sb.append(Character.forDigit((b >> 4) & 0xF, 16));
+            sb.append(Character.forDigit(b & 0xF, 16));
+        }
+        return sb.toString();
     }
 }

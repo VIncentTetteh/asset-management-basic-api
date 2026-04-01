@@ -2,6 +2,7 @@ package com.example.demo.services;
 
 import com.example.demo.dto.AssetDto;
 import com.example.demo.dto.AssetHistoryEventDto;
+import com.example.demo.dto.TcoDto;
 import com.example.demo.enums.AssetStatus;
 
 import java.util.List;
@@ -31,4 +32,17 @@ public interface AssetService {
     void delete(UUID id);
 
     List<AssetHistoryEventDto> getHistory(UUID assetId);
+
+    /**
+     * Calculate the Total Cost of Ownership for an asset.
+     * Aggregates acquisition cost, maintenance costs, insurance premiums, downtime costs,
+     * and subtracts disposal/sale proceeds if the asset has been disposed.
+     */
+    TcoDto getTco(UUID assetId);
+
+    /**
+     * Look up an asset by the decoded QR payload (e.g. "asset:<uuid>").
+     * Returns the full AssetDto if found and belongs to the current tenant.
+     */
+    AssetDto getByQrPayload(String payload);
 }

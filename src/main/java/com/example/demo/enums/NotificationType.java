@@ -7,5 +7,12 @@ public enum NotificationType {
     SYSTEM,
     TRANSFER,
     DISPOSAL,
-    PURCHASE_ORDER
+    PURCHASE_ORDER,
+    WARRANTY_EXPIRY,
+    END_OF_LIFE,
+    BUDGET_THRESHOLD,
+    CHECKOUT,
+    EXPENSE,
+    LEASE_EXPIRY,
+    INSURANCE_EXPIRY
 }

@@ -2,12 +2,7 @@ package com.example.demo.dto;
 
 import lombok.Data;
 
-import java.util.List;
-
 @Data
-public class NotificationPageDto {
-    private long totalNotifications;
+public class NotificationPageDto extends PagedResponseDto<NotificationDto> {
     private long unreadCount;
-    private int limit;
-    private List<NotificationDto> notifications;
 }

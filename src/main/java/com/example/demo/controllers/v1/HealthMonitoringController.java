@@ -22,9 +22,11 @@ public class HealthMonitoringController {
     private static final long START_TIME = System.currentTimeMillis();
 
     private final DataSource dataSource;
+    private final com.example.demo.repositories.AuditEventRepository auditEventRepository;
 
-    public HealthMonitoringController(DataSource dataSource) {
+    public HealthMonitoringController(DataSource dataSource, com.example.demo.repositories.AuditEventRepository auditEventRepository) {
         this.dataSource = dataSource;
+        this.auditEventRepository = auditEventRepository;
     }
 
     /** GET /api/v1/health */
@@ -72,20 +74,19 @@ public class HealthMonitoringController {
 
     /** GET /api/v1/metrics */
     @GetMapping("/metrics")
-    public ResponseEntity<?> getMetrics(
-            @RequestParam(defaultValue = "day") String period,
-            @RequestParam(required = false) String metric) {
-
-        Runtime rt = Runtime.getRuntime();
-        long totalMem = rt.totalMemory();
-        long freeMem  = rt.freeMemory();
-        long usedMem  = totalMem - freeMem;
-        long maxMem   = rt.maxMemory();
+    public ResponseEntity<?> getMetrics(@RequestParam(defaultValue = "day") String period) {
+        // JVM memory stats
+        final Runtime rt = Runtime.getRuntime();
+        final long totalMem = rt.totalMemory();
+        final long freeMem  = rt.freeMemory();
+        final long usedMem  = totalMem - freeMem;
+        final long maxMem   = rt.maxMemory();
 
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("period", period);
         response.put("timestamp", Instant.now().toString());
 
+        // JVM Stats
         Map<String, Object> jvm = new LinkedHashMap<>();
         jvm.put("heapUsedMb", mb(usedMem));
         jvm.put("heapTotalMb", mb(totalMem));
@@ -94,6 +95,28 @@ public class HealthMonitoringController {
         jvm.put("availableProcessors", rt.availableProcessors());
         jvm.put("threadCount", Thread.activeCount());
         response.put("jvm", jvm);
+
+        // API Metrics (Aggregated from last 24h Audit Logs)
+        Instant last24h = Instant.now().minus(java.time.Duration.ofHours(24));
+        List<com.example.demo.models.AuditEvent> recentEvents = auditEventRepository.findAll().stream()
+                .filter(e -> e.getCreatedAt() != null && e.getCreatedAt().isAfter(last24h))
+                .toList();
+
+        int totalRequests = recentEvents.size();
+        long successCount = recentEvents.stream().filter(com.example.demo.models.AuditEvent::getSuccess).count();
+        double successRate = totalRequests == 0 ? 0.0 : (successCount * 100.0 / totalRequests);
+
+        double avgLatency = recentEvents.stream()
+                .filter(e -> e.getResponseTimeMs() != null)
+                .mapToLong(com.example.demo.models.AuditEvent::getResponseTimeMs)
+                .average()
+                .orElse(0.0);
+
+        response.put("totalRequests", totalRequests);
+        response.put("successfulRequests", (int) successCount);
+        response.put("failedRequests", totalRequests - (int) successCount);
+        response.put("successRate", String.format("%.1f%%", successRate));
+        response.put("averageLatency", (int) avgLatency);
 
         response.put("uptime", uptimeString());
         response.put("uptimeMs", System.currentTimeMillis() - START_TIME);

@@ -48,13 +48,14 @@ public class NotificationsController {
     public ResponseEntity<NotificationPageDto> getNotifications(
             @RequestParam(required = false) String type,
             @RequestParam(defaultValue = "all") String status,
-            @RequestParam(defaultValue = "20") int limit) {
+            @RequestParam(defaultValue = "20") int limit,
+            @RequestParam(defaultValue = "0") long offset) {
 
         User user = requireUser();
         Organisation org = requireOrg();
         NotificationType notifType = parseType(type);
         Boolean read = parseStatus(status);
-        return ResponseEntity.ok(notificationService.getNotifications(user, org, notifType, read, limit));
+        return ResponseEntity.ok(notificationService.getNotifications(user, org, notifType, read, limit, offset));
     }
 
     /**

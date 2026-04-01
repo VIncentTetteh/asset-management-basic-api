@@ -38,5 +38,8 @@ public class UserDto {
     private UUID organisationId;
 
     private UUID departmentId;
+
+    /** Whether TOTP-based MFA is currently active for this user. Read-only in most contexts. */
+    private Boolean mfaEnabled;
 }
 

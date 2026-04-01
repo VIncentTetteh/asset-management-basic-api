@@ -37,7 +37,7 @@ public class AuditEventServiceImpl extends TenantAwareService implements AuditEv
     }
 
     @Override
-    public List<AuditEventDto> getEvents(UUID actorId, Instant start, Instant end, Boolean success, String method) {
+    public List<AuditEventDto> getEvents(UUID actorId, Instant start, Instant end, Boolean success, String method, String path) {
         Organisation org = requireTenantOrg();
         String normalizedMethod = method != null ? method.toUpperCase(Locale.ROOT) : null;
 
@@ -47,6 +47,7 @@ public class AuditEventServiceImpl extends TenantAwareService implements AuditEv
                 .filter(e -> end == null || (e.getCreatedAt() != null && !e.getCreatedAt().isAfter(end)))
                 .filter(e -> success == null || success.equals(e.getSuccess()))
                 .filter(e -> normalizedMethod == null || normalizedMethod.equalsIgnoreCase(e.getMethod()))
+                .filter(e -> path == null || (e.getPath() != null && e.getPath().contains(path)))
                 .map(this::mapToDto)
                 .collect(Collectors.toList());
     }
@@ -67,6 +68,7 @@ public class AuditEventServiceImpl extends TenantAwareService implements AuditEv
         dto.setRequestId(event.getRequestId());
         dto.setClientIp(event.getClientIp());
         dto.setUserAgent(event.getUserAgent());
+        dto.setResponseTimeMs(event.getResponseTimeMs());
         dto.setCreatedAt(event.getCreatedAt());
         return dto;
     }

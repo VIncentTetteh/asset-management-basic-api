@@ -164,6 +164,38 @@ public class UserServiceImpl extends TenantAwareService implements UserService {
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public UserDto getMe(String email) {
+        Organisation org = requireTenantOrg();
+        User user = userRepository.findByEmailAndOrganisationId(email, org.getId())
+                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+        return toDto(user);
+    }
+
+    @Override
+    public UserDto patchMe(String email, UserDto dto) {
+        Organisation org = requireTenantOrg();
+        User user = userRepository.findByEmailAndOrganisationId(email, org.getId())
+                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+
+        // Only allow updating safe personal fields — no role/status/dept changes
+        if (dto.getFirstName() != null && !dto.getFirstName().isBlank()) {
+            user.setFirstName(dto.getFirstName());
+        }
+        if (dto.getLastName() != null && !dto.getLastName().isBlank()) {
+            user.setLastName(dto.getLastName());
+        }
+        if (dto.getPhone() != null) {
+            user.setPhone(dto.getPhone().isBlank() ? null : dto.getPhone());
+        }
+        if (dto.getJobTitle() != null) {
+            user.setJobTitle(dto.getJobTitle().isBlank() ? null : dto.getJobTitle());
+        }
+
+        return toDto(userRepository.save(user));
+    }
+
+    @Override
     public UserDto deactivateUser(UUID id) {
         Organisation org = requireTenantOrg();
         User user = userRepository.findByIdAndOrganisation(id, org)
@@ -196,6 +228,7 @@ public class UserServiceImpl extends TenantAwareService implements UserService {
         dto.setOrganisationId(user.getOrganisation() != null ? user.getOrganisation().getId() : null);
         dto.setDepartmentId(user.getDepartment() != null ? user.getDepartment().getId() : null);
         dto.setRoleId(user.getRole() != null ? user.getRole().getId() : null);
+        dto.setMfaEnabled(Boolean.TRUE.equals(user.getMfaEnabled()));
         // never return password hash
         return dto;
     }

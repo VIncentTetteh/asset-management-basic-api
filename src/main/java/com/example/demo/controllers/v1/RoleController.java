@@ -2,8 +2,10 @@ package com.example.demo.controllers.v1;
 
 import com.example.demo.dto.RoleDto;
 import com.example.demo.services.RoleService;
+import com.example.demo.multitenancy.TenantContext;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.annotation.*;
 
 import jakarta.validation.Valid;
@@ -23,6 +25,7 @@ public class RoleController {
     @PostMapping
     public ResponseEntity<RoleDto> createRole(@Valid @RequestBody RoleDto roleDto,
                                              @RequestParam UUID organisationId) {
+        requireSameOrganisation(organisationId);
         RoleDto createdRole = roleService.createRole(roleDto, organisationId);
         return ResponseEntity.status(HttpStatus.CREATED).body(createdRole);
     }
@@ -35,6 +38,7 @@ public class RoleController {
 
     @GetMapping
     public ResponseEntity<Set<RoleDto>> getRolesByOrganisation(@RequestParam UUID organisationId) {
+        requireSameOrganisation(organisationId);
         Set<RoleDto> roles = roleService.getRolesByOrganisation(organisationId);
         return ResponseEntity.ok(roles);
     }
@@ -62,7 +66,18 @@ public class RoleController {
     @GetMapping("/by-name")
     public ResponseEntity<RoleDto> getRoleByName(@RequestParam String name,
                                                 @RequestParam UUID organisationId) {
+        requireSameOrganisation(organisationId);
         RoleDto role = roleService.getRoleByNameAndOrganisation(name, organisationId);
         return ResponseEntity.ok(role);
+    }
+
+    private static void requireSameOrganisation(UUID organisationId) {
+        UUID current = TenantContext.getOrganisationId();
+        if (current == null) {
+            throw new AccessDeniedException("Tenant context is required");
+        }
+        if (organisationId == null || !organisationId.equals(current)) {
+            throw new AccessDeniedException("organisationId does not match current tenant");
+        }
     }
 }

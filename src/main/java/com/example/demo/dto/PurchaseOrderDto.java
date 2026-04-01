@@ -35,5 +35,8 @@ public class PurchaseOrderDto {
 
     @NotNull(message = "Supplier ID is required")
     private UUID supplierId;
+
+    /** Optional: Budget to auto-deduct from when this PO is approved. */
+    private UUID linkedBudgetId;
 }
 

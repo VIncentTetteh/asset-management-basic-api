@@ -11,7 +11,14 @@ import java.util.UUID;
 
 public interface NotificationService {
 
-    NotificationPageDto getNotifications(User user, Organisation org, NotificationType type, Boolean read, int limit);
+    NotificationPageDto getNotifications(
+            User user,
+            Organisation org,
+            NotificationType type,
+            Boolean read,
+            int limit,
+            long offset
+    );
 
     void markAsRead(UUID notificationId, User user, Organisation org);
 

@@ -9,6 +9,6 @@ import java.util.UUID;
 public interface AuditEventService {
     AuditEventDto getEventById(UUID id);
 
-    List<AuditEventDto> getEvents(UUID actorId, Instant start, Instant end, Boolean success, String method);
+    List<AuditEventDto> getEvents(UUID actorId, Instant start, Instant end, Boolean success, String method, String path);
 }
 

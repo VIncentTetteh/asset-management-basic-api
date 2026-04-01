@@ -2,6 +2,7 @@ package com.example.demo.services.impl;
 
 import com.example.demo.dto.AssetDto;
 import com.example.demo.dto.AssetHistoryEventDto;
+import com.example.demo.dto.TcoDto;
 import com.example.demo.enums.AssetStatus;
 import com.example.demo.models.*;
 import com.example.demo.multitenancy.TenantContext;
@@ -18,6 +19,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.*;
@@ -553,5 +555,109 @@ public class AssetServiceImpl implements AssetService {
                 Comparator.nullsLast(Comparator.reverseOrder())));
 
         return timeline;
+    }
+
+    // ────────────────────────────────────────────────────
+    // TCO Calculation
+    // ────────────────────────────────────────────────────
+
+    @Override
+    public TcoDto getTco(UUID assetId) {
+        Organisation org = requireTenantOrg();
+        Asset asset = assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(assetId, org)
+                .orElseThrow(() -> new IllegalArgumentException("Asset not found: " + assetId));
+
+        // 1. Acquisition cost
+        BigDecimal acquisitionCost = asset.getPurchaseCost() != null ? asset.getPurchaseCost() : BigDecimal.ZERO;
+
+        // 2. Maintenance costs
+        Set<com.example.demo.models.MaintenanceRecord> maintenanceRecords =
+                maintenanceRecordRepository.findByAssetIdAndDeletedAtIsNull(assetId);
+        BigDecimal totalMaintenanceCost = maintenanceRecords.stream()
+                .filter(m -> m.getCost() != null)
+                .map(com.example.demo.models.MaintenanceRecord::getCost)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        int maintenanceRecordCount = maintenanceRecords.size();
+
+        // 3. Insurance costs (annual premium * years owned)
+        BigDecimal totalInsuranceCost = BigDecimal.ZERO;
+        if (asset.getInsurancePremiumPerYear() != null && asset.getPurchaseDate() != null) {
+            long daysOwned = java.time.temporal.ChronoUnit.DAYS.between(
+                    asset.getPurchaseDate(), java.time.LocalDate.now());
+            BigDecimal yearsOwned = BigDecimal.valueOf(daysOwned).divide(BigDecimal.valueOf(365), 4,
+                    java.math.RoundingMode.HALF_UP);
+            totalInsuranceCost = asset.getInsurancePremiumPerYear().multiply(yearsOwned)
+                    .setScale(2, java.math.RoundingMode.HALF_UP);
+        }
+
+        // 4. Downtime costs
+        BigDecimal totalDowntimeCost = BigDecimal.ZERO;
+        long downtimeDays = 0L;
+        if (asset.getDowntimeCostPerDay() != null) {
+            downtimeDays = maintenanceRecords.stream()
+                    .filter(m -> m.getScheduledDate() != null && m.getPerformedDate() != null)
+                    .mapToLong(m -> java.time.temporal.ChronoUnit.DAYS.between(
+                            m.getScheduledDate(), m.getPerformedDate()))
+                    .filter(d -> d > 0)
+                    .sum();
+            totalDowntimeCost = asset.getDowntimeCostPerDay()
+                    .multiply(BigDecimal.valueOf(downtimeDays))
+                    .setScale(2, java.math.RoundingMode.HALF_UP);
+        }
+
+        // 5. Disposal/sale recovery
+        BigDecimal disposalRecovery = disposalRecordRepository.findByAssetIdAndDeletedAtIsNull(assetId)
+                .stream()
+                .filter(d -> d.getSaleValue() != null)
+                .map(com.example.demo.models.DisposalRecord::getSaleValue)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        // 6. Net TCO = acquisition + maintenance + insurance + downtime - recovery
+        BigDecimal netTco = acquisitionCost
+                .add(totalMaintenanceCost)
+                .add(totalInsuranceCost)
+                .add(totalDowntimeCost)
+                .subtract(disposalRecovery);
+
+        TcoDto dto = new TcoDto();
+        dto.setAssetId(asset.getId());
+        dto.setAssetName(asset.getName());
+        dto.setAssetTag(asset.getAssetTag());
+        dto.setAcquisitionCost(acquisitionCost);
+        dto.setTotalMaintenanceCost(totalMaintenanceCost);
+        dto.setTotalInsuranceCost(totalInsuranceCost);
+        dto.setTotalDowntimeCost(totalDowntimeCost);
+        dto.setDisposalRecovery(disposalRecovery);
+        dto.setNetTco(netTco);
+        dto.setCurrency(asset.getCurrency());
+        dto.setCalculatedAt(Instant.now());
+        dto.setMaintenanceRecordCount(maintenanceRecordCount);
+        dto.setDowntimeDays(downtimeDays);
+        return dto;
+    }
+
+    // ────────────────────────────────────────────────────
+    // QR Scan Lookup
+    // ────────────────────────────────────────────────────
+
+    @Override
+    public AssetDto getByQrPayload(String payload) {
+        if (payload == null || payload.isBlank()) {
+            throw new IllegalArgumentException("QR payload is required");
+        }
+        // Payload format: "asset:<uuid>"
+        String trimmed = payload.trim();
+        UUID assetId;
+        try {
+            String uuidStr = trimmed.startsWith("asset:") ? trimmed.substring(6) : trimmed;
+            assetId = UUID.fromString(uuidStr);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("Invalid QR payload: " + payload);
+        }
+        AssetDto result = get(assetId);
+        if (result == null) {
+            throw new IllegalArgumentException("Asset not found for QR payload: " + payload);
+        }
+        return result;
     }
 }

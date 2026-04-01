@@ -2,9 +2,11 @@ package com.example.demo.controllers.v1;
 
 import com.example.demo.dto.CloudAssetDto;
 import com.example.demo.dto.CloudCostSummaryDto;
+import com.example.demo.dto.PagedResponseDto;
 import com.example.demo.services.CloudAssetService;
 import jakarta.validation.Valid;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
@@ -46,11 +48,26 @@ public class CloudAssetController {
      * List cloud assets with optional filters.
      */
     @GetMapping
-    public ResponseEntity<Page<CloudAssetDto>> list(
+    public ResponseEntity<PagedResponseDto<CloudAssetDto>> list(
             @RequestParam(required = false) String provider,
             @RequestParam(required = false) String environment,
+            @RequestParam(required = false) Integer limit,
+            @RequestParam(required = false) Long offset,
             @PageableDefault(size = 20) Pageable pageable) {
-        return ResponseEntity.ok(cloudAssetService.list(provider, environment, pageable));
+        int effectiveLimit = (limit != null && limit > 0) ? limit : pageable.getPageSize();
+        long effectiveOffset = (offset != null && offset >= 0)
+                ? offset
+                : (long) pageable.getPageNumber() * effectiveLimit;
+
+        Pageable effectivePageable = PageRequest.of((int) (effectiveOffset / effectiveLimit), effectiveLimit, pageable.getSort());
+        Page<CloudAssetDto> page = cloudAssetService.list(provider, environment, effectivePageable);
+
+        PagedResponseDto<CloudAssetDto> response = new PagedResponseDto<>();
+        response.setTotal(page.getTotalElements());
+        response.setLimit(effectiveLimit);
+        response.setOffset(effectiveOffset);
+        response.setItems(page.getContent());
+        return ResponseEntity.ok(response);
     }
 
     /**

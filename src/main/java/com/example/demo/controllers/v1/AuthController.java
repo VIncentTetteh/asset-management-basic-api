@@ -173,6 +173,25 @@ public class AuthController {
                     .body(Map.of("error", "User account is " + user.getStatus().toString().toLowerCase()));
         }
 
+        // ── MFA check ────────────────────────────────────────────────────────
+        // If the user has MFA enabled, do NOT issue the full JWT yet.
+        // Instead return a short-lived challenge token that the client must
+        // exchange at POST /api/v1/auth/mfa-challenge with a valid TOTP code.
+        if (Boolean.TRUE.equals(user.getMfaEnabled()) && user.getMfaSecret() != null) {
+            Map<String, Object> challengeClaims = new HashMap<>();
+            challengeClaims.put("mfaChallenge", true);
+            challengeClaims.put("userId", user.getId().toString());
+            if (user.getOrganisation() != null) {
+                challengeClaims.put("organisationId", user.getOrganisation().getId().toString());
+            }
+            // Challenge token is valid for 5 minutes only
+            String challengeToken = jwtUtil.generateToken(user.getEmail(), challengeClaims, 5 * 60 * 1000L);
+            return ResponseEntity.status(HttpStatus.ACCEPTED)
+                    .body(Map.of(
+                            "mfaRequired", true,
+                            "mfaChallengeToken", challengeToken));
+        }
+
         // Update last login timestamp
         user.setLastLoginAt(Instant.now());
         userRepository.save(user);

@@ -25,6 +25,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.util.*;
 import java.util.List;
+import java.util.function.Consumer;
 
 @Service
 @Transactional
@@ -50,8 +51,17 @@ public class NotificationServiceImpl implements NotificationService {
 
     @Override
     @Transactional(readOnly = true)
-    public NotificationPageDto getNotifications(User user, Organisation org, NotificationType type, Boolean read, int limit) {
-        Pageable pageable = PageRequest.of(0, Math.min(limit, 100), Sort.by(Sort.Direction.DESC, "createdAt"));
+    public NotificationPageDto getNotifications(
+            User user,
+            Organisation org,
+            NotificationType type,
+            Boolean read,
+            int limit,
+            long offset
+    ) {
+        int safeLimit = Math.max(1, Math.min(limit, 100));
+        long safeOffset = Math.max(0L, offset);
+        Pageable pageable = PageRequest.of((int) (safeOffset / safeLimit), safeLimit, Sort.by(Sort.Direction.DESC, "createdAt"));
 
         Page<Notification> page;
         if (type != null && read != null) {
@@ -67,10 +77,11 @@ public class NotificationServiceImpl implements NotificationService {
         long unreadCount = notificationRepository.countByUserAndOrganisationAndReadAndDeletedAtIsNull(user, org, false);
 
         NotificationPageDto dto = new NotificationPageDto();
-        dto.setTotalNotifications(page.getTotalElements());
+        dto.setTotal(page.getTotalElements());
         dto.setUnreadCount(unreadCount);
-        dto.setLimit(limit);
-        dto.setNotifications(page.getContent().stream().map(this::toDto).toList());
+        dto.setLimit(safeLimit);
+        dto.setOffset(safeOffset);
+        dto.setItems(page.getContent().stream().map(this::toDto).toList());
         return dto;
     }
 
@@ -215,6 +226,13 @@ public class NotificationServiceImpl implements NotificationService {
             case TRANSFER -> prefs.isEmailTransfer();
             case DISPOSAL -> prefs.isEmailDisposal();
             case PURCHASE_ORDER -> prefs.isEmailPurchaseOrder();
+            case WARRANTY_EXPIRY -> false;
+            case END_OF_LIFE -> false;
+            case BUDGET_THRESHOLD -> false;
+            case CHECKOUT -> false;
+            case EXPENSE -> false;
+            case LEASE_EXPIRY -> false;
+            case INSURANCE_EXPIRY -> false;
         };
     }
 
@@ -259,7 +277,7 @@ public class NotificationServiceImpl implements NotificationService {
         return dto;
     }
 
-    private void applyBooleanIfPresent(Map<?, ?> map, String key, java.util.function.Consumer<Boolean> setter) {
+    private void applyBooleanIfPresent(Map<?, ?> map, String key, Consumer<Boolean> setter) {
         Object val = map.get(key);
         if (val instanceof Boolean b) setter.accept(b);
     }

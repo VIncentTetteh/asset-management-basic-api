@@ -123,6 +123,9 @@ public class TenantRegistrationServiceImpl implements TenantRegistrationService 
         user.setFirstName(request.getAdminFirstName());
         user.setLastName(request.getAdminLastName());
         user.setEmail(request.getAdminEmail());
+        // User.employeeId is non-null in the data model; generate a deterministic-enough value
+        // for onboarding so the tenant registration endpoint works out-of-the-box.
+        user.setEmployeeId("EMP-" + UUID.randomUUID().toString().substring(0, 10).toUpperCase(Locale.ROOT));
         user.setPhone(request.getAdminPhone());
         user.setJobTitle(request.getAdminJobTitle());
         user.setPasswordHash(passwordEncoder.encode(request.getPassword()));

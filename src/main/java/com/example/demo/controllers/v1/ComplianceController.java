@@ -1,10 +1,12 @@
 package com.example.demo.controllers.v1;
 
 import com.example.demo.dto.compliance.*;
+import com.example.demo.dto.PagedResponseDto;
 import com.example.demo.services.ComplianceService;
 import jakarta.validation.Valid;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -89,10 +91,25 @@ public class ComplianceController {
     // ── RiskRegister ─────────────────────────────────────────────────────────
 
     @GetMapping("/risks")
-    public ResponseEntity<Page<RiskRegisterDto>> listRisks(
+    public ResponseEntity<PagedResponseDto<RiskRegisterDto>> listRisks(
             @RequestParam(required = false) String status,
+            @RequestParam(required = false) Integer limit,
+            @RequestParam(required = false) Long offset,
             @PageableDefault(size = 20) Pageable pageable) {
-        return ResponseEntity.ok(complianceService.listRisks(status, pageable));
+        int effectiveLimit = (limit != null && limit > 0) ? limit : pageable.getPageSize();
+        long effectiveOffset = (offset != null && offset >= 0)
+                ? offset
+                : (long) pageable.getPageNumber() * effectiveLimit;
+
+        Pageable effectivePageable = PageRequest.of((int) (effectiveOffset / effectiveLimit), effectiveLimit, pageable.getSort());
+        Page<RiskRegisterDto> page = complianceService.listRisks(status, effectivePageable);
+
+        PagedResponseDto<RiskRegisterDto> response = new PagedResponseDto<>();
+        response.setTotal(page.getTotalElements());
+        response.setLimit(effectiveLimit);
+        response.setOffset(effectiveOffset);
+        response.setItems(page.getContent());
+        return ResponseEntity.ok(response);
     }
 
     @GetMapping("/risks/{id}")
@@ -120,9 +137,24 @@ public class ComplianceController {
     // ── SecurityIncident ─────────────────────────────────────────────────────
 
     @GetMapping("/incidents")
-    public ResponseEntity<Page<SecurityIncidentDto>> listIncidents(
+    public ResponseEntity<PagedResponseDto<SecurityIncidentDto>> listIncidents(
+            @RequestParam(required = false) Integer limit,
+            @RequestParam(required = false) Long offset,
             @PageableDefault(size = 20) Pageable pageable) {
-        return ResponseEntity.ok(complianceService.listIncidents(pageable));
+        int effectiveLimit = (limit != null && limit > 0) ? limit : pageable.getPageSize();
+        long effectiveOffset = (offset != null && offset >= 0)
+                ? offset
+                : (long) pageable.getPageNumber() * effectiveLimit;
+
+        Pageable effectivePageable = PageRequest.of((int) (effectiveOffset / effectiveLimit), effectiveLimit, pageable.getSort());
+        Page<SecurityIncidentDto> page = complianceService.listIncidents(effectivePageable);
+
+        PagedResponseDto<SecurityIncidentDto> response = new PagedResponseDto<>();
+        response.setTotal(page.getTotalElements());
+        response.setLimit(effectiveLimit);
+        response.setOffset(effectiveOffset);
+        response.setItems(page.getContent());
+        return ResponseEntity.ok(response);
     }
 
     @GetMapping("/incidents/{id}")
@@ -237,10 +269,25 @@ public class ComplianceController {
     // ── PatchRecord ──────────────────────────────────────────────────────────
 
     @GetMapping("/patch-records")
-    public ResponseEntity<Page<PatchRecordDto>> listPatchRecords(
+    public ResponseEntity<PagedResponseDto<PatchRecordDto>> listPatchRecords(
             @RequestParam(required = false) UUID assetId,
+            @RequestParam(required = false) Integer limit,
+            @RequestParam(required = false) Long offset,
             @PageableDefault(size = 20) Pageable pageable) {
-        return ResponseEntity.ok(complianceService.listPatchRecords(assetId, pageable));
+        int effectiveLimit = (limit != null && limit > 0) ? limit : pageable.getPageSize();
+        long effectiveOffset = (offset != null && offset >= 0)
+                ? offset
+                : (long) pageable.getPageNumber() * effectiveLimit;
+
+        Pageable effectivePageable = PageRequest.of((int) (effectiveOffset / effectiveLimit), effectiveLimit, pageable.getSort());
+        Page<PatchRecordDto> page = complianceService.listPatchRecords(assetId, effectivePageable);
+
+        PagedResponseDto<PatchRecordDto> response = new PagedResponseDto<>();
+        response.setTotal(page.getTotalElements());
+        response.setLimit(effectiveLimit);
+        response.setOffset(effectiveOffset);
+        response.setItems(page.getContent());
+        return ResponseEntity.ok(response);
     }
 
     @GetMapping("/patch-records/{id}")
@@ -314,9 +361,24 @@ public class ComplianceController {
     // ── VulnerabilityScan ────────────────────────────────────────────────────
 
     @GetMapping("/vulnerability-scans")
-    public ResponseEntity<Page<VulnerabilityScanDto>> listVulnerabilityScans(
+    public ResponseEntity<PagedResponseDto<VulnerabilityScanDto>> listVulnerabilityScans(
+            @RequestParam(required = false) Integer limit,
+            @RequestParam(required = false) Long offset,
             @PageableDefault(size = 20) Pageable pageable) {
-        return ResponseEntity.ok(complianceService.listVulnerabilityScans(pageable));
+        int effectiveLimit = (limit != null && limit > 0) ? limit : pageable.getPageSize();
+        long effectiveOffset = (offset != null && offset >= 0)
+                ? offset
+                : (long) pageable.getPageNumber() * effectiveLimit;
+
+        Pageable effectivePageable = PageRequest.of((int) (effectiveOffset / effectiveLimit), effectiveLimit, pageable.getSort());
+        Page<VulnerabilityScanDto> page = complianceService.listVulnerabilityScans(effectivePageable);
+
+        PagedResponseDto<VulnerabilityScanDto> response = new PagedResponseDto<>();
+        response.setTotal(page.getTotalElements());
+        response.setLimit(effectiveLimit);
+        response.setOffset(effectiveOffset);
+        response.setItems(page.getContent());
+        return ResponseEntity.ok(response);
     }
 
     @GetMapping("/vulnerability-scans/{id}")

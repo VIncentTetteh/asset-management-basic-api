@@ -2,6 +2,7 @@ package com.example.demo.services.impl;
 
 import com.example.demo.dto.PurchaseOrderDto;
 import com.example.demo.enums.POStatus;
+import com.example.demo.models.Budget;
 import com.example.demo.models.PurchaseOrder;
 import com.example.demo.models.Organisation;
 import com.example.demo.models.Department;
@@ -34,6 +35,7 @@ public class PurchaseOrderServiceImpl extends TenantAwareService implements Purc
     private final DepartmentRepository departmentRepository;
     private final SupplierRepository supplierRepository;
     private final UserRepository userRepository;
+    private final BudgetRepository budgetRepository;
     private final NotificationService notificationService;
 
     public PurchaseOrderServiceImpl(PurchaseOrderRepository poRepository,
@@ -41,12 +43,14 @@ public class PurchaseOrderServiceImpl extends TenantAwareService implements Purc
             DepartmentRepository departmentRepository,
             SupplierRepository supplierRepository,
             UserRepository userRepository,
+            BudgetRepository budgetRepository,
             NotificationService notificationService) {
         super(organisationRepository);
         this.poRepository = poRepository;
         this.departmentRepository = departmentRepository;
         this.supplierRepository = supplierRepository;
         this.userRepository = userRepository;
+        this.budgetRepository = budgetRepository;
         this.notificationService = notificationService;
     }
 
@@ -71,6 +75,11 @@ public class PurchaseOrderServiceImpl extends TenantAwareService implements Purc
         po.setOrganisation(org);
         po.setDepartment(department);
         po.setSupplier(supplier);
+
+        if (poDto.getLinkedBudgetId() != null) {
+            budgetRepository.findByIdAndOrganisationAndDeletedAtIsNull(poDto.getLinkedBudgetId(), org)
+                    .ifPresent(po::setLinkedBudget);
+        }
 
         PurchaseOrder saved = poRepository.save(po);
         logger.info("Created Purchase Order {} (PO Number: {})", saved.getId(), saved.getPoNumber());
@@ -216,6 +225,15 @@ public class PurchaseOrderServiceImpl extends TenantAwareService implements Purc
         po.setStatus(POStatus.APPROVED);
         po.setApprovedAt(Instant.now());
 
+        // Auto-deduct from linked budget when PO is approved
+        if (po.getLinkedBudget() != null && po.getTotalAmount() != null) {
+            Budget budget = po.getLinkedBudget();
+            budget.setSpentAmount(budget.getSpentAmount().add(po.getTotalAmount()));
+            budgetRepository.save(budget);
+            logger.info("Auto-deducted {} {} from budget {} for approved PO {}",
+                    po.getTotalAmount(), po.getCurrency(), budget.getId(), po.getId());
+        }
+
         PurchaseOrder approved = poRepository.save(po);
         notificationService.notifyOrgAdmins(org, NotificationType.APPROVAL,
                 "Purchase Order Approved",
@@ -273,6 +291,9 @@ public class PurchaseOrderServiceImpl extends TenantAwareService implements Purc
         dto.setOrganisationId(po.getOrganisation().getId());
         dto.setDepartmentId(po.getDepartment().getId());
         dto.setSupplierId(po.getSupplier().getId());
+        if (po.getLinkedBudget() != null) {
+            dto.setLinkedBudgetId(po.getLinkedBudget().getId());
+        }
         return dto;
     }
 }

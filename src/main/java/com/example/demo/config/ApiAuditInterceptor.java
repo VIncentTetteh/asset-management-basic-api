@@ -43,6 +43,12 @@ public class ApiAuditInterceptor implements HandlerInterceptor {
     }
 
     @Override
+    public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
+        request.setAttribute("startTime", System.currentTimeMillis());
+        return true;
+    }
+
+    @Override
     public void afterCompletion(HttpServletRequest request, HttpServletResponse response, Object handler, Exception ex)
             throws Exception {
         String path = request.getRequestURI();
@@ -69,6 +75,11 @@ public class ApiAuditInterceptor implements HandlerInterceptor {
             event.setRequestId(response.getHeader(RequestCorrelationIdInterceptor.REQUEST_ID_HEADER));
             event.setClientIp(clientIp(request));
             event.setUserAgent(abbreviate(request.getHeader("User-Agent")));
+
+            Long startTime = (Long) request.getAttribute("startTime");
+            if (startTime != null) {
+                event.setResponseTimeMs(System.currentTimeMillis() - startTime);
+            }
 
             auditEventRepository.save(event);
         } catch (Exception saveEx) {

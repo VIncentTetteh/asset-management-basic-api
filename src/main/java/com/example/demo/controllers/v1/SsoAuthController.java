@@ -550,4 +550,63 @@ public class SsoAuthController {
             s += "=";
         return s;
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Public SSO Discovery
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Returns the SSO provider(s) that are enabled and fully configured for the
+     * given organisation — WITHOUT exposing any secrets.
+     *
+     * The login page calls this after the user types their Organisation ID so that
+     * it can show only the relevant SSO button(s) and hide all others.
+     *
+     * GET /api/v1/auth/sso/public?orgId={uuid}
+     *
+     * Response when SSO is active:
+     *   { "enabled": true, "provider": "GOOGLE" }
+     *
+     * Response when SSO is not configured / disabled:
+     *   { "enabled": false }
+     *
+     * This endpoint is publicly accessible (no Bearer token required).
+     */
+    @Operation(summary = "Discover active SSO provider for an organisation (public)")
+    @GetMapping("/public")
+    public ResponseEntity<Map<String, Object>> getPublicSsoConfig(
+            @RequestParam(name = "orgId", required = false) String orgIdStr) {
+
+        if (orgIdStr == null || orgIdStr.isBlank()) {
+            return ResponseEntity.ok(Map.of("enabled", false));
+        }
+
+        UUID orgId;
+        try {
+            orgId = UUID.fromString(orgIdStr.trim());
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.ok(Map.of("enabled", false));
+        }
+
+        // Verify the organisation exists
+        if (organisationRepository.findByIdAndDeletedAtIsNull(orgId).isEmpty()) {
+            return ResponseEntity.ok(Map.of("enabled", false));
+        }
+
+        var configOpt = ssoConfigRepository.findByOrganisationId(orgId);
+        if (configOpt.isEmpty()) {
+            return ResponseEntity.ok(Map.of("enabled", false));
+        }
+
+        OrgSsoConfig config = configOpt.get();
+        if (!config.isEnabled()) {
+            return ResponseEntity.ok(Map.of("enabled", false));
+        }
+
+        // Return only the public-safe fields: enabled status and provider type
+        Map<String, Object> response = new HashMap<>();
+        response.put("enabled", true);
+        response.put("provider", config.getProvider() != null ? config.getProvider().name() : null);
+        return ResponseEntity.ok(response);
+    }
 }

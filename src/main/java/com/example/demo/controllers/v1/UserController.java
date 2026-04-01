@@ -6,6 +6,7 @@ import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Set;
@@ -26,6 +27,35 @@ public class UserController {
     public UserController(UserService userService) {
         this.userService = userService;
     }
+
+    // ── Self-service endpoints (any authenticated user) ───────────────────────
+
+    /**
+     * GET /api/v1/users/me — returns the currently-authenticated user's own profile.
+     * No admin role required.
+     *
+     * Uses Authentication directly instead of @AuthenticationPrincipal UserDetails
+     * because the JWT filter sets the principal as a String (the email), not a
+     * UserDetails object — @AuthenticationPrincipal would resolve to null.
+     */
+    @GetMapping("/me")
+    public ResponseEntity<UserDto> getMe(Authentication authentication) {
+        return ResponseEntity.ok(userService.getMe(authentication.getName()));
+    }
+
+    /**
+     * PATCH /api/v1/users/me — allows any authenticated user to update their own
+     * safe personal fields (firstName, lastName, phone, jobTitle).
+     * Role, status, department and organisation fields are intentionally ignored.
+     */
+    @PatchMapping("/me")
+    public ResponseEntity<UserDto> patchMe(
+            Authentication authentication,
+            @RequestBody UserDto dto) {
+        return ResponseEntity.ok(userService.patchMe(authentication.getName(), dto));
+    }
+
+    // ── Admin-only endpoints ──────────────────────────────────────────────────
 
     @PostMapping
     @PreAuthorize("hasAuthority('ROLE_ADMIN')")

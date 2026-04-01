@@ -43,6 +43,8 @@ public class BudgetDto {
     /** Computed: spentAmount / totalAmount * 100 */
     private Double utilizationPct;
 
+    private Integer fiscalYear;
+
     // ---- getters / setters ----
 
     public UUID getId() { return id; }
@@ -83,4 +85,7 @@ public class BudgetDto {
 
     public Double getUtilizationPct() { return utilizationPct; }
     public void setUtilizationPct(Double utilizationPct) { this.utilizationPct = utilizationPct; }
+
+    public Integer getFiscalYear() { return fiscalYear; }
+    public void setFiscalYear(Integer fiscalYear) { this.fiscalYear = fiscalYear; }
 }

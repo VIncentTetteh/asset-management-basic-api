@@ -71,11 +71,14 @@ public class AssetImportServiceImpl extends com.example.demo.services.TenantAwar
     private static final int COL_INSURANCE_POLICY_ID = 22;
 
     private final AssetService assetService;
+    private final AssetRepository assetRepository;
     private final CategoryRepository categoryRepository;
     private final LocationRepository locationRepository;
     private final SupplierRepository supplierRepository;
     private final DepartmentRepository departmentRepository;
     private final UserRepository userRepository;
+    private final OrganisationSubscriptionRepository organisationSubscriptionRepository;
+    private final SubscriptionPlanRepository subscriptionPlanRepository;
     private final FileStorageService storageService;
 
     @Value("${app.storage.s3.import-prefix:imports}")
@@ -83,32 +86,84 @@ public class AssetImportServiceImpl extends com.example.demo.services.TenantAwar
 
     public AssetImportServiceImpl(
             AssetService assetService,
+            AssetRepository assetRepository,
             CategoryRepository categoryRepository,
             LocationRepository locationRepository,
             SupplierRepository supplierRepository,
             DepartmentRepository departmentRepository,
             UserRepository userRepository,
             OrganisationRepository organisationRepository,
+            OrganisationSubscriptionRepository organisationSubscriptionRepository,
+            SubscriptionPlanRepository subscriptionPlanRepository,
             FileStorageService storageService) {
         super(organisationRepository);
         this.assetService = assetService;
+        this.assetRepository = assetRepository;
         this.categoryRepository = categoryRepository;
         this.locationRepository = locationRepository;
         this.supplierRepository = supplierRepository;
         this.departmentRepository = departmentRepository;
         this.userRepository = userRepository;
+        this.organisationSubscriptionRepository = organisationSubscriptionRepository;
+        this.subscriptionPlanRepository = subscriptionPlanRepository;
         this.storageService = storageService;
     }
 
     @Override
     public AssetImportResultDto importFromExcel(MultipartFile file) {
-        AssetImportResultDto result = new AssetImportResultDto();
+        return importFromExcel(file, false);
+    }
 
+    @Override
+    public AssetImportResultDto importFromExcel(MultipartFile file, boolean dryRun) {
         if (file == null || file.isEmpty()) {
+            AssetImportResultDto result = new AssetImportResultDto();
+            result.setDryRun(dryRun);
             result.getErrors().add(new RowError(0, "Uploaded file is empty"));
             return result;
         }
+
         String filename = file.getOriginalFilename();
+        String contentType = file.getContentType();
+        if (filename == null || (!filename.endsWith(".xlsx") && !filename.endsWith(".xls"))) {
+            AssetImportResultDto result = new AssetImportResultDto();
+            result.setDryRun(dryRun);
+            result.getErrors().add(new RowError(0, "Only .xlsx and .xls files are supported"));
+            return result;
+        }
+
+        byte[] fileBytes;
+        try {
+            fileBytes = file.getBytes();
+        } catch (IOException e) {
+            AssetImportResultDto result = new AssetImportResultDto();
+            result.setDryRun(dryRun);
+            result.getErrors().add(new RowError(0, "Failed to read uploaded file"));
+            return result;
+        }
+
+        // For sync imports, store the import artifact for traceability (phase 2 may refine behavior).
+        return importFromExcelInternal(filename, contentType, fileBytes, dryRun, true);
+    }
+
+    @Override
+    public AssetImportResultDto importFromExcelBytes(String filename, String contentType, byte[] fileBytes, boolean dryRun) {
+        // For async import jobs, bytes are already provided; we avoid re-storing import artifacts here.
+        return importFromExcelInternal(filename, contentType, fileBytes, dryRun, false);
+    }
+
+    private AssetImportResultDto importFromExcelInternal(String filename,
+                                                          String contentType,
+                                                          byte[] fileBytes,
+                                                          boolean dryRun,
+                                                          boolean storeArtifact) {
+        AssetImportResultDto result = new AssetImportResultDto();
+        result.setDryRun(dryRun);
+
+        if (fileBytes == null || fileBytes.length == 0) {
+            result.getErrors().add(new RowError(0, "Uploaded file is empty"));
+            return result;
+        }
         if (filename == null || (!filename.endsWith(".xlsx") && !filename.endsWith(".xls"))) {
             result.getErrors().add(new RowError(0, "Only .xlsx and .xls files are supported"));
             return result;
@@ -124,20 +179,14 @@ public class AssetImportServiceImpl extends com.example.demo.services.TenantAwar
 
         LookupCache cache = buildCache(org);
 
-        byte[] fileBytes;
-        try {
-            fileBytes = file.getBytes();
-        } catch (IOException e) {
-            result.getErrors().add(new RowError(0, "Failed to read uploaded file"));
-            return result;
+        if (storeArtifact) {
+            String cleanName = filename.replaceAll("[^A-Za-z0-9._-]", "_");
+            String key = importPrefix + "/" + org.getId() + "/" + UUID.randomUUID() + "/" + cleanName;
+            storageService.store(key, fileBytes, contentType, cleanName, Map.of(
+                    "organisationId", org.getId().toString(),
+                    "originalFilename", cleanName
+            ));
         }
-
-        String cleanName = filename.replaceAll("[^A-Za-z0-9._-]", "_");
-        String key = importPrefix + "/" + org.getId() + "/" + UUID.randomUUID() + "/" + cleanName;
-        storageService.store(key, fileBytes, file.getContentType(), cleanName, Map.of(
-                "organisationId", org.getId().toString(),
-                "originalFilename", cleanName
-        ));
 
         try (Workbook workbook = new XSSFWorkbook(new ByteArrayInputStream(fileBytes))) {
             Sheet sheet = workbook.getSheetAt(0);
@@ -158,9 +207,19 @@ public class AssetImportServiceImpl extends com.example.demo.services.TenantAwar
                 result.setTotalRows(result.getTotalRows() + 1);
                 try {
                     AssetDto dto = buildDto(row, name, cache);
-                    assetService.create(dto);
+                    if (dryRun) {
+                        validateDryRunCreate(dto, org, result.getImported());
+                    } else {
+                        assetService.create(dto);
+                    }
                     result.setImported(result.getImported() + 1);
                 } catch (IllegalArgumentException e) {
+                    result.setSkipped(result.getSkipped() + 1);
+                    result.getErrors().add(new RowError(humanRow, e.getMessage()));
+                } catch (IllegalStateException e) {
+                    result.setSkipped(result.getSkipped() + 1);
+                    result.getErrors().add(new RowError(humanRow, e.getMessage()));
+                } catch (AccessDeniedException e) {
                     result.setSkipped(result.getSkipped() + 1);
                     result.getErrors().add(new RowError(humanRow, e.getMessage()));
                 } catch (Exception e) {
@@ -174,6 +233,41 @@ public class AssetImportServiceImpl extends com.example.demo.services.TenantAwar
         }
 
         return result;
+    }
+
+    private void validateDryRunCreate(AssetDto dto, Organisation org, int alreadyImported) {
+        SubscriptionPlan plan = resolvePlan(org);
+        long currentAssets = assetRepository.countByOrganisationAndDeletedAtIsNull(org);
+        long projectedCount = currentAssets + alreadyImported;
+        if (projectedCount >= plan.getMaxAssets()) {
+            throw new AccessDeniedException("Asset limit reached for current plan. Upgrade your subscription.");
+        }
+
+        String name = dto.getName();
+        UUID departmentId = dto.getDepartmentId();
+        boolean duplicate = departmentId != null
+                ? assetRepository.existsByNameIgnoreCaseAndOrganisationAndDepartmentAndDeletedAtIsNull(
+                name,
+                org,
+                departmentRepository.findByIdAndOrganisationAndDeletedAtIsNull(departmentId, org)
+                        .orElseThrow(() -> new IllegalArgumentException("Department not found in your organisation")))
+                : assetRepository.existsByNameIgnoreCaseAndOrganisationAndDeletedAtIsNull(name, org);
+        if (duplicate) {
+            throw new IllegalStateException("Asset with the same name already exists in this organisation");
+        }
+    }
+
+    private SubscriptionPlan resolvePlan(Organisation org) {
+        OrganisationSubscription subscription = organisationSubscriptionRepository
+                .findFirstByOrganisationAndDeletedAtIsNullOrderByCreatedAtDesc(org)
+                .orElse(null);
+        if (subscription != null
+                && subscription.getPlan() != null
+                && subscription.getStatus() == SubscriptionStatus.ACTIVE) {
+            return subscription.getPlan();
+        }
+        return subscriptionPlanRepository.findByCodeAndDeletedAtIsNull("FREEMIUM")
+                .orElseThrow(() -> new IllegalStateException("FREEMIUM plan is not configured"));
     }
 
     // ── Lookup cache ──────────────────────────────────────────────────────────
