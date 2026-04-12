@@ -4,6 +4,7 @@ import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
 
+import java.time.Instant;
 import java.util.UUID;
 
 @Data
@@ -22,5 +23,9 @@ public class CategoryDto {
     private String assetPrefixCode;
 
     private UUID organisationId;
+
+    private Instant createdAt;
+
+    private Instant updatedAt;
 }
 

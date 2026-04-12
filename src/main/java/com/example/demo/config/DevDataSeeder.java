@@ -8,6 +8,7 @@ import com.example.demo.repositories.DepartmentRepository;
 import com.example.demo.repositories.OrganisationRepository;
 import com.example.demo.repositories.RoleRepository;
 import com.example.demo.repositories.UserRepository;
+import com.example.demo.services.DefaultRoleSeederService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
@@ -50,17 +51,20 @@ public class DevDataSeeder implements ApplicationRunner {
     private final RoleRepository roleRepository;
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
+    private final DefaultRoleSeederService defaultRoleSeederService;
 
     public DevDataSeeder(OrganisationRepository organisationRepository,
             DepartmentRepository departmentRepository,
             RoleRepository roleRepository,
             UserRepository userRepository,
-            PasswordEncoder passwordEncoder) {
+            PasswordEncoder passwordEncoder,
+            DefaultRoleSeederService defaultRoleSeederService) {
         this.organisationRepository = organisationRepository;
         this.departmentRepository = departmentRepository;
         this.roleRepository = roleRepository;
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
+        this.defaultRoleSeederService = defaultRoleSeederService;
     }
 
     @Override
@@ -88,18 +92,14 @@ public class DevDataSeeder implements ApplicationRunner {
                     return departmentRepository.save(d);
                 });
 
-        // 3) Role (scoped to org)
+        // 3) Seed all standard platform roles (idempotent — skips existing ones)
+        defaultRoleSeederService.seedRolesForOrganisation(org);
+
+        // Retrieve the ADMIN role that was just seeded (or already existed)
         Role role = roleRepository
-                .findByNameAndOrganisationId(ROLE_NAME, getId(org))
-                .orElseGet(() -> {
-                    Role r = new Role();
-                    r.setName(ROLE_NAME);
-                    r.setDescription("Administrator role with full access (dev-only seed)");
-                    r.setPermissions("[\"ALL\"]");
-                    r.setOrganisation(org);
-                    log.info("[DEV SEED] Creating role: {} (org={})", ROLE_NAME, org.getName());
-                    return roleRepository.save(r);
-                });
+                .findByNameAndOrganisationAndDeletedAtIsNull(ROLE_NAME, org)
+                .orElseThrow(() -> new IllegalStateException(
+                        "[DEV SEED] ADMIN role not found after seeding — this should not happen"));
 
         // 4) User (email unique per org, employeeId globally unique)
         Optional<User> existingByEmail = userRepository.findByEmailAndOrganisationId(USER_EMAIL, getId(org));

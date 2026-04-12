@@ -8,6 +8,7 @@ import com.example.demo.repositories.OrganisationRepository;
 import com.example.demo.repositories.RoleRepository;
 import com.example.demo.security.JwtBlacklist;
 import com.example.demo.security.JwtUtil;
+import com.example.demo.security.PermissionCacheService;
 import com.example.demo.services.EmailService;
 import com.example.demo.enums.UserStatus;
 import org.springframework.http.HttpStatus;
@@ -47,6 +48,7 @@ public class AuthController {
     private final JwtUtil jwtUtil;
     private final JwtBlacklist jwtBlacklist;
     private final EmailService emailService;
+    private final PermissionCacheService permissionCacheService;
 
     @Value("${app.jwt.expiration:86400000}")
     private long jwtExpirationMillis;
@@ -59,7 +61,8 @@ public class AuthController {
 
     public AuthController(UserRepository userRepository, OrganisationRepository organisationRepository,
             RoleRepository roleRepository, PasswordEncoder passwordEncoder, JwtUtil jwtUtil,
-            JwtBlacklist jwtBlacklist, EmailService emailService) {
+            JwtBlacklist jwtBlacklist, EmailService emailService,
+            PermissionCacheService permissionCacheService) {
         this.userRepository = userRepository;
         this.organisationRepository = organisationRepository;
         this.roleRepository = roleRepository;
@@ -67,6 +70,7 @@ public class AuthController {
         this.jwtUtil = jwtUtil;
         this.jwtBlacklist = jwtBlacklist;
         this.emailService = emailService;
+        this.permissionCacheService = permissionCacheService;
     }
 
     /**
@@ -268,7 +272,7 @@ public class AuthController {
 
         User user = userOpt.get();
 
-        // Build new token with same claims
+        // Build new token with same claims (mirrors login JWT structure)
         Map<String, Object> claims = new HashMap<>();
         claims.put("email", user.getEmail());
         claims.put("firstName", user.getFirstName());
@@ -277,9 +281,13 @@ public class AuthController {
         if (user.getRole() != null) {
             String roleName = user.getRole().getName();
             claims.put("role", roleName.startsWith("ROLE_") ? roleName : "ROLE_" + roleName);
+            claims.put("permissions", user.getRole().getPermissions());
         }
         if (user.getOrganisation() != null) {
             claims.put("organisationId", user.getOrganisation().getId().toString());
+        }
+        if (user.getDepartment() != null) {
+            claims.put("departmentId", user.getDepartment().getId().toString());
         }
 
         String newToken = jwtUtil.generateToken(email, claims, jwtExpirationMillis);
@@ -402,6 +410,31 @@ public class AuthController {
 
         User user = userOpt.get();
         return ResponseEntity.ok(convertToUserDto(user));
+    }
+
+    /**
+     * Returns the live set of permissions for the currently authenticated user.
+     * Backed by {@link PermissionCacheService} — reflects role changes immediately
+     * without requiring a re-login or token refresh.
+     */
+    @GetMapping("/me/permissions")
+    public ResponseEntity<?> getMyPermissions(@RequestHeader("Authorization") String authHeader) {
+        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", "Missing or invalid authorization header"));
+        }
+        String token = authHeader.substring(7);
+        io.jsonwebtoken.Claims parsedClaims;
+        try {
+            parsedClaims = jwtUtil.parseToken(token);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", "Invalid or expired token"));
+        }
+        String email = parsedClaims.getSubject();
+        String orgId = parsedClaims.get("organisationId", String.class);
+        List<String> permissions = permissionCacheService.getPermissionsForUser(email, orgId);
+        return ResponseEntity.ok(Map.of("permissions", permissions));
     }
 
     /**

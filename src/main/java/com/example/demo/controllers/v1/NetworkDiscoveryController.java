@@ -22,7 +22,7 @@ import java.util.UUID;
  */
 @RestController
 @RequestMapping("/api/v1/discovery")
-@PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN')")
+@PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_ORGANIZATION_SETTINGS','VIEW_NETWORK_DISCOVERY','MANAGE_NETWORK_DISCOVERY')")
 public class NetworkDiscoveryController {
 
     private final NetworkDiscoveryService discoveryService;

@@ -52,10 +52,24 @@ public class DepartmentServiceImpl implements DepartmentService {
             throw new IllegalStateException("Department with the same name already exists in this organisation");
         }
 
+        if (dto.getDepartmentCode() != null && !dto.getDepartmentCode().isBlank()) {
+            if (departmentRepository.existsByDepartmentCodeIgnoreCaseAndOrganisationAndDeletedAtIsNull(dto.getDepartmentCode(), organisation)) {
+                throw new IllegalStateException("Department code \"" + dto.getDepartmentCode() + "\" is already in use in this organisation");
+            }
+        }
+
+        if (dto.getCostCenterCode() != null && !dto.getCostCenterCode().isBlank()) {
+            if (departmentRepository.existsByCostCenterCodeIgnoreCaseAndOrganisationAndDeletedAtIsNull(dto.getCostCenterCode(), organisation)) {
+                throw new IllegalStateException("Cost center code \"" + dto.getCostCenterCode() + "\" is already in use in this organisation");
+            }
+        }
+
         Department department = new Department();
         department.setName(name);
         department.setOrganisation(organisation);
 
+        if (dto.getDescription() != null)
+            department.setDescription(dto.getDescription());
         if (dto.getDepartmentCode() != null)
             department.setDepartmentCode(dto.getDepartmentCode());
         if (dto.getCostCenterCode() != null)
@@ -103,7 +117,7 @@ public class DepartmentServiceImpl implements DepartmentService {
         }
 
         UUID orgId = TenantContext.getOrganisationId();
-        Organisation org = organisationRepository.findByIdAndDeletedAtIsNull(orgId)
+        Organisation org = organisationRepository.findById(orgId)
                 .orElseThrow(() -> new IllegalArgumentException("Organisation not found: " + orgId));
 
         List<Department> result = departmentRepository.findAllByOrganisationAndDeletedAtIsNull(org);
@@ -123,12 +137,28 @@ public class DepartmentServiceImpl implements DepartmentService {
         Department d = departmentRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
                 .orElseThrow(() -> new IllegalArgumentException("Department not found in your organisation"));
 
-        if (dto.getName() != null)
+        if (dto.getName() != null && !dto.getName().equalsIgnoreCase(d.getName())) {
+            if (departmentRepository.existsByNameIgnoreCaseAndOrganisationAndDeletedAtIsNull(dto.getName(), org)) {
+                throw new IllegalStateException("Department with the same name already exists in this organisation");
+            }
             d.setName(dto.getName());
-        if (dto.getDepartmentCode() != null)
+        }
+        if (dto.getDescription() != null)
+            d.setDescription(dto.getDescription());
+        if (dto.getDepartmentCode() != null) {
+            if (!dto.getDepartmentCode().isBlank() &&
+                    departmentRepository.existsByDepartmentCodeIgnoreCaseAndOrganisationAndDeletedAtIsNullAndIdNot(dto.getDepartmentCode(), org, id)) {
+                throw new IllegalStateException("Department code \"" + dto.getDepartmentCode() + "\" is already in use in this organisation");
+            }
             d.setDepartmentCode(dto.getDepartmentCode());
-        if (dto.getCostCenterCode() != null)
+        }
+        if (dto.getCostCenterCode() != null) {
+            if (!dto.getCostCenterCode().isBlank() &&
+                    departmentRepository.existsByCostCenterCodeIgnoreCaseAndOrganisationAndDeletedAtIsNullAndIdNot(dto.getCostCenterCode(), org, id)) {
+                throw new IllegalStateException("Cost center code \"" + dto.getCostCenterCode() + "\" is already in use in this organisation");
+            }
             d.setCostCenterCode(dto.getCostCenterCode());
+        }
         if (dto.getBudgetLimit() != null)
             d.setBudgetLimit(dto.getBudgetLimit());
         if (dto.getStatus() != null)
@@ -177,10 +207,13 @@ public class DepartmentServiceImpl implements DepartmentService {
         DepartmentDto dto = new DepartmentDto();
         dto.setId(d.getId());
         dto.setName(d.getName());
+        dto.setDescription(d.getDescription());
         dto.setDepartmentCode(d.getDepartmentCode());
         dto.setCostCenterCode(d.getCostCenterCode());
         dto.setBudgetLimit(d.getBudgetLimit());
         dto.setStatus(d.getStatus());
+        dto.setCreatedAt(d.getCreatedAt());
+        dto.setUpdatedAt(d.getUpdatedAt());
 
         if (d.getParentDepartment() != null) {
             dto.setParentDepartmentId(d.getParentDepartment().getId());

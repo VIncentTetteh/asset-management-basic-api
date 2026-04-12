@@ -6,6 +6,7 @@ import lombok.Data;
 
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.UUID;
 
@@ -71,4 +72,8 @@ public class AssetDto {
     private com.example.demo.enums.ProcurementType procurementType;
 
     private String costCenter;
+
+    private Instant createdAt;
+
+    private Instant updatedAt;
 }

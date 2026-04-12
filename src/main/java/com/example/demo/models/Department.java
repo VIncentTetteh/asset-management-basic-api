@@ -11,16 +11,16 @@ import java.math.BigDecimal;
 import java.util.Set;
 
 @Entity
-@Table(name = "department", uniqueConstraints = {
-        @UniqueConstraint(columnNames = { "department_code", "organisation_id" }, name = "uk_dept_code_per_org"),
-        @UniqueConstraint(columnNames = { "cost_center_code", "organisation_id" }, name = "uk_dept_costcenter_per_org")
-})
+@Table(name = "department")
 @Data
 @EqualsAndHashCode(callSuper = true, onlyExplicitlyIncluded = true)
 public class Department extends BaseEntity {
 
     @Column(nullable = false)
     private String name;
+
+    @Column(columnDefinition = "TEXT")
+    private String description;
 
     @Column
     private String departmentCode;

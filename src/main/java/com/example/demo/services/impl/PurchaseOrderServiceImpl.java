@@ -294,6 +294,8 @@ public class PurchaseOrderServiceImpl extends TenantAwareService implements Purc
         if (po.getLinkedBudget() != null) {
             dto.setLinkedBudgetId(po.getLinkedBudget().getId());
         }
+        dto.setCreatedAt(po.getCreatedAt());
+        dto.setUpdatedAt(po.getUpdatedAt());
         return dto;
     }
 }

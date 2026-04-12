@@ -44,7 +44,7 @@ public class NotificationsController {
      *   limit  — max results, default 20
      */
     @GetMapping
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_USER','ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','VIEW_ASSETS')")
     public ResponseEntity<NotificationPageDto> getNotifications(
             @RequestParam(required = false) String type,
             @RequestParam(defaultValue = "all") String status,
@@ -62,7 +62,7 @@ public class NotificationsController {
      * PATCH /api/v1/notifications/{notificationId}/read
      */
     @PatchMapping("/{notificationId}/read")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_USER','ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','VIEW_ASSETS')")
     public ResponseEntity<Map<String, Object>> markAsRead(@PathVariable UUID notificationId) {
         notificationService.markAsRead(notificationId, requireUser(), requireOrg());
         return ResponseEntity.ok(Map.of(
@@ -75,7 +75,7 @@ public class NotificationsController {
      * PATCH /api/v1/notifications/mark-all-read
      */
     @PatchMapping("/mark-all-read")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_USER','ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','VIEW_ASSETS')")
     public ResponseEntity<Map<String, Object>> markAllAsRead() {
         int count = notificationService.markAllAsRead(requireUser(), requireOrg());
         return ResponseEntity.ok(Map.of(
@@ -87,7 +87,7 @@ public class NotificationsController {
      * DELETE /api/v1/notifications/{notificationId}
      */
     @DeleteMapping("/{notificationId}")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_USER','ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','VIEW_ASSETS')")
     public ResponseEntity<Void> deleteNotification(@PathVariable UUID notificationId) {
         notificationService.deleteNotification(notificationId, requireUser(), requireOrg());
         return ResponseEntity.noContent().build();
@@ -97,7 +97,7 @@ public class NotificationsController {
      * DELETE /api/v1/notifications
      */
     @DeleteMapping
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_USER','ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','VIEW_ASSETS')")
     public ResponseEntity<Map<String, Object>> deleteAllNotifications() {
         int count = notificationService.deleteAllNotifications(requireUser(), requireOrg());
         return ResponseEntity.ok(Map.of(
@@ -109,7 +109,7 @@ public class NotificationsController {
      * GET /api/v1/notifications/preferences
      */
     @GetMapping("/preferences")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_USER','ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','VIEW_ASSETS')")
     public ResponseEntity<NotificationPreferencesDto> getNotificationPreferences() {
         return ResponseEntity.ok(notificationService.getPreferences(requireUser()));
     }
@@ -118,7 +118,7 @@ public class NotificationsController {
      * PATCH /api/v1/notifications/preferences
      */
     @PatchMapping("/preferences")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_USER','ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','VIEW_ASSETS')")
     public ResponseEntity<NotificationPreferencesDto> updateNotificationPreferences(
             @RequestBody Map<String, Object> request) {
         return ResponseEntity.ok(notificationService.updatePreferences(requireUser(), request));
@@ -128,7 +128,7 @@ public class NotificationsController {
      * GET /api/v1/notifications/summary
      */
     @GetMapping("/summary")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_USER','ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','VIEW_ASSETS')")
     public ResponseEntity<Map<String, Object>> getNotificationSummary() {
         return ResponseEntity.ok(notificationService.getSummary(requireUser(), requireOrg()));
     }

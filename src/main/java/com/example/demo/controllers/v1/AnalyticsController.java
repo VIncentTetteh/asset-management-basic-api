@@ -37,7 +37,7 @@ public class AnalyticsController {
      *   groupBy — status | department | condition, default "status"
      */
     @GetMapping("/assets")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','VIEW_REPORTS','GENERATE_REPORTS')")
     public ResponseEntity<Map<String, Object>> getAssetAnalytics(
             @RequestParam(defaultValue = "month") String period,
             @RequestParam(defaultValue = "status") String groupBy) {
@@ -50,7 +50,7 @@ public class AnalyticsController {
      * Asset values, depreciation totals, and per-category breakdown.
      */
     @GetMapping("/financial")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','VIEW_REPORTS','GENERATE_REPORTS')")
     public ResponseEntity<Map<String, Object>> getFinancialAnalytics(
             @RequestParam(defaultValue = "month") String period) {
         Organisation org = requireOrg();
@@ -62,7 +62,7 @@ public class AnalyticsController {
      * PO counts by status, totals, averages, and top suppliers.
      */
     @GetMapping("/purchase-orders")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','VIEW_REPORTS','GENERATE_REPORTS')")
     public ResponseEntity<Map<String, Object>> getPurchaseOrderAnalytics(
             @RequestParam(defaultValue = "month") String period) {
         Organisation org = requireOrg();
@@ -74,7 +74,7 @@ public class AnalyticsController {
      * Maintenance records: totals, cost, overdue assets, breakdown by type.
      */
     @GetMapping("/maintenance")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','VIEW_REPORTS','GENERATE_REPORTS')")
     public ResponseEntity<Map<String, Object>> getMaintenanceAnalytics() {
         Organisation org = requireOrg();
         return ResponseEntity.ok(analyticsService.getMaintenanceAnalytics(org));
@@ -85,7 +85,7 @@ public class AnalyticsController {
      * Month-by-month book value and depreciation charges for the last N months (max 60).
      */
     @GetMapping("/depreciation-trends")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','VIEW_REPORTS','GENERATE_REPORTS','VIEW_DEPRECIATION','MANAGE_DEPRECIATION')")
     public ResponseEntity<Map<String, Object>> getDepreciationTrends(
             @RequestParam(defaultValue = "12") int months) {
         if (months < 1 || months > MAX_TREND_MONTHS) {

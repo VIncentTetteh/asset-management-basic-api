@@ -4,6 +4,7 @@ import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
 
+import java.time.Instant;
 import java.util.UUID;
 
 @Data
@@ -25,8 +26,18 @@ public class LocationDto {
 
     private String geoCoordinates;
 
+    private Double latitude;
+
+    private Double longitude;
+
+    private String address;
+
     private UUID parentLocationId;
 
     private UUID organisationId;
+
+    private Instant createdAt;
+
+    private Instant updatedAt;
 }
 

@@ -23,7 +23,7 @@ public class PurchaseOrderController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_EXPENSES','MANAGE_PROCUREMENT')")
     public ResponseEntity<PurchaseOrderDto> createPurchaseOrder(
             @Valid @RequestBody PurchaseOrderDto poDto) {
         PurchaseOrderDto createdPo = poService.createPurchaseOrder(poDto);
@@ -31,14 +31,14 @@ public class PurchaseOrderController {
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_USER')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','VIEW_ASSETS','VIEW_PROCUREMENT','MANAGE_PROCUREMENT')")
     public ResponseEntity<PurchaseOrderDto> getPurchaseOrderById(@PathVariable UUID id) {
         PurchaseOrderDto po = poService.getPurchaseOrderById(id);
         return ResponseEntity.ok(po);
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_USER')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','VIEW_ASSETS','VIEW_PROCUREMENT','MANAGE_PROCUREMENT')")
     public ResponseEntity<Set<PurchaseOrderDto>> getPurchaseOrders(
             @RequestParam(required = false) UUID departmentId,
             @RequestParam(required = false) UUID supplierId,
@@ -56,7 +56,7 @@ public class PurchaseOrderController {
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_EXPENSES','MANAGE_PROCUREMENT')")
     public ResponseEntity<PurchaseOrderDto> updatePurchaseOrder(@PathVariable UUID id,
             @Valid @RequestBody PurchaseOrderDto poDto) {
         PurchaseOrderDto updatedPo = poService.updatePurchaseOrder(id, poDto);
@@ -64,7 +64,7 @@ public class PurchaseOrderController {
     }
 
     @PatchMapping("/{id}")
-    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_EXPENSES','MANAGE_PROCUREMENT')")
     public ResponseEntity<PurchaseOrderDto> patchPurchaseOrder(@PathVariable UUID id,
             @RequestBody PurchaseOrderDto poDto) {
         PurchaseOrderDto updatedPo = poService.patchPurchaseOrder(id, poDto);
@@ -72,7 +72,7 @@ public class PurchaseOrderController {
     }
 
     @PostMapping("/{id}/approve")
-    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_EXPENSES','APPROVE_PROCUREMENT','APPROVE_REQUESTS')")
     // C4 fix: approver resolved from SecurityContext in service — no approvedById
     // param
     public ResponseEntity<PurchaseOrderDto> approvePurchaseOrder(@PathVariable UUID id) {
@@ -81,14 +81,14 @@ public class PurchaseOrderController {
     }
 
     @PostMapping("/{id}/reject")
-    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_EXPENSES','APPROVE_PROCUREMENT','REJECT_REQUESTS')")
     public ResponseEntity<PurchaseOrderDto> rejectPurchaseOrder(@PathVariable UUID id) {
         PurchaseOrderDto rejectedPo = poService.rejectPurchaseOrder(id);
         return ResponseEntity.ok(rejectedPo);
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_EXPENSES','MANAGE_PROCUREMENT')")
     public ResponseEntity<Void> deletePurchaseOrder(@PathVariable UUID id) {
         poService.deletePurchaseOrder(id);
         return ResponseEntity.noContent().build();

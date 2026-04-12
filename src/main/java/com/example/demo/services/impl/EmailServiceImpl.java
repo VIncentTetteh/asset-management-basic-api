@@ -45,6 +45,9 @@ public class EmailServiceImpl implements EmailService {
     public EmailServiceImpl(ObjectProvider<JavaMailSender> mailSenderProvider, TemplateEngine templateEngine) {
         this.mailSenderProvider = mailSenderProvider;
         this.templateEngine = templateEngine;
+        // Startup log for effective email config
+        log.info("[EMAIL] Email sending enabled: {}", emailEnabled);
+        log.info("[EMAIL] SMTP host: {}", smtpHost);
     }
 
     @Override

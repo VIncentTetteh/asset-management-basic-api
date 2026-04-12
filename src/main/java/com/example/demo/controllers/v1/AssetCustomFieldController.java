@@ -26,7 +26,7 @@ public class AssetCustomFieldController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','EDIT_ASSET')")
     public ResponseEntity<AssetCustomFieldDto> create(
             @PathVariable UUID assetId,
             @Valid @RequestBody AssetCustomFieldDto dto) {
@@ -40,7 +40,7 @@ public class AssetCustomFieldController {
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','VIEW_ASSETS')")
     public ResponseEntity<List<AssetCustomFieldDto>> list(@PathVariable UUID assetId) {
         try {
             return ResponseEntity.ok(fieldService.listByAsset(assetId));
@@ -50,7 +50,7 @@ public class AssetCustomFieldController {
     }
 
     @PutMapping("/{fieldId}")
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','EDIT_ASSET')")
     public ResponseEntity<AssetCustomFieldDto> update(
             @PathVariable UUID assetId,
             @PathVariable UUID fieldId,
@@ -63,7 +63,7 @@ public class AssetCustomFieldController {
     }
 
     @DeleteMapping("/{fieldId}")
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','EDIT_ASSET')")
     public ResponseEntity<Void> delete(
             @PathVariable UUID assetId,
             @PathVariable UUID fieldId) {

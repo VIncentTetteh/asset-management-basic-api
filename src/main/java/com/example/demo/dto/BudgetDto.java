@@ -6,6 +6,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.UUID;
 
@@ -44,6 +45,10 @@ public class BudgetDto {
     private Double utilizationPct;
 
     private Integer fiscalYear;
+
+    private Instant createdAt;
+
+    private Instant updatedAt;
 
     // ---- getters / setters ----
 
@@ -88,4 +93,10 @@ public class BudgetDto {
 
     public Integer getFiscalYear() { return fiscalYear; }
     public void setFiscalYear(Integer fiscalYear) { this.fiscalYear = fiscalYear; }
+
+    public Instant getCreatedAt() { return createdAt; }
+    public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
+
+    public Instant getUpdatedAt() { return updatedAt; }
+    public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }
 }

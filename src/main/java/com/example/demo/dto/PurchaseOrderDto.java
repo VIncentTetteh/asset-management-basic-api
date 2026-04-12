@@ -7,6 +7,7 @@ import lombok.Data;
 
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.UUID;
 
 @Data
@@ -38,5 +39,9 @@ public class PurchaseOrderDto {
 
     /** Optional: Budget to auto-deduct from when this PO is approved. */
     private UUID linkedBudgetId;
+
+    private Instant createdAt;
+
+    private Instant updatedAt;
 }
 

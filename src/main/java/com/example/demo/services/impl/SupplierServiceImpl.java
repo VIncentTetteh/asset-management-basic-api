@@ -163,6 +163,8 @@ public class SupplierServiceImpl extends TenantAwareService implements SupplierS
         dto.setTaxId(supplier.getTaxId());
         dto.setStatus(supplier.getStatus());
         dto.setOrganisationId(supplier.getOrganisation().getId());
+        dto.setCreatedAt(supplier.getCreatedAt());
+        dto.setUpdatedAt(supplier.getUpdatedAt());
         return dto;
     }
 }

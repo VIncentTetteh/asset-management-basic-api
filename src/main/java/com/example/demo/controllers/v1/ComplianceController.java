@@ -18,7 +18,7 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/compliance")
-@PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN')")
+@PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','VIEW_AUDIT_LOGS','CONDUCT_AUDIT','MANAGE_SECURITY_SETTINGS','VIEW_COMPLIANCE','MANAGE_COMPLIANCE')")
 public class ComplianceController {
 
     private final ComplianceService complianceService;

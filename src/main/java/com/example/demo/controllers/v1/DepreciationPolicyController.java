@@ -6,6 +6,7 @@ import com.example.demo.multitenancy.TenantContext;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import jakarta.validation.Valid;
@@ -23,6 +24,7 @@ public class DepreciationPolicyController {
     }
 
     @PostMapping
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_DEPRECIATION')")
     public ResponseEntity<DepreciationPolicyDto> createPolicy(@Valid @RequestBody DepreciationPolicyDto policyDto,
                                                              @RequestParam UUID organisationId) {
         requireSameOrganisation(organisationId);
@@ -31,12 +33,14 @@ public class DepreciationPolicyController {
     }
 
     @GetMapping("/{id}")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','VIEW_DEPRECIATION','MANAGE_DEPRECIATION','VIEW_REPORTS')")
     public ResponseEntity<DepreciationPolicyDto> getPolicyById(@PathVariable UUID id) {
         DepreciationPolicyDto policy = policyService.getPolicyById(id);
         return ResponseEntity.ok(policy);
     }
 
     @GetMapping
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','VIEW_DEPRECIATION','MANAGE_DEPRECIATION','VIEW_REPORTS')")
     public ResponseEntity<Set<DepreciationPolicyDto>> getPoliciesByOrganisation(@RequestParam UUID organisationId) {
         requireSameOrganisation(organisationId);
         Set<DepreciationPolicyDto> policies = policyService.getPoliciesByOrganisation(organisationId);
@@ -54,6 +58,7 @@ public class DepreciationPolicyController {
     }
 
     @PutMapping("/{id}")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_DEPRECIATION')")
     public ResponseEntity<DepreciationPolicyDto> updatePolicy(@PathVariable UUID id,
                                                              @Valid @RequestBody DepreciationPolicyDto policyDto) {
         DepreciationPolicyDto updatedPolicy = policyService.updatePolicy(id, policyDto);
@@ -61,6 +66,7 @@ public class DepreciationPolicyController {
     }
 
     @PatchMapping("/{id}")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_DEPRECIATION')")
     public ResponseEntity<DepreciationPolicyDto> patchPolicy(@PathVariable UUID id,
             @RequestBody DepreciationPolicyDto policyDto) {
         DepreciationPolicyDto updatedPolicy = policyService.patchPolicy(id, policyDto);
@@ -68,6 +74,7 @@ public class DepreciationPolicyController {
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_DEPRECIATION')")
     public ResponseEntity<Void> deletePolicy(@PathVariable UUID id) {
         policyService.deletePolicy(id);
         return ResponseEntity.noContent().build();

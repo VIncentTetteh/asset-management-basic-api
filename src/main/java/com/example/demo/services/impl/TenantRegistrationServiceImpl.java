@@ -15,6 +15,7 @@ import com.example.demo.repositories.RoleRepository;
 import com.example.demo.repositories.SubscriptionPlanRepository;
 import com.example.demo.repositories.UserRepository;
 import com.example.demo.security.JwtUtil;
+import com.example.demo.security.RolePermissionDefaults;
 import com.example.demo.services.EmailService;
 import com.example.demo.services.TenantRegistrationService;
 import org.springframework.beans.factory.annotation.Value;
@@ -96,11 +97,15 @@ public class TenantRegistrationServiceImpl implements TenantRegistrationService 
             Role r = new Role();
             r.setName("ADMIN");
             r.setDescription("Organisation administrator with full permissions");
-            r.setPermissions(allPermissionsJson());
+            r.setPermissions(RolePermissionDefaults.allPermissionsJson());
             r.setOrganisation(savedOrg);
             r.setCreatedBy(request.getAdminEmail()); // Manually set for ownership filtering
             return roleRepository.save(r);
         });
+        if (!Objects.equals(adminRole.getPermissions(), RolePermissionDefaults.allPermissionsJson())) {
+            adminRole.setPermissions(RolePermissionDefaults.allPermissionsJson());
+            adminRole = roleRepository.save(adminRole);
+        }
 
         roleRepository.findByNameAndOrganisationId("USER", savedOrg.getId()).orElseGet(() -> {
             Role r = new Role();
@@ -181,13 +186,6 @@ public class TenantRegistrationServiceImpl implements TenantRegistrationService 
         emailService.sendTemplate(savedUser.getEmail(), "Welcome to AssetIQ", "email/tenant-welcome", model);
 
         return response;
-    }
-
-    private String allPermissionsJson() {
-        Set<String> all = Arrays.stream(Permission.values())
-                .map(Enum::name)
-                .collect(Collectors.toCollection(LinkedHashSet::new));
-        return asJsonArray(all);
     }
 
     private String asJsonArray(Collection<String> values) {

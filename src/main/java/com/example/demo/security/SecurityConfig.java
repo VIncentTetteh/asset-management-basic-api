@@ -24,19 +24,22 @@ public class SecurityConfig {
     private final TenantFilter tenantFilter;
     private final CorsConfigurationSource corsConfigurationSource;
     private final JwtBlacklist jwtBlacklist;
+    private final PermissionCacheService permissionCacheService;
 
     public SecurityConfig(JwtUtil jwtUtil, UserRepository userRepository, TenantFilter tenantFilter,
-            CorsConfigurationSource corsConfigurationSource, JwtBlacklist jwtBlacklist) {
+            CorsConfigurationSource corsConfigurationSource, JwtBlacklist jwtBlacklist,
+            PermissionCacheService permissionCacheService) {
         this.jwtUtil = jwtUtil;
         this.userRepository = userRepository;
         this.tenantFilter = tenantFilter;
         this.corsConfigurationSource = corsConfigurationSource;
         this.jwtBlacklist = jwtBlacklist;
+        this.permissionCacheService = permissionCacheService;
     }
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
-        JwtAuthenticationFilter jwtFilter = new JwtAuthenticationFilter(jwtUtil, userRepository, jwtBlacklist);
+        JwtAuthenticationFilter jwtFilter = new JwtAuthenticationFilter(jwtUtil, userRepository, jwtBlacklist, permissionCacheService);
 
         http
                 .cors(cors -> cors.configurationSource(corsConfigurationSource))

@@ -39,7 +39,15 @@ public class LocationServiceImpl extends TenantAwareService implements LocationS
         location.setRoom(locationDto.getRoom());
         location.setCity(locationDto.getCity());
         location.setCountry(locationDto.getCountry());
-        location.setGeoCoordinates(locationDto.getGeoCoordinates());
+        location.setAddress(locationDto.getAddress());
+        location.setLatitude(locationDto.getLatitude());
+        location.setLongitude(locationDto.getLongitude());
+        // Keep geoCoordinates in sync if lat/lng provided
+        if (locationDto.getLatitude() != null && locationDto.getLongitude() != null) {
+            location.setGeoCoordinates(locationDto.getLatitude() + "," + locationDto.getLongitude());
+        } else {
+            location.setGeoCoordinates(locationDto.getGeoCoordinates());
+        }
         location.setOrganisation(org);
 
         if (locationDto.getParentLocationId() != null) {
@@ -94,7 +102,14 @@ public class LocationServiceImpl extends TenantAwareService implements LocationS
         location.setRoom(locationDto.getRoom());
         location.setCity(locationDto.getCity());
         location.setCountry(locationDto.getCountry());
-        location.setGeoCoordinates(locationDto.getGeoCoordinates());
+        location.setAddress(locationDto.getAddress());
+        location.setLatitude(locationDto.getLatitude());
+        location.setLongitude(locationDto.getLongitude());
+        if (locationDto.getLatitude() != null && locationDto.getLongitude() != null) {
+            location.setGeoCoordinates(locationDto.getLatitude() + "," + locationDto.getLongitude());
+        } else {
+            location.setGeoCoordinates(locationDto.getGeoCoordinates());
+        }
 
         if (locationDto.getParentLocationId() != null) {
             Location parentLocation = locationRepository.findByIdAndOrganisationAndDeletedAtIsNull(
@@ -138,7 +153,19 @@ public class LocationServiceImpl extends TenantAwareService implements LocationS
         if (locationDto.getCountry() != null) {
             location.setCountry(locationDto.getCountry());
         }
-        if (locationDto.getGeoCoordinates() != null) {
+        if (locationDto.getAddress() != null) {
+            location.setAddress(locationDto.getAddress());
+        }
+        if (locationDto.getLatitude() != null) {
+            location.setLatitude(locationDto.getLatitude());
+        }
+        if (locationDto.getLongitude() != null) {
+            location.setLongitude(locationDto.getLongitude());
+        }
+        // Sync geoCoordinates from lat/lng when both are present
+        if (location.getLatitude() != null && location.getLongitude() != null) {
+            location.setGeoCoordinates(location.getLatitude() + "," + location.getLongitude());
+        } else if (locationDto.getGeoCoordinates() != null) {
             location.setGeoCoordinates(locationDto.getGeoCoordinates());
         }
 
@@ -174,10 +201,15 @@ public class LocationServiceImpl extends TenantAwareService implements LocationS
         dto.setCity(location.getCity());
         dto.setCountry(location.getCountry());
         dto.setGeoCoordinates(location.getGeoCoordinates());
+        dto.setAddress(location.getAddress());
+        dto.setLatitude(location.getLatitude());
+        dto.setLongitude(location.getLongitude());
         if (location.getParentLocation() != null) {
             dto.setParentLocationId(location.getParentLocation().getId());
         }
         dto.setOrganisationId(location.getOrganisation().getId());
+        dto.setCreatedAt(location.getCreatedAt());
+        dto.setUpdatedAt(location.getUpdatedAt());
         return dto;
     }
 }

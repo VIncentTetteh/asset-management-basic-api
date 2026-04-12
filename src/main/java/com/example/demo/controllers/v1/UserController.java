@@ -58,19 +58,19 @@ public class UserController {
     // ── Admin-only endpoints ──────────────────────────────────────────────────
 
     @PostMapping
-    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_USERS','EDIT_USER','DELETE_USER')")
     public ResponseEntity<UserDto> createUser(@Valid @RequestBody UserDto dto) {
         return ResponseEntity.status(HttpStatus.CREATED).body(userService.createUser(dto));
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_USER')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','VIEW_USERS')")
     public ResponseEntity<UserDto> getUser(@PathVariable UUID id) {
         return ResponseEntity.ok(userService.getUserById(id));
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_USER')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','VIEW_USERS')")
     public ResponseEntity<Set<UserDto>> listUsers(
             @RequestParam(required = false) UUID departmentId) {
         if (departmentId != null) {
@@ -80,27 +80,27 @@ public class UserController {
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_USERS','EDIT_USER','DELETE_USER')")
     public ResponseEntity<UserDto> updateUser(@PathVariable UUID id,
             @Valid @RequestBody UserDto dto) {
         return ResponseEntity.ok(userService.updateUser(id, dto));
     }
 
     @PatchMapping("/{id}")
-    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_USERS','EDIT_USER','DELETE_USER')")
     public ResponseEntity<UserDto> patchUser(@PathVariable UUID id,
             @RequestBody UserDto dto) {
         return ResponseEntity.ok(userService.patchUser(id, dto));
     }
 
     @PutMapping("/{id}/deactivate")
-    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_USERS','EDIT_USER','DELETE_USER')")
     public ResponseEntity<UserDto> deactivateUser(@PathVariable UUID id) {
         return ResponseEntity.ok(userService.deactivateUser(id));
     }
 
     @PutMapping("/{id}/role")
-    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_USERS','EDIT_USER','DELETE_USER')")
     public ResponseEntity<UserDto> assignRole(@PathVariable UUID id,
             @RequestParam UUID roleId) {
         return ResponseEntity.ok(userService.assignRole(id, roleId));

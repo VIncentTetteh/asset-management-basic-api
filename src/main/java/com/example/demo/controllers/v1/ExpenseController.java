@@ -46,7 +46,7 @@ public class ExpenseController {
 
     /** Returns only SUBMITTED expenses awaiting approval. */
     @GetMapping("/pending")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','MANAGE_EXPENSES','VIEW_REPORTS')")
     public ResponseEntity<List<ExpenseDto>> listPending() {
         return ResponseEntity.ok(expenseService.listPending());
     }
@@ -59,7 +59,7 @@ public class ExpenseController {
 
     /** Approve a submitted expense. */
     @PostMapping("/{id}/approve")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','MANAGE_EXPENSES','VIEW_REPORTS')")
     public ResponseEntity<ExpenseDto> approve(@PathVariable UUID id) {
         try {
             return ResponseEntity.ok(expenseService.approve(id));
@@ -70,7 +70,7 @@ public class ExpenseController {
 
     /** Reject a submitted expense with an optional reason. */
     @PostMapping("/{id}/reject")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','MANAGE_EXPENSES','VIEW_REPORTS')")
     public ResponseEntity<ExpenseDto> reject(
             @PathVariable UUID id,
             @RequestBody(required = false) Map<String, String> body) {
@@ -83,7 +83,7 @@ public class ExpenseController {
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','MANAGE_EXPENSES','VIEW_REPORTS')")
     public ResponseEntity<Void> delete(@PathVariable UUID id) {
         expenseService.delete(id);
         return ResponseEntity.noContent().build();

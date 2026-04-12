@@ -171,6 +171,8 @@ public class BudgetServiceImpl extends TenantAwareService implements BudgetServi
             d.setDepartmentId(b.getDepartment().getId());
             d.setDepartmentName(b.getDepartment().getName());
         }
+        d.setCreatedAt(b.getCreatedAt());
+        d.setUpdatedAt(b.getUpdatedAt());
         return d;
     }
 }

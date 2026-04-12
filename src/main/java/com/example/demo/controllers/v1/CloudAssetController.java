@@ -38,7 +38,7 @@ public class CloudAssetController {
      * Register a new cloud asset.
      */
     @PostMapping
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','VIEW_ASSETS','EDIT_ASSET','MANAGE_CLOUD_ASSETS')")
     public ResponseEntity<CloudAssetDto> create(@Valid @RequestBody CloudAssetDto dto) {
         return ResponseEntity.status(HttpStatus.CREATED).body(cloudAssetService.create(dto));
     }
@@ -48,6 +48,7 @@ public class CloudAssetController {
      * List cloud assets with optional filters.
      */
     @GetMapping
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','VIEW_ASSETS','VIEW_CLOUD_ASSETS','MANAGE_CLOUD_ASSETS')")
     public ResponseEntity<PagedResponseDto<CloudAssetDto>> list(
             @RequestParam(required = false) String provider,
             @RequestParam(required = false) String environment,
@@ -74,6 +75,7 @@ public class CloudAssetController {
      * GET /api/v1/cloud-assets/{id}
      */
     @GetMapping("/{id}")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','VIEW_ASSETS','VIEW_CLOUD_ASSETS','MANAGE_CLOUD_ASSETS')")
     public ResponseEntity<CloudAssetDto> getById(@PathVariable UUID id) {
         return ResponseEntity.ok(cloudAssetService.getById(id));
     }
@@ -82,7 +84,7 @@ public class CloudAssetController {
      * PUT /api/v1/cloud-assets/{id}
      */
     @PutMapping("/{id}")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','VIEW_ASSETS','EDIT_ASSET','MANAGE_CLOUD_ASSETS')")
     public ResponseEntity<CloudAssetDto> update(@PathVariable UUID id, @Valid @RequestBody CloudAssetDto dto) {
         return ResponseEntity.ok(cloudAssetService.update(id, dto));
     }
@@ -91,7 +93,7 @@ public class CloudAssetController {
      * DELETE /api/v1/cloud-assets/{id}
      */
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','VIEW_ASSETS','EDIT_ASSET','MANAGE_CLOUD_ASSETS')")
     public ResponseEntity<Void> delete(@PathVariable UUID id) {
         cloudAssetService.delete(id);
         return ResponseEntity.noContent().build();
@@ -102,6 +104,7 @@ public class CloudAssetController {
      * Cost breakdown by provider and environment.
      */
     @GetMapping("/cost-summary")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','VIEW_ASSETS','VIEW_CLOUD_ASSETS','MANAGE_CLOUD_ASSETS','VIEW_REPORTS')")
     public ResponseEntity<CloudCostSummaryDto> costSummary() {
         return ResponseEntity.ok(cloudAssetService.getCostSummary());
     }
@@ -112,7 +115,7 @@ public class CloudAssetController {
      * Body: { "billingMonth": "2025-01", "amount": 120.50, "serviceName": "EC2 Compute" }
      */
     @PostMapping("/{id}/cost")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','VIEW_ASSETS','EDIT_ASSET','MANAGE_CLOUD_ASSETS')")
     public ResponseEntity<Void> recordCost(@PathVariable UUID id, @RequestBody Map<String, Object> body) {
         String billingMonth = (String) body.get("billingMonth");
         BigDecimal amount = new BigDecimal(body.get("amount").toString());

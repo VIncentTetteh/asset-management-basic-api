@@ -22,7 +22,7 @@ public class AssetTransferController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_USER')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','TRANSFER_ASSET','VIEW_ASSETS')")
     public ResponseEntity<AssetTransferDto> createTransferRequest(
             @Valid @RequestBody AssetTransferDto transferDto) {
         AssetTransferDto createdTransfer = transferService.createTransferRequest(transferDto);
@@ -30,14 +30,14 @@ public class AssetTransferController {
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_USER')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','TRANSFER_ASSET','VIEW_ASSETS')")
     public ResponseEntity<AssetTransferDto> getTransferById(@PathVariable UUID id) {
         AssetTransferDto transfer = transferService.getTransferById(id);
         return ResponseEntity.ok(transfer);
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_USER')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','TRANSFER_ASSET','VIEW_ASSETS')")
     public ResponseEntity<Set<AssetTransferDto>> getTransfers(
             @RequestParam(required = false) UUID assetId,
             @RequestParam(required = false) UUID fromDepartmentId,
@@ -58,7 +58,7 @@ public class AssetTransferController {
     }
 
     @PostMapping("/{id}/approve")
-    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','TRANSFER_ASSET')")
     // C4 fix: approver identity derived from SecurityContext in service — no
     // approvedById param
     public ResponseEntity<AssetTransferDto> approveTransfer(@PathVariable UUID id) {
@@ -67,21 +67,21 @@ public class AssetTransferController {
     }
 
     @PostMapping("/{id}/reject")
-    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','TRANSFER_ASSET')")
     public ResponseEntity<AssetTransferDto> rejectTransfer(@PathVariable UUID id) {
         AssetTransferDto rejectedTransfer = transferService.rejectTransfer(id);
         return ResponseEntity.ok(rejectedTransfer);
     }
 
     @PostMapping("/{id}/complete")
-    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','TRANSFER_ASSET')")
     public ResponseEntity<AssetTransferDto> completeTransfer(@PathVariable UUID id) {
         AssetTransferDto completedTransfer = transferService.completeTransfer(id);
         return ResponseEntity.ok(completedTransfer);
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','TRANSFER_ASSET')")
     public ResponseEntity<Void> deleteTransfer(@PathVariable UUID id) {
         transferService.deleteTransfer(id);
         return ResponseEntity.noContent().build();

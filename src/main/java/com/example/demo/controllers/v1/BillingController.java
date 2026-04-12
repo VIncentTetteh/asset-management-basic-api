@@ -33,25 +33,25 @@ public class BillingController {
     }
 
     @GetMapping("/subscription")
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_ORGANIZATION_SETTINGS','VIEW_REPORTS')")
     public ResponseEntity<OrganisationSubscriptionDto> getCurrentSubscription() {
         return ResponseEntity.ok(billingService.getCurrentSubscription());
     }
 
     @PostMapping("/checkout")
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_ORGANIZATION_SETTINGS')")
     public ResponseEntity<BillingCheckoutResponse> initializeCheckout(@Valid @RequestBody BillingCheckoutRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED).body(billingService.initializeCheckout(request));
     }
 
     @PostMapping("/checkout/verify")
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_ORGANIZATION_SETTINGS')")
     public ResponseEntity<OrganisationSubscriptionDto> verifyCheckout(@RequestParam String reference) {
         return ResponseEntity.ok(billingService.verifyCheckout(reference));
     }
 
     @PatchMapping("/subscription/auto-renew")
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_ORGANIZATION_SETTINGS')")
     public ResponseEntity<OrganisationSubscriptionDto> setAutoRenew(@Valid @RequestBody AutoRenewRequest request) {
         return ResponseEntity.ok(billingService.setAutoRenew(request.getEnabled()));
     }

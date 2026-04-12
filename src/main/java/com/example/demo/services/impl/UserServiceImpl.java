@@ -7,13 +7,18 @@ import com.example.demo.models.Organisation;
 import com.example.demo.models.Role;
 import com.example.demo.models.User;
 import com.example.demo.repositories.*;
+import com.example.demo.services.EmailService;
 import com.example.demo.services.TenantAwareService;
 import com.example.demo.services.UsageLimitService;
 import com.example.demo.services.UserService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -22,24 +27,32 @@ import java.util.stream.Collectors;
 @Transactional
 public class UserServiceImpl extends TenantAwareService implements UserService {
 
+    private static final Logger log = LoggerFactory.getLogger(UserServiceImpl.class);
+
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
     private final DepartmentRepository departmentRepository;
     private final PasswordEncoder passwordEncoder;
     private final UsageLimitService usageLimitService;
+    private final EmailService emailService;
+
+    @Value("${app.email.base-url:http://localhost:3000}")
+    private String baseUrl;
 
     public UserServiceImpl(UserRepository userRepository,
             RoleRepository roleRepository,
             DepartmentRepository departmentRepository,
             OrganisationRepository organisationRepository,
             PasswordEncoder passwordEncoder,
-            UsageLimitService usageLimitService) {
+            UsageLimitService usageLimitService,
+            EmailService emailService) {
         super(organisationRepository);
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
         this.departmentRepository = departmentRepository;
         this.passwordEncoder = passwordEncoder;
         this.usageLimitService = usageLimitService;
+        this.emailService = emailService;
     }
 
     @Override
@@ -76,7 +89,29 @@ public class UserServiceImpl extends TenantAwareService implements UserService {
             user.setDepartment(dept);
         }
 
-        return toDto(userRepository.save(user));
+        User saved = userRepository.save(user);
+
+        // Send welcome / invite email to the newly created user
+        try {
+            String roleName = (saved.getRole() != null) ? saved.getRole().getName() : null;
+            Map<String, Object> model = new java.util.HashMap<>();
+            model.put("firstName", saved.getFirstName() != null ? saved.getFirstName() : "");
+            model.put("email", saved.getEmail());
+            model.put("temporaryPassword", dto.getPassword() != null ? dto.getPassword() : "(set by admin)");
+            model.put("organisationName", org.getName() != null ? org.getName() : "");
+            model.put("loginUrl", baseUrl + "/login");
+            model.put("role", roleName != null ? roleName : "");
+            emailService.sendTemplate(
+                saved.getEmail(),
+                "You've been invited to " + org.getName(),
+                "email/user-invite",
+                model
+            );
+        } catch (Exception e) {
+            log.warn("[EMAIL] Failed to send invite email to {}: {}", saved.getEmail(), e.getMessage());
+        }
+
+        return toDto(saved);
     }
 
     @Override

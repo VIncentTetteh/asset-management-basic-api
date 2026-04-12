@@ -22,21 +22,21 @@ public class LocationController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_ORGANIZATION_SETTINGS','MANAGE_LOCATIONS')")
     public ResponseEntity<LocationDto> createLocation(@Valid @RequestBody LocationDto locationDto) {
         LocationDto createdLocation = locationService.createLocation(locationDto, null);
         return ResponseEntity.status(HttpStatus.CREATED).body(createdLocation);
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_USER')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','VIEW_ASSETS','VIEW_LOCATIONS','MANAGE_LOCATIONS')")
     public ResponseEntity<LocationDto> getLocationById(@PathVariable UUID id) {
         LocationDto location = locationService.getLocationById(id);
         return ResponseEntity.ok(location);
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_USER')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','VIEW_ASSETS','VIEW_LOCATIONS','MANAGE_LOCATIONS')")
     public ResponseEntity<Set<LocationDto>> getLocationsByOrganisation() {
         // organisationId ignored — derived from TenantContext in service
         Set<LocationDto> locations = locationService.getLocationsByOrganisation(null);
@@ -44,14 +44,14 @@ public class LocationController {
     }
 
     @GetMapping("/{parentId}/sub-locations")
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_USER')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','VIEW_ASSETS','VIEW_LOCATIONS','MANAGE_LOCATIONS')")
     public ResponseEntity<Set<LocationDto>> getSubLocations(@PathVariable UUID parentId) {
         Set<LocationDto> subLocations = locationService.getSubLocations(parentId);
         return ResponseEntity.ok(subLocations);
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_ORGANIZATION_SETTINGS','MANAGE_LOCATIONS')")
     public ResponseEntity<LocationDto> updateLocation(@PathVariable UUID id,
             @Valid @RequestBody LocationDto locationDto) {
         LocationDto updatedLocation = locationService.updateLocation(id, locationDto);
@@ -59,7 +59,7 @@ public class LocationController {
     }
 
     @PatchMapping("/{id}")
-    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_ORGANIZATION_SETTINGS','MANAGE_LOCATIONS')")
     public ResponseEntity<LocationDto> patchLocation(@PathVariable UUID id,
             @RequestBody LocationDto locationDto) {
         LocationDto updatedLocation = locationService.patchLocation(id, locationDto);
@@ -67,7 +67,7 @@ public class LocationController {
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_ORGANIZATION_SETTINGS','MANAGE_LOCATIONS')")
     public ResponseEntity<Void> deleteLocation(@PathVariable UUID id) {
         locationService.deleteLocation(id);
         return ResponseEntity.noContent().build();

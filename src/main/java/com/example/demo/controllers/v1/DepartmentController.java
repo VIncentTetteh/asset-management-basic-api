@@ -21,7 +21,7 @@ public class DepartmentController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAuthority('ROLE_ORG_ADMIN') or hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAuthority('ROLE_ORG_ADMIN') or hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_DEPARTMENTS')")
     public ResponseEntity<DepartmentDto> create(@Valid @RequestBody DepartmentDto dto) {
         return ResponseEntity.ok(departmentService.create(dto));
     }
@@ -41,7 +41,7 @@ public class DepartmentController {
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasAuthority('ROLE_ORG_ADMIN') or hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAuthority('ROLE_ORG_ADMIN') or hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_DEPARTMENTS')")
     public ResponseEntity<DepartmentDto> update(@PathVariable UUID id, @Valid @RequestBody DepartmentDto dto) {
         try {
             return ResponseEntity.ok(departmentService.update(id, dto));
@@ -51,7 +51,7 @@ public class DepartmentController {
     }
 
     @PatchMapping("/{id}")
-    @PreAuthorize("hasAuthority('ROLE_ORG_ADMIN') or hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAuthority('ROLE_ORG_ADMIN') or hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_DEPARTMENTS')")
     public ResponseEntity<DepartmentDto> patch(@PathVariable UUID id, @RequestBody DepartmentDto dto) {
         try {
             return ResponseEntity.ok(departmentService.patch(id, dto));
@@ -61,7 +61,7 @@ public class DepartmentController {
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAuthority('ROLE_ORG_ADMIN') or hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAuthority('ROLE_ORG_ADMIN') or hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_DEPARTMENTS')")
     public ResponseEntity<Void> delete(@PathVariable UUID id) {
         departmentService.delete(id);
         return ResponseEntity.noContent().build();

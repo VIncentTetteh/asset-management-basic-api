@@ -64,7 +64,7 @@ public class AssetController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','CREATE_ASSET','EDIT_ASSET')")
     public ResponseEntity<AssetDto> create(@Valid @RequestBody AssetDto dto) {
         try {
             AssetDto created = assetService.create(dto);
@@ -93,7 +93,7 @@ public class AssetController {
      * ?categoryId=<uuid> – filter by category
      */
     @GetMapping
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_USER','ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','VIEW_ASSETS')")
     public ResponseEntity<?> list(
             @RequestParam(required = false) AssetStatus status,
             @RequestParam(required = false) UUID departmentId,
@@ -114,7 +114,7 @@ public class AssetController {
     }
 
     @PostMapping("/{id}/assign/{departmentId}")
-    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','DELETE_ASSET','EDIT_ASSET','TRANSFER_ASSET','DISPOSE_ASSET')")
     public ResponseEntity<AssetDto> assign(@PathVariable UUID id, @PathVariable UUID departmentId) {
         try {
             AssetDto dto = assetService.assignToDepartment(id, departmentId);
@@ -127,7 +127,7 @@ public class AssetController {
     }
 
     @PostMapping("/{id}/assign-user/{userId}")
-    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','DELETE_ASSET','EDIT_ASSET','TRANSFER_ASSET','DISPOSE_ASSET')")
     public ResponseEntity<AssetDto> assignUser(@PathVariable UUID id, @PathVariable UUID userId) {
         try {
             AssetDto dto = assetService.assignToUser(id, userId);
@@ -140,7 +140,7 @@ public class AssetController {
     }
 
     @DeleteMapping("/{id}/assign-user")
-    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','DELETE_ASSET','EDIT_ASSET','TRANSFER_ASSET','DISPOSE_ASSET')")
     public ResponseEntity<AssetDto> unassignUser(@PathVariable UUID id) {
         try {
             AssetDto dto = assetService.unassignUser(id);
@@ -151,7 +151,7 @@ public class AssetController {
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','DELETE_ASSET','EDIT_ASSET','TRANSFER_ASSET','DISPOSE_ASSET')")
     public ResponseEntity<AssetDto> update(@PathVariable UUID id, @Valid @RequestBody AssetDto dto) {
         try {
             AssetDto updated = assetService.update(id, dto);
@@ -162,7 +162,7 @@ public class AssetController {
     }
 
     @PatchMapping("/{id}")
-    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','DELETE_ASSET','EDIT_ASSET','TRANSFER_ASSET','DISPOSE_ASSET')")
     public ResponseEntity<AssetDto> patch(@PathVariable UUID id, @RequestBody AssetDto dto) {
         try {
             AssetDto updated = assetService.patch(id, dto);
@@ -173,7 +173,7 @@ public class AssetController {
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','DELETE_ASSET','EDIT_ASSET','TRANSFER_ASSET','DISPOSE_ASSET')")
     public ResponseEntity<Void> delete(@PathVariable UUID id) {
         assetService.delete(id);
         return ResponseEntity.noContent().build();
@@ -185,7 +185,7 @@ public class AssetController {
      * GET /api/v1/assets/{id}/qrcode
      */
     @GetMapping(value = "/{id}/qrcode", produces = MediaType.IMAGE_PNG_VALUE)
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','VIEW_ASSETS')")
     public ResponseEntity<byte[]> getQrCode(@PathVariable UUID id) {
         AssetDto asset = assetService.get(id);
         if (asset == null) return ResponseEntity.notFound().build();
@@ -212,7 +212,7 @@ public class AssetController {
      * GET /api/v1/assets/{id}/history
      */
     @GetMapping("/{id}/history")
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','VIEW_ASSETS')")
     public ResponseEntity<List<AssetHistoryEventDto>> getHistory(@PathVariable UUID id) {
         try {
             return ResponseEntity.ok(assetService.getHistory(id));
@@ -226,7 +226,7 @@ public class AssetController {
      * GET /api/v1/assets/{id}/tco
      */
     @GetMapping("/{id}/tco")
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','VIEW_ASSETS')")
     public ResponseEntity<TcoDto> getTco(@PathVariable UUID id) {
         try {
             return ResponseEntity.ok(assetService.getTco(id));
@@ -241,7 +241,7 @@ public class AssetController {
      * GET /api/v1/assets/scan/{payload}
      */
     @GetMapping("/scan/{payload}")
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','VIEW_ASSETS')")
     public ResponseEntity<AssetDto> getByQrPayload(@PathVariable String payload) {
         try {
             return ResponseEntity.ok(assetService.getByQrPayload(payload));
@@ -256,7 +256,7 @@ public class AssetController {
      * GET /api/v1/assets/{id}/qrcode/payload
      */
     @GetMapping(value = "/{id}/qrcode/payload", produces = MediaType.APPLICATION_JSON_VALUE)
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','VIEW_ASSETS')")
     public ResponseEntity<java.util.Map<String, Object>> getQrPayload(@PathVariable UUID id) {
         AssetDto asset = assetService.get(id);
         if (asset == null) return ResponseEntity.notFound().build();
@@ -280,7 +280,7 @@ public class AssetController {
      * </p>
      */
     @PostMapping(value = "/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','CREATE_ASSET','EDIT_ASSET')")
     public ResponseEntity<AssetImportResultDto> importAssets(
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @RequestParam("file") MultipartFile file) {

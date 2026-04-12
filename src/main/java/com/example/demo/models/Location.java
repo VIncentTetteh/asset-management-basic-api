@@ -28,7 +28,14 @@ public class Location extends BaseEntity {
     private String country;
 
     @Column(columnDefinition = "TEXT")
-    private String geoCoordinates; // Format: "latitude,longitude"
+    private String geoCoordinates; // Format: "latitude,longitude" (legacy — prefer latitude/longitude fields)
+
+    private Double latitude;
+
+    private Double longitude;
+
+    @Column(columnDefinition = "TEXT")
+    private String address;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "parent_location_id")

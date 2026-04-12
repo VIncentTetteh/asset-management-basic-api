@@ -22,13 +22,13 @@ public class LeaseRecordController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','MANAGE_LEASES','VIEW_REPORTS')")
     public ResponseEntity<LeaseRecordDto> create(@Valid @RequestBody LeaseRecordDto dto) {
         return ResponseEntity.ok(leaseRecordService.create(dto));
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','MANAGE_LEASES','VIEW_REPORTS')")
     public ResponseEntity<LeaseRecordDto> update(@PathVariable UUID id, @RequestBody LeaseRecordDto dto) {
         try {
             return ResponseEntity.ok(leaseRecordService.update(id, dto));
@@ -64,7 +64,7 @@ public class LeaseRecordController {
      * Example: GET /api/v1/leases/expiring-soon?days=60
      */
     @GetMapping("/expiring-soon")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','MANAGE_LEASES','VIEW_REPORTS')")
     public ResponseEntity<List<LeaseRecordDto>> listExpiringSoon(
             @RequestParam(defaultValue = "30") int days) {
         return ResponseEntity.ok(leaseRecordService.listExpiringSoon(days));
@@ -72,7 +72,7 @@ public class LeaseRecordController {
 
     /** Terminate a lease early. */
     @PostMapping("/{id}/terminate")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','MANAGE_LEASES','VIEW_REPORTS')")
     public ResponseEntity<LeaseRecordDto> terminate(
             @PathVariable UUID id,
             @RequestBody(required = false) Map<String, String> body) {
@@ -85,7 +85,7 @@ public class LeaseRecordController {
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','MANAGE_LEASES','VIEW_REPORTS')")
     public ResponseEntity<Void> delete(@PathVariable UUID id) {
         leaseRecordService.delete(id);
         return ResponseEntity.noContent().build();

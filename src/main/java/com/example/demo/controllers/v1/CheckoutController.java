@@ -21,7 +21,7 @@ public class CheckoutController {
 
     /** Check out an asset to a user. */
     @PostMapping("/assets/{assetId}/users/{userId}")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','ROLE_USER')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','CHECKOUT_ASSET','VIEW_ASSETS')")
     public ResponseEntity<CheckoutRecordDto> checkOut(
             @PathVariable UUID assetId,
             @PathVariable UUID userId,
@@ -31,7 +31,7 @@ public class CheckoutController {
 
     /** Check in (return) a previously checked-out asset. */
     @PostMapping("/{checkoutRecordId}/checkin")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','ROLE_USER')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','CHECKOUT_ASSET','VIEW_ASSETS')")
     public ResponseEntity<CheckoutRecordDto> checkIn(
             @PathVariable UUID checkoutRecordId,
             @RequestBody(required = false) CheckoutRecordDto dto) {
@@ -39,7 +39,7 @@ public class CheckoutController {
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','ROLE_USER')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','CHECKOUT_ASSET','VIEW_ASSETS')")
     public ResponseEntity<CheckoutRecordDto> getById(@PathVariable UUID id) {
         try {
             return ResponseEntity.ok(checkoutService.getById(id));
@@ -49,26 +49,26 @@ public class CheckoutController {
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','ROLE_USER')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','CHECKOUT_ASSET','VIEW_ASSETS')")
     public ResponseEntity<List<CheckoutRecordDto>> listByOrg() {
         return ResponseEntity.ok(checkoutService.listByOrg());
     }
 
     @GetMapping("/assets/{assetId}")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','ROLE_USER')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','CHECKOUT_ASSET','VIEW_ASSETS')")
     public ResponseEntity<List<CheckoutRecordDto>> listByAsset(@PathVariable UUID assetId) {
         return ResponseEntity.ok(checkoutService.listByAsset(assetId));
     }
 
     @GetMapping("/users/{userId}")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','ROLE_USER')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','CHECKOUT_ASSET','VIEW_ASSETS')")
     public ResponseEntity<List<CheckoutRecordDto>> listByUser(@PathVariable UUID userId) {
         return ResponseEntity.ok(checkoutService.listByUser(userId));
     }
 
     /** Returns all ACTIVE checkout records whose expected return date is in the past. */
     @GetMapping("/overdue")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','CHECKOUT_ASSET')")
     public ResponseEntity<List<CheckoutRecordDto>> listOverdue() {
         return ResponseEntity.ok(checkoutService.listOverdue());
     }

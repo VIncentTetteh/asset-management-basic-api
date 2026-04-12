@@ -138,6 +138,8 @@ public class CategoryServiceImpl extends TenantAwareService implements CategoryS
             dto.setDepreciationPolicyId(category.getDepreciationPolicy().getId());
         }
         dto.setOrganisationId(category.getOrganisation().getId());
+        dto.setCreatedAt(category.getCreatedAt());
+        dto.setUpdatedAt(category.getUpdatedAt());
         return dto;
     }
 }

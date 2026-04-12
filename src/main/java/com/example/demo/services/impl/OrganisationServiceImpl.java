@@ -2,24 +2,30 @@ package com.example.demo.services.impl;
 
 import com.example.demo.dto.OrganisationDto;
 import com.example.demo.models.Organisation;
+import com.example.demo.multitenancy.TenantContext;
 import com.example.demo.repositories.OrganisationRepository;
+import com.example.demo.services.DefaultRoleSeederService;
 import com.example.demo.services.OrganisationService;
+import jakarta.persistence.EntityNotFoundException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.util.*;
 import java.util.stream.Collectors;
-import com.example.demo.multitenancy.TenantContext;
 
 @Service
 public class OrganisationServiceImpl implements OrganisationService {
 
     private final OrganisationRepository organisationRepository;
+    private final DefaultRoleSeederService defaultRoleSeederService;
 
-    public OrganisationServiceImpl(OrganisationRepository organisationRepository) {
+    public OrganisationServiceImpl(OrganisationRepository organisationRepository,
+                                   DefaultRoleSeederService defaultRoleSeederService) {
         this.organisationRepository = organisationRepository;
+        this.defaultRoleSeederService = defaultRoleSeederService;
     }
 
     @Override
@@ -58,6 +64,11 @@ public class OrganisationServiceImpl implements OrganisationService {
             organisation.setStatus(dto.getStatus());
 
         Organisation saved = organisationRepository.save(organisation);
+
+        // Seed the standard set of platform roles for the new organisation so
+        // admins can immediately assign roles without manual setup.
+        defaultRoleSeederService.seedRolesForOrganisation(saved);
+
         return toDto(saved);
     }
 
@@ -97,12 +108,9 @@ public class OrganisationServiceImpl implements OrganisationService {
     @Override
     public OrganisationDto update(UUID id, OrganisationDto dto) {
         Organisation o = organisationRepository.findByIdAndDeletedAtIsNull(id)
-                .orElseThrow(() -> new IllegalArgumentException("Organisation not found"));
+                .orElseThrow(() -> new EntityNotFoundException("Organisation not found"));
 
-        String creator = o.getCreatedBy();
-        if (isRestrictedAdmin() && (creator == null || !creator.equals(getCurrentUserEmail()))) {
-            throw new IllegalArgumentException("You do not have permission to update this organisation");
-        }
+        assertCanManage(o, "update");
 
         if (dto.getName() != null)
             o.setName(dto.getName());
@@ -137,15 +145,28 @@ public class OrganisationServiceImpl implements OrganisationService {
     @Override
     public void delete(UUID id) {
         Organisation o = organisationRepository.findByIdAndDeletedAtIsNull(id)
-                .orElseThrow(() -> new IllegalArgumentException("Organisation not found"));
+                .orElseThrow(() -> new EntityNotFoundException("Organisation not found"));
 
-        String creator = o.getCreatedBy();
-        if (isRestrictedAdmin() && (creator == null || !creator.equals(getCurrentUserEmail()))) {
-            throw new IllegalArgumentException("You do not have permission to delete this organisation");
-        }
+        assertCanManage(o, "delete");
 
         o.setDeletedAt(Instant.now());
         organisationRepository.save(o);
+    }
+
+    private void assertCanManage(Organisation organisation, String action) {
+        if (TenantContext.hasOrganisationId()) {
+            if (organisation.getId().equals(TenantContext.getOrganisationId())) {
+                return;
+            }
+            throw new AccessDeniedException("You do not have permission to " + action + " this organisation");
+        }
+
+        String creator = organisation.getCreatedBy();
+        if (isRestrictedAdmin() && creator != null && creator.equals(getCurrentUserEmail())) {
+            return;
+        }
+
+        throw new AccessDeniedException("You do not have permission to " + action + " this organisation");
     }
 
     private boolean isRestrictedAdmin() {

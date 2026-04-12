@@ -62,7 +62,7 @@ public class BulkOperationsController {
      * Pass ?dryRun=true to validate without persisting.
      */
     @PostMapping(value = "/assets/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','EDIT_ASSET','DELETE_ASSET','MANAGE_ORGANIZATION_SETTINGS')")
     public ResponseEntity<AssetImportResultDto> bulkImportAssets(
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @RequestParam("file") MultipartFile file,
@@ -183,7 +183,7 @@ public class BulkOperationsController {
      * Body: { "format": "CSV" | "EXCEL" | "PDF" }
      */
     @PostMapping("/assets/export")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','EDIT_ASSET','DELETE_ASSET','MANAGE_ORGANIZATION_SETTINGS')")
     public ResponseEntity<byte[]> bulkExportAssets(@RequestBody Map<String, Object> request) {
         String format = ((String) request.getOrDefault("format", "CSV")).toUpperCase();
         try {
@@ -209,7 +209,7 @@ public class BulkOperationsController {
      * Export purchase orders as EXCEL or CSV.
      */
     @PostMapping("/purchase-orders/export")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','EDIT_ASSET','DELETE_ASSET','MANAGE_ORGANIZATION_SETTINGS')")
     public ResponseEntity<byte[]> bulkExportPurchaseOrders(@RequestBody Map<String, Object> request) {
         String format = ((String) request.getOrDefault("format", "EXCEL")).toUpperCase();
         try {
@@ -234,7 +234,7 @@ public class BulkOperationsController {
      * POST /api/v1/bulk/suppliers/export
      */
     @PostMapping("/suppliers/export")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','EDIT_ASSET','DELETE_ASSET','MANAGE_ORGANIZATION_SETTINGS')")
     public ResponseEntity<byte[]> bulkExportSuppliers(@RequestBody Map<String, Object> request) {
         String format = ((String) request.getOrDefault("format", "CSV")).toUpperCase();
         try {

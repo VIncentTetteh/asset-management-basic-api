@@ -22,9 +22,17 @@ import java.time.Duration;
 import java.util.Map;
 import java.util.Optional;
 
+/**
+ * Global S3 storage service backed by the application-level S3 credentials
+ * configured via {@code app.storage.s3.*} properties.
+ *
+ * <p>This bean is only created when {@code app.storage.s3.enabled=true}.
+ * It is NOT marked {@code @Primary} — {@link OrgAwareStorageService} is the
+ * primary {@link FileStorageService} and delegates here when an organisation's
+ * config has {@code useGlobalConfig=true}.
+ */
 @Service
 @ConditionalOnProperty(name = "app.storage.s3.enabled", havingValue = "true")
-@Primary
 public class S3FileStorageService implements FileStorageService {
 
     private static final Logger log = LoggerFactory.getLogger(S3FileStorageService.class);

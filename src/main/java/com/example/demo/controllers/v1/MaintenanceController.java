@@ -23,7 +23,7 @@ public class MaintenanceController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','SCHEDULE_MAINTENANCE','MARK_MAINTENANCE_COMPLETE')")
     public ResponseEntity<MaintenanceRecordDto> createMaintenanceRecord(
             @Valid @RequestBody MaintenanceRecordDto recordDto) {
         MaintenanceRecordDto createdRecord = maintenanceService.createMaintenanceRecord(recordDto);
@@ -31,14 +31,14 @@ public class MaintenanceController {
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_USER')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','VIEW_MAINTENANCE')")
     public ResponseEntity<MaintenanceRecordDto> getMaintenanceRecordById(@PathVariable UUID id) {
         MaintenanceRecordDto record = maintenanceService.getMaintenanceRecordById(id);
         return ResponseEntity.ok(record);
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_USER')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','VIEW_MAINTENANCE')")
     public ResponseEntity<Set<MaintenanceRecordDto>> getMaintenanceRecords(
             @RequestParam(required = false) UUID assetId,
             @RequestParam(required = false) UUID vendorId,
@@ -56,7 +56,7 @@ public class MaintenanceController {
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','SCHEDULE_MAINTENANCE','MARK_MAINTENANCE_COMPLETE')")
     public ResponseEntity<MaintenanceRecordDto> updateMaintenanceRecord(@PathVariable UUID id,
             @Valid @RequestBody MaintenanceRecordDto recordDto) {
         MaintenanceRecordDto updatedRecord = maintenanceService.updateMaintenanceRecord(id, recordDto);
@@ -64,7 +64,7 @@ public class MaintenanceController {
     }
 
     @PatchMapping("/{id}")
-    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','SCHEDULE_MAINTENANCE','MARK_MAINTENANCE_COMPLETE')")
     public ResponseEntity<MaintenanceRecordDto> patchMaintenanceRecord(@PathVariable UUID id,
             @RequestBody MaintenanceRecordDto recordDto) {
         MaintenanceRecordDto updatedRecord = maintenanceService.patchMaintenanceRecord(id, recordDto);
@@ -72,14 +72,14 @@ public class MaintenanceController {
     }
 
     @PostMapping("/{id}/complete")
-    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','SCHEDULE_MAINTENANCE','MARK_MAINTENANCE_COMPLETE')")
     public ResponseEntity<MaintenanceRecordDto> completeMaintenanceRecord(@PathVariable UUID id) {
         MaintenanceRecordDto completedRecord = maintenanceService.completeMaintenanceRecord(id);
         return ResponseEntity.ok(completedRecord);
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','SCHEDULE_MAINTENANCE','MARK_MAINTENANCE_COMPLETE')")
     public ResponseEntity<Void> deleteMaintenanceRecord(@PathVariable UUID id) {
         maintenanceService.deleteMaintenanceRecord(id);
         return ResponseEntity.noContent().build();

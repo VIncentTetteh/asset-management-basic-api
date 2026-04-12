@@ -14,18 +14,39 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
+/**
+ * JWT authentication filter.
+ *
+ * Authority loading strategy:
+ *  1. The `role` claim becomes ROLE_<name> (e.g. ROLE_ADMIN, ROLE_USER, ROLE_Manager).
+ *  2. Built-in system roles (ROLE_ADMIN, ROLE_ORG_ADMIN, ROLE_USER) are passed through as-is.
+ *  3. Custom org roles (anything else) ALSO receive ROLE_USER so that standard
+ *     organisation-member endpoints (guarded by ROLE_USER) remain accessible.
+ *  4. Every permission string stored in the `permissions` JWT claim is added as its
+ *     own GrantedAuthority (e.g. VIEW_ASSETS, CREATE_ASSET) so that fine-grained
+ *     @PreAuthorize("hasAuthority('VIEW_ASSETS')") checks work.
+ */
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
-    private final JwtUtil jwtUtil;
-    private final UserRepository userRepository;
-    private final JwtBlacklist jwtBlacklist;
+    /** Roles that are part of the built-in hierarchy — not treated as custom org roles. */
+    private static final Set<String> SYSTEM_ROLES = Set.of(
+            "ROLE_ADMIN", "ROLE_ORG_ADMIN", "ROLE_USER"
+    );
 
-    public JwtAuthenticationFilter(JwtUtil jwtUtil, UserRepository userRepository, JwtBlacklist jwtBlacklist) {
+    private final JwtUtil jwtUtil;
+    private final JwtBlacklist jwtBlacklist;
+    private final PermissionCacheService permissionCacheService;
+
+    public JwtAuthenticationFilter(JwtUtil jwtUtil, UserRepository userRepository,
+                                   JwtBlacklist jwtBlacklist, PermissionCacheService permissionCacheService) {
         this.jwtUtil = jwtUtil;
-        this.userRepository = userRepository;
         this.jwtBlacklist = jwtBlacklist;
+        this.permissionCacheService = permissionCacheService;
+        // userRepository retained in constructor signature for backward-compat with SecurityConfig
     }
 
     @Override
@@ -43,24 +64,46 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
                 Claims claims = jwtUtil.parseToken(token);
                 String username = claims.getSubject();
-                // JWT is written with key 'role' (singular), e.g. "ROLE_ADMIN"
+
+                List<SimpleGrantedAuthority> authorities = new ArrayList<>();
+
+                // ── 1. Role authority ─────────────────────────────────────────────
                 Object roleClaim = claims.get("role");
-                List<SimpleGrantedAuthority> authorities = List.of();
                 if (roleClaim != null) {
                     String roleStr = roleClaim.toString().trim();
                     if (!roleStr.isEmpty()) {
-                        // Support both "ADMIN" (legacy) and "ROLE_ADMIN" (prefixed)
                         String authority = roleStr.startsWith("ROLE_") ? roleStr : "ROLE_" + roleStr;
-                        authorities = List.of(new SimpleGrantedAuthority(authority));
+                        authorities.add(new SimpleGrantedAuthority(authority));
+
+                        // ── 2. Custom-role fallback ───────────────────────────────
+                        // Users with a custom org role (e.g. ROLE_Manager) must also
+                        // receive ROLE_USER so that standard member endpoints work.
+                        if (!SYSTEM_ROLES.contains(authority)) {
+                            authorities.add(new SimpleGrantedAuthority("ROLE_USER"));
+                        }
                     }
                 }
 
-                UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(username, null,
-                        authorities);
+                // ── 3. Permission authorities (live from DB / Redis cache) ───────
+                // Always load permissions from DB (via PermissionCacheService) so
+                // that role permission changes take effect immediately — no re-login
+                // required. Results are cached in Redis and evicted by RoleServiceImpl
+                // whenever a role's permissions are updated.
+                String orgIdClaim = claims.get("organisationId", String.class);
+                List<String> livePermissions = permissionCacheService.getPermissionsForUser(username, orgIdClaim);
+                for (String perm : livePermissions) {
+                    if (!perm.isEmpty()) {
+                        authorities.add(new SimpleGrantedAuthority(perm));
+                    }
+                }
+
+                UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
+                        username, null, authorities);
                 auth.setDetails(claims);
                 SecurityContextHolder.getContext().setAuthentication(auth);
+
             } catch (Exception ex) {
-                // Ignore invalid/expired tokens and continue as unauthenticated
+                // Ignore invalid/expired tokens — request continues as unauthenticated
             }
         }
         filterChain.doFilter(request, response);

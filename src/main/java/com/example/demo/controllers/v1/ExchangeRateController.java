@@ -24,7 +24,7 @@ public class ExchangeRateController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','MANAGE_EXCHANGE_RATES','VIEW_BUDGETS')")
     public ResponseEntity<ExchangeRateDto> create(@Valid @RequestBody ExchangeRateDto dto) {
         return ResponseEntity.ok(exchangeRateService.create(dto));
     }
@@ -61,7 +61,7 @@ public class ExchangeRateController {
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','MANAGE_EXCHANGE_RATES','VIEW_BUDGETS')")
     public ResponseEntity<Void> delete(@PathVariable UUID id) {
         exchangeRateService.delete(id);
         return ResponseEntity.noContent().build();

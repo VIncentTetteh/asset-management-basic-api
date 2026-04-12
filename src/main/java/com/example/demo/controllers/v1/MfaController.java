@@ -257,7 +257,7 @@ public class MfaController {
      * Requires ROLE_ADMIN authority.
      */
     @DeleteMapping("/admin/reset/{userId}")
-    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_USERS','MANAGE_SECURITY_SETTINGS')")
     public ResponseEntity<Map<String, String>> adminResetMfa(@PathVariable UUID userId) {
         User target = userRepository.findById(userId)
                 .orElse(null);

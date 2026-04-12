@@ -35,4 +35,12 @@ public interface DepartmentRepository extends JpaRepository<Department, UUID> {
                         Organisation organisation);
 
         boolean existsByNameIgnoreCaseAndOrganisationAndDeletedAtIsNull(String name, Organisation organisation);
+
+        boolean existsByDepartmentCodeIgnoreCaseAndOrganisationAndDeletedAtIsNull(String departmentCode, Organisation organisation);
+
+        boolean existsByCostCenterCodeIgnoreCaseAndOrganisationAndDeletedAtIsNull(String costCenterCode, Organisation organisation);
+
+        boolean existsByDepartmentCodeIgnoreCaseAndOrganisationAndDeletedAtIsNullAndIdNot(String departmentCode, Organisation organisation, UUID id);
+
+        boolean existsByCostCenterCodeIgnoreCaseAndOrganisationAndDeletedAtIsNullAndIdNot(String costCenterCode, Organisation organisation, UUID id);
 }

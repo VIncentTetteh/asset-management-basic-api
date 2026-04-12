@@ -23,7 +23,7 @@ public class DisposalController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','DISPOSE_ASSET')")
     public ResponseEntity<DisposalRecordDto> createDisposalRecord(
             @Valid @RequestBody DisposalRecordDto recordDto) {
         DisposalRecordDto createdRecord = disposalService.createDisposalRecord(recordDto);
@@ -57,7 +57,7 @@ public class DisposalController {
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','DISPOSE_ASSET')")
     public ResponseEntity<DisposalRecordDto> updateDisposalRecord(@PathVariable UUID id,
             @Valid @RequestBody DisposalRecordDto recordDto) {
         DisposalRecordDto updatedRecord = disposalService.updateDisposalRecord(id, recordDto);
@@ -65,7 +65,7 @@ public class DisposalController {
     }
 
     @PatchMapping("/{id}")
-    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','DISPOSE_ASSET')")
     public ResponseEntity<DisposalRecordDto> patchDisposalRecord(@PathVariable UUID id,
             @RequestBody DisposalRecordDto recordDto) {
         DisposalRecordDto updatedRecord = disposalService.patchDisposalRecord(id, recordDto);
@@ -73,7 +73,7 @@ public class DisposalController {
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','DISPOSE_ASSET')")
     public ResponseEntity<Void> deleteDisposalRecord(@PathVariable UUID id) {
         disposalService.deleteDisposalRecord(id);
         return ResponseEntity.noContent().build();

@@ -28,7 +28,7 @@ public class DashboardController {
      * Returns high-level dashboard metrics
      */
     @GetMapping("/summary")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','VIEW_REPORTS','VIEW_ASSETS','GENERATE_REPORTS')")
     public ResponseEntity<?> getDashboardSummary(com.example.demo.models.Organisation org) {
         return ResponseEntity.ok(dashboardService.getSummary(org));
     }
@@ -58,7 +58,7 @@ public class DashboardController {
      * Returns assets needing maintenance
      */
     @GetMapping("/maintenance-alerts")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','VIEW_MAINTENANCE','SCHEDULE_MAINTENANCE','VIEW_REPORTS')")
     public ResponseEntity<?> getMaintenanceAlerts(com.example.demo.models.Organisation org) {
         return ResponseEntity.ok(dashboardService.getMaintenanceAlerts(org));
     }
@@ -68,7 +68,7 @@ public class DashboardController {
      * Returns depreciation information
      */
     @GetMapping("/depreciation-summary")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','VIEW_REPORTS','VIEW_BUDGETS','VIEW_TCO')")
     public ResponseEntity<?> getDepreciationSummary(com.example.demo.models.Organisation org) {
         return ResponseEntity.ok(dashboardService.getDepreciationSummary(org));
     }

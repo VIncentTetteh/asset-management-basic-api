@@ -21,7 +21,7 @@ public class ImportJobsController {
     }
 
     @PostMapping(value = "/assets", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','CREATE_ASSET','MANAGE_ORGANIZATION_SETTINGS')")
     public ResponseEntity<AssetImportJobDto> createAssetImportJob(
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @RequestParam("file") MultipartFile file,
@@ -31,7 +31,7 @@ public class ImportJobsController {
     }
 
     @GetMapping("/{jobId}")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','CREATE_ASSET','MANAGE_ORGANIZATION_SETTINGS')")
     public ResponseEntity<AssetImportJobDto> getAssetImportJob(@PathVariable UUID jobId) {
         return ResponseEntity.ok(assetImportJobService.getAssetImportJob(jobId));
     }

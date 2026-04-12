@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title th:text="'Asset ' + ${eventType}?: 'Asset Update'">Asset Update</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f1f5f9;padding:48px 16px;">
+    <tr>
+      <td align="center">
+        <table width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;">
+
+          <!-- Header -->
+          <tr>
+            <td style="background:#0f172a;border-radius:12px 12px 0 0;padding:28px 40px;text-align:center;">
+              <span style="color:#f8fafc;font-size:20px;font-weight:700;" th:text="${appName}">AssetIQ</span>
+            </td>
+          </tr>
+          <!-- Dynamic accent colour per event type -->
+          <tr>
+            <td th:style="'background:' + (${accentColor}?: '#3b82f6') + ';height:4px;'"></td>
+          </tr>
+
+          <!-- Card body -->
+          <tr>
+            <td style="background:#ffffff;padding:40px;border-left:1px solid #e2e8f0;border-right:1px solid #e2e8f0;">
+
+              <!-- Event badge -->
+              <div style="text-align:center;margin-bottom:20px;">
+                <span th:text="${eventBadge}?: '📦'"
+                      style="display:inline-block;background:#eff6ff;border:2px solid #bfdbfe;border-radius:50%;width:64px;height:64px;line-height:60px;text-align:center;font-size:28px;">&#128230;</span>
+              </div>
+
+              <h1 style="color:#0f172a;font-size:21px;font-weight:700;margin:0 0 6px 0;text-align:center;"
+                  th:text="${eventTitle}?: 'Asset Update'">Asset Update</h1>
+              <p style="color:#64748b;font-size:14px;margin:0 0 30px 0;text-align:center;"
+                 th:text="${eventSubtitle}?: 'An asset has been updated in your organisation.'">An asset has been updated in your organisation.</p>
+
+              <p style="color:#1e293b;font-size:15px;margin:0 0 20px 0;">
+                Hi <strong th:text="${firstName}?: 'there'">there</strong>,
+              </p>
+
+              <!-- Asset detail card -->
+              <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:20px;margin-bottom:24px;">
+                <p style="color:#0f172a;font-size:12px;font-weight:700;margin:0 0 14px 0;text-transform:uppercase;letter-spacing:0.6px;">Asset Details</p>
+                <table cellpadding="0" cellspacing="0" width="100%">
+                  <tr>
+                    <td style="color:#64748b;font-size:14px;padding:5px 0;width:120px;font-weight:600;vertical-align:top;">Asset Name</td>
+                    <td style="color:#0f172a;font-size:14px;padding:5px 0;font-weight:600;" th:text="${assetName}?: 'N/A'">Laptop Pro 15</td>
+                  </tr>
+                  <tr th:if="${assetTag}">
+                    <td style="color:#64748b;font-size:14px;padding:5px 0;font-weight:600;vertical-align:top;">Asset Tag</td>
+                    <td style="font-size:14px;padding:5px 0;">
+                      <code style="background:#f1f5f9;border:1px solid #e2e8f0;border-radius:4px;padding:2px 8px;font-size:13px;" th:text="${assetTag}">LTP-001</code>
+                    </td>
+                  </tr>
+                  <tr th:if="${category}">
+                    <td style="color:#64748b;font-size:14px;padding:5px 0;font-weight:600;vertical-align:top;">Category</td>
+                    <td style="color:#0f172a;font-size:14px;padding:5px 0;" th:text="${category}">IT Equipment</td>
+                  </tr>
+                  <tr th:if="${location}">
+                    <td style="color:#64748b;font-size:14px;padding:5px 0;font-weight:600;vertical-align:top;">Location</td>
+                    <td style="color:#0f172a;font-size:14px;padding:5px 0;" th:text="${location}">HQ – Floor 3</td>
+                  </tr>
+                  <tr th:if="${assignedTo}">
+                    <td style="color:#64748b;font-size:14px;padding:5px 0;font-weight:600;vertical-align:top;">Assigned To</td>
+                    <td style="color:#0f172a;font-size:14px;padding:5px 0;" th:text="${assignedTo}">John Smith</td>
+                  </tr>
+                  <tr th:if="${eventDate}">
+                    <td style="color:#64748b;font-size:14px;padding:5px 0;font-weight:600;vertical-align:top;">Date</td>
+                    <td style="color:#0f172a;font-size:14px;padding:5px 0;" th:text="${eventDate}">2025-01-15</td>
+                  </tr>
+                  <tr th:if="${performedBy}">
+                    <td style="color:#64748b;font-size:14px;padding:5px 0;font-weight:600;vertical-align:top;">Updated By</td>
+                    <td style="color:#0f172a;font-size:14px;padding:5px 0;" th:text="${performedBy}">Admin User</td>
+                  </tr>
+                </table>
+              </div>
+
+              <!-- Additional notes -->
+              <div th:if="${notes}" style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:14px 18px;margin-bottom:24px;">
+                <p style="color:#92400e;font-size:13px;font-weight:600;margin:0 0 4px 0;">Notes</p>
+                <p style="color:#78350f;font-size:14px;margin:0;" th:text="${notes}">Additional information about this event.</p>
+              </div>
+
+              <!-- CTA -->
+              <div th:if="${assetUrl}" style="text-align:center;margin-bottom:24px;">
+                <a th:href="${assetUrl}" href="#"
+                   style="display:inline-block;background:#0f172a;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;padding:13px 28px;border-radius:8px;">
+                  View Asset in Registry →
+                </a>
+              </div>
+
+              <hr style="border:none;border-top:1px solid #f1f5f9;margin:24px 0;"/>
+              <p style="color:#94a3b8;font-size:13px;line-height:1.5;margin:0;">
+                This is an automated notification from <span th:text="${appName}">AssetIQ</span>.
+                Questions? Contact <a th:href="'mailto:' + ${supportEmail}" style="color:#3b82f6;text-decoration:none;" th:text="${supportEmail}">support</a>.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:0 0 12px 12px;padding:18px 40px;text-align:center;">
+              <p style="color:#94a3b8;font-size:12px;margin:0;">© <span th:text="${appName}">AssetIQ</span> · Asset Lifecycle Notification</p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

@@ -35,7 +35,7 @@ public class SsoConfigController {
      */
     @Operation(summary = "Get SSO config for an organisation")
     @GetMapping
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_SECURITY_SETTINGS','MANAGE_ORGANIZATION_SETTINGS')")
     public ResponseEntity<?> getSsoConfig(@PathVariable UUID orgId) {
         OrgSsoConfigDto dto = ssoConfigService.getByOrgId(orgId);
         if (dto == null) {
@@ -52,7 +52,7 @@ public class SsoConfigController {
      */
     @Operation(summary = "Configure OAuth2 SSO for an organisation")
     @PutMapping("/oauth2")
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_SECURITY_SETTINGS','MANAGE_ORGANIZATION_SETTINGS')")
     public ResponseEntity<OrgSsoConfigDto> saveOAuth2Config(
             @PathVariable UUID orgId,
             @Valid @RequestBody OrgSsoConfigDto dto) {
@@ -66,7 +66,7 @@ public class SsoConfigController {
      */
     @Operation(summary = "Configure SAML SSO for an organisation")
     @PutMapping("/saml")
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_SECURITY_SETTINGS','MANAGE_ORGANIZATION_SETTINGS')")
     public ResponseEntity<OrgSsoConfigDto> saveSamlConfig(
             @PathVariable UUID orgId,
             @Valid @RequestBody OrgSsoConfigDto dto) {
@@ -80,7 +80,7 @@ public class SsoConfigController {
      */
     @Operation(summary = "Enable or disable SSO for an organisation")
     @PatchMapping("/toggle")
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_SECURITY_SETTINGS','MANAGE_ORGANIZATION_SETTINGS')")
     public ResponseEntity<OrgSsoConfigDto> toggleSso(
             @PathVariable UUID orgId,
             @RequestBody Map<String, Boolean> body) {

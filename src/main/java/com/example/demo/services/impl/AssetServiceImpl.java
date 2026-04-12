@@ -9,10 +9,14 @@ import com.example.demo.multitenancy.TenantContext;
 import com.example.demo.repositories.*;
 import com.example.demo.enums.NotificationType;
 import com.example.demo.services.AssetService;
+import com.example.demo.services.EmailService;
 import com.example.demo.services.NotificationService;
 import com.example.demo.services.UsageLimitService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import jakarta.persistence.EntityManager;
 import jakarta.transaction.Transactional;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
@@ -21,13 +25,18 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.stream.Collectors;
 import java.util.EnumSet;
 
 @Service
 public class AssetServiceImpl implements AssetService {
+
+    private static final Logger log = LoggerFactory.getLogger(AssetServiceImpl.class);
+    private static final DateTimeFormatter EMAIL_DATE_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
 
     private final AssetRepository assetRepository;
     private final DepartmentRepository departmentRepository;
@@ -44,6 +53,10 @@ public class AssetServiceImpl implements AssetService {
     private final MaintenanceRecordRepository maintenanceRecordRepository;
     private final DisposalRecordRepository disposalRecordRepository;
     private final NotificationService notificationService;
+    private final EmailService emailService;
+
+    @Value("${app.email.base-url:http://localhost:3000}")
+    private String baseUrl;
 
     public AssetServiceImpl(AssetRepository assetRepository,
             DepartmentRepository departmentRepository,
@@ -59,7 +72,8 @@ public class AssetServiceImpl implements AssetService {
             AssetTransferRepository assetTransferRepository,
             MaintenanceRecordRepository maintenanceRecordRepository,
             DisposalRecordRepository disposalRecordRepository,
-            NotificationService notificationService) {
+            NotificationService notificationService,
+            EmailService emailService) {
         this.assetRepository = assetRepository;
         this.departmentRepository = departmentRepository;
         this.organisationRepository = organisationRepository;
@@ -75,6 +89,7 @@ public class AssetServiceImpl implements AssetService {
         this.maintenanceRecordRepository = maintenanceRecordRepository;
         this.disposalRecordRepository = disposalRecordRepository;
         this.notificationService = notificationService;
+        this.emailService = emailService;
     }
 
     // ────────────────────────────────────────────────────
@@ -284,7 +299,36 @@ public class AssetServiceImpl implements AssetService {
         if (asset.getStatus() == AssetStatus.IN_STOCK || asset.getStatus() == AssetStatus.RESERVED) {
             asset.setStatus(AssetStatus.IN_USE);
         }
-        return toDto(assetRepository.save(asset));
+        Asset saved = assetRepository.save(asset);
+
+        // Send asset-assignment email to the assigned user
+        try {
+            String now = LocalDateTime.now(ZoneOffset.UTC).format(EMAIL_DATE_FMT);
+            Map<String, Object> model = new HashMap<>();
+            model.put("firstName", user.getFirstName());
+            model.put("eventTitle", "Asset Assigned to You");
+            model.put("eventSubtitle", "An asset has been assigned to you in " + org.getName() + ".");
+            model.put("eventType", "ASSIGNED");
+            model.put("eventBadge", "\uD83D\uDCBC");
+            model.put("accentColor", "#6366f1");
+            model.put("assetName", saved.getName());
+            model.put("assetTag", saved.getAssetTag());
+            model.put("category", saved.getCategory() != null ? saved.getCategory().getName() : null);
+            model.put("location", saved.getLocation() != null ? saved.getLocation().getName() : null);
+            model.put("assignedTo", user.getFirstName() + " " + user.getLastName());
+            model.put("eventDate", now);
+            model.put("assetUrl", baseUrl + "/assets");
+            emailService.sendTemplate(
+                user.getEmail(),
+                "Asset assigned: " + saved.getName(),
+                "email/asset-lifecycle",
+                model
+            );
+        } catch (Exception e) {
+            log.warn("[EMAIL] Failed to send asset-assignment email: {}", e.getMessage());
+        }
+
+        return toDto(saved);
     }
 
     @Override
@@ -491,6 +535,8 @@ public class AssetServiceImpl implements AssetService {
             d.setAssignedUserId(a.getAssignedUser().getId());
         if (a.getPurchaseOrder() != null)
             d.setPurchaseOrderId(a.getPurchaseOrder().getId());
+        d.setCreatedAt(a.getCreatedAt());
+        d.setUpdatedAt(a.getUpdatedAt());
         return d;
     }
 

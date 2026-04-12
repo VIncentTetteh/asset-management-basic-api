@@ -23,21 +23,21 @@ public class AuditController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','CONDUCT_AUDIT','EXPORT_AUDIT_LOGS')")
     public ResponseEntity<AssetAuditDto> createAudit(@Valid @RequestBody AssetAuditDto auditDto) {
         AssetAuditDto createdAudit = auditService.createAudit(auditDto);
         return ResponseEntity.status(HttpStatus.CREATED).body(createdAudit);
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_USER')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','VIEW_AUDIT_LOGS')")
     public ResponseEntity<AssetAuditDto> getAuditById(@PathVariable UUID id) {
         AssetAuditDto audit = auditService.getAuditById(id);
         return ResponseEntity.ok(audit);
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_USER')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','VIEW_AUDIT_LOGS')")
     public ResponseEntity<Set<AssetAuditDto>> getAudits(
             @RequestParam(required = false) UUID departmentId,
             @RequestParam(required = false) LocalDate startDate,
@@ -56,7 +56,7 @@ public class AuditController {
     }
 
     @PatchMapping("/{id}/status")
-    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','CONDUCT_AUDIT','EXPORT_AUDIT_LOGS')")
     public ResponseEntity<AssetAuditDto> updateAuditStatus(@PathVariable UUID id,
             @RequestParam String status) {
         AssetAuditDto updatedAudit = auditService.updateAuditStatus(id, status);
@@ -64,7 +64,7 @@ public class AuditController {
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','CONDUCT_AUDIT','EXPORT_AUDIT_LOGS')")
     public ResponseEntity<Void> deleteAudit(@PathVariable UUID id) {
         auditService.deleteAudit(id);
         return ResponseEntity.noContent().build();

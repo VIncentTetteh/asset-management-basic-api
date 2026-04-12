@@ -21,13 +21,13 @@ public class OrganisationController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_ORGANIZATION_SETTINGS')")
     public ResponseEntity<OrganisationDto> create(@Valid @RequestBody OrganisationDto dto) {
         return ResponseEntity.ok(organisationService.create(dto));
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_USER','ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','VIEW_ASSETS')")
     public ResponseEntity<OrganisationDto> get(@PathVariable UUID id) {
         OrganisationDto dto = organisationService.get(id);
         if (dto == null) return ResponseEntity.notFound().build();
@@ -35,33 +35,25 @@ public class OrganisationController {
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_USER','ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','VIEW_ASSETS')")
     public ResponseEntity<List<OrganisationDto>> list() {
         return ResponseEntity.ok(organisationService.list());
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_ORGANIZATION_SETTINGS')")
     public ResponseEntity<OrganisationDto> update(@PathVariable UUID id, @Valid @RequestBody OrganisationDto dto) {
-        try {
-            return ResponseEntity.ok(organisationService.update(id, dto));
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.notFound().build();
-        }
+        return ResponseEntity.ok(organisationService.update(id, dto));
     }
 
     @PatchMapping("/{id}")
-    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_ORGANIZATION_SETTINGS')")
     public ResponseEntity<OrganisationDto> patch(@PathVariable UUID id, @RequestBody OrganisationDto dto) {
-        try {
-            return ResponseEntity.ok(organisationService.patch(id, dto));
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.notFound().build();
-        }
+        return ResponseEntity.ok(organisationService.patch(id, dto));
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_ORGANIZATION_SETTINGS')")
     public ResponseEntity<Void> delete(@PathVariable UUID id) {
         organisationService.delete(id);
         return ResponseEntity.noContent().build();

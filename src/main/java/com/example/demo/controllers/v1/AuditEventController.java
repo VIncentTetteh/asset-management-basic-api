@@ -22,13 +22,13 @@ public class AuditEventController {
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN', 'ROLE_ORG_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','VIEW_AUDIT_LOGS','EXPORT_AUDIT_LOGS')")
     public ResponseEntity<AuditEventDto> getEventById(@PathVariable UUID id) {
         return ResponseEntity.ok(auditEventService.getEventById(id));
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN', 'ROLE_ORG_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','VIEW_AUDIT_LOGS','EXPORT_AUDIT_LOGS')")
     public ResponseEntity<List<AuditEventDto>> getEvents(
             @RequestParam(required = false) UUID actorId,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant start,

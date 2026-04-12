@@ -5,12 +5,15 @@ import com.example.demo.models.Role;
 import com.example.demo.models.Organisation;
 import com.example.demo.repositories.RoleRepository;
 import com.example.demo.repositories.OrganisationRepository;
+import com.example.demo.security.PermissionCacheService;
+import com.example.demo.security.RolePermissionDefaults;
 import com.example.demo.services.RoleService;
 import com.example.demo.services.TenantAwareService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -20,11 +23,14 @@ import java.util.stream.Collectors;
 public class RoleServiceImpl extends TenantAwareService implements RoleService {
 
     private final RoleRepository roleRepository;
+    private final PermissionCacheService permissionCacheService;
 
     public RoleServiceImpl(RoleRepository roleRepository,
-            OrganisationRepository organisationRepository) {
+            OrganisationRepository organisationRepository,
+            PermissionCacheService permissionCacheService) {
         super(organisationRepository);
         this.roleRepository = roleRepository;
+        this.permissionCacheService = permissionCacheService;
     }
 
     @Override
@@ -35,7 +41,7 @@ public class RoleServiceImpl extends TenantAwareService implements RoleService {
         Role role = new Role();
         role.setName(roleDto.getName());
         role.setDescription(roleDto.getDescription());
-        role.setPermissions(roleDto.getPermissions());
+        role.setPermissions(RolePermissionDefaults.defaultPermissionsForRole(roleDto.getName(), roleDto.getPermissions()));
         role.setOrganisation(org);
 
         return mapToDto(roleRepository.save(role));
@@ -66,11 +72,18 @@ public class RoleServiceImpl extends TenantAwareService implements RoleService {
         Role role = roleRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
                 .orElseThrow(() -> new IllegalArgumentException("Role not found"));
 
+        String previousPermissions = role.getPermissions();
         role.setName(roleDto.getName());
         role.setDescription(roleDto.getDescription());
-        role.setPermissions(roleDto.getPermissions());
+        role.setPermissions(RolePermissionDefaults.defaultPermissionsForRole(roleDto.getName(), roleDto.getPermissions()));
 
-        return mapToDto(roleRepository.save(role));
+        RoleDto saved = mapToDto(roleRepository.save(role));
+        // Evict cached permissions for every user with this role so changes
+        // take effect immediately without requiring the user to re-login.
+        if (!Objects.equals(previousPermissions, role.getPermissions())) {
+            permissionCacheService.evictForRole(id);
+        }
+        return saved;
     }
 
     @Override
@@ -79,17 +92,27 @@ public class RoleServiceImpl extends TenantAwareService implements RoleService {
         Role role = roleRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
                 .orElseThrow(() -> new IllegalArgumentException("Role not found"));
 
+        String previousPermissions = role.getPermissions();
+        String effectiveRoleName = roleDto.getName() != null ? roleDto.getName() : role.getName();
+
         if (roleDto.getName() != null) {
             role.setName(roleDto.getName());
         }
         if (roleDto.getDescription() != null) {
             role.setDescription(roleDto.getDescription());
         }
-        if (roleDto.getPermissions() != null) {
+
+        if (RolePermissionDefaults.isAdminRoleName(effectiveRoleName)) {
+            role.setPermissions(RolePermissionDefaults.allPermissionsJson());
+        } else if (roleDto.getPermissions() != null) {
             role.setPermissions(roleDto.getPermissions());
         }
 
-        return mapToDto(roleRepository.save(role));
+        RoleDto patched = mapToDto(roleRepository.save(role));
+        if (!Objects.equals(previousPermissions, role.getPermissions())) {
+            permissionCacheService.evictForRole(id);
+        }
+        return patched;
     }
 
     @Override
