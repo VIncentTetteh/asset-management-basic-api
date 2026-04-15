@@ -8,11 +8,11 @@
 		<version>3.3.0</version>
 		<relativePath/> <!-- lookup parent from a repository -->
 	</parent>
-	<groupId>com.assert-iq</groupId>
+	<groupId>com.assetiq</groupId>
 	<artifactId>assetIQ</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
-	<name>enterprise-assert-manager</name>
-	<description>Enterprise Asset Management System</description>
+	<name>AssetIQ</name>
+	<description>AssetIQ — Enterprise Asset Management Platform</description>
 	<url/>
 	<licenses>
 		<license/>
@@ -27,7 +27,10 @@
 		<url/>
 	</scm>
 	<properties>
-		<java.version>17</java.version>
+		<java.version>21</java.version>
+		<!-- Override the Flyway version bundled by Spring Boot 3.3.0 (10.10.0).
+		     PostgreSQL 17 support requires Flyway 10.12.0+. -->
+		<flyway.version>10.20.1</flyway.version>
 	</properties>
 	<dependencies>
 		<dependency>
@@ -123,6 +126,15 @@
 			<version>3.18.0</version>
 		</dependency>
 
+		<!-- Commons Pool2 — required by Lettuce connection pooling.
+		     spring-boot-starter-data-redis does NOT pull this in transitively;
+		     it must be declared explicitly when lettuce.pool.enabled=true.
+		     Version is managed by the Spring Boot BOM. -->
+		<dependency>
+			<groupId>org.apache.commons</groupId>
+			<artifactId>commons-pool2</artifactId>
+		</dependency>
+
 		<!-- JSON Processing -->
 		<dependency>
 			<groupId>com.fasterxml.jackson.core</groupId>
@@ -179,11 +191,18 @@
 			<artifactId>spring-boot-starter-oauth2-resource-server</artifactId>
 		</dependency>
 
-		<!-- Log Aggregation - SLF4J with Logstash Encoder -->
+		<!-- Sentry — error tracking, distributed tracing, and metrics -->
+		<!-- sentry-spring-boot-starter-jakarta auto-configures Sentry for Spring Boot 3 (Jakarta EE) -->
 		<dependency>
-			<groupId>net.logstash.logback</groupId>
-			<artifactId>logstash-logback-encoder</artifactId>
-			<version>7.3</version>
+			<groupId>io.sentry</groupId>
+			<artifactId>sentry-spring-boot-starter-jakarta</artifactId>
+			<version>7.14.0</version>
+		</dependency>
+		<!-- sentry-logback routes Logback ERROR events to Sentry as issues -->
+		<dependency>
+			<groupId>io.sentry</groupId>
+			<artifactId>sentry-logback</artifactId>
+			<version>7.14.0</version>
 		</dependency>
 
 		<dependency>

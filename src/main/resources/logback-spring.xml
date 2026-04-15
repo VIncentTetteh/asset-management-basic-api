@@ -3,18 +3,18 @@
     <property name="LOG_FILE" value="${LOG_FILE:-${LOG_PATH:-${LOG_TEMP:-${java.io.tmpdir:-/tmp}}/spring.log}}"/>
     <property name="LOG_PATTERN" value="%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"/>
 
-    <!-- Console appender for development -->
+    <!-- ── Console appender ────────────────────────────────────────────────── -->
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
-        <filter class="com.example.demo.config.SensitiveDataFilter"/>
+        <filter class="com.assetiq.config.SensitiveDataFilter"/>
         <encoder>
             <pattern>${LOG_PATTERN}</pattern>
             <charset>utf8</charset>
         </encoder>
     </appender>
 
-    <!-- File appender -->
+    <!-- ── Rolling file appender ──────────────────────────────────────────── -->
     <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
-        <filter class="com.example.demo.config.SensitiveDataFilter"/>
+        <filter class="com.assetiq.config.SensitiveDataFilter"/>
         <file>${LOG_FILE}</file>
         <encoder>
             <pattern>${LOG_PATTERN}</pattern>
@@ -27,32 +27,34 @@
         </rollingPolicy>
     </appender>
 
-    <!-- Logstash appender for log aggregation (ELK Stack) -->
-    <appender name="LOGSTASH" class="net.logstash.logback.appender.LogstashTcpSocketAppender">
-        <destination>localhost:8009</destination>
-        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
-            <customFields>{"service":"asset-management-system","version":"1.0.0"}</customFields>
-        </encoder>
-        <keepAliveDuration>5 minutes</keepAliveDuration>
+    <!-- ── Sentry appender ─────────────────────────────────────────────────
+         Forwards ERROR-level events to Sentry as issues.
+         INFO+ events are attached as breadcrumbs so you get full context.
+         The DSN is picked up automatically from sentry.dsn in application.properties.
+    ──────────────────────────────────────────────────────────────────────── -->
+    <appender name="SENTRY" class="io.sentry.logback.SentryAppender">
+        <!-- Only create Sentry issues for ERROR and above -->
+        <minimumEventLevel>ERROR</minimumEventLevel>
+        <!-- Attach INFO+ log lines as breadcrumbs on every event -->
+        <minimumBreadcrumbLevel>INFO</minimumBreadcrumbLevel>
     </appender>
 
-    <!-- Application logs -->
-    <logger name="com.example.demo" level="DEBUG" additivity="false">
+    <!-- ── Application logger ─────────────────────────────────────────────── -->
+    <logger name="com.assetiq" level="DEBUG" additivity="false">
         <appender-ref ref="CONSOLE"/>
         <appender-ref ref="FILE"/>
-        <appender-ref ref="LOGSTASH"/>
+        <appender-ref ref="SENTRY"/>
     </logger>
 
-    <!-- Spring framework logs -->
+    <!-- ── Framework loggers ──────────────────────────────────────────────── -->
     <logger name="org.springframework" level="INFO"/>
-    <logger name="org.springframework.security" level="DEBUG"/>
+    <logger name="org.springframework.security" level="WARN"/>
     <logger name="org.hibernate" level="INFO"/>
 
-    <!-- Root logger -->
+    <!-- ── Root logger ────────────────────────────────────────────────────── -->
     <root level="INFO">
         <appender-ref ref="CONSOLE"/>
         <appender-ref ref="FILE"/>
-        <appender-ref ref="LOGSTASH"/>
+        <appender-ref ref="SENTRY"/>
     </root>
 </configuration>
-

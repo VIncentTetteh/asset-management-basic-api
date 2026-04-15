@@ -1,0 +1,172 @@
+# AssetIQ Standalone Edition — Docker Compose
+#
+# Usage:
+#   1. Copy .env.standalone.example to .env and fill in all values
+#   2. Run: ./scripts/generate-rsa-keys.sh   (one-time, creates keys/ dir)
+#   3. Run: docker compose -f docker-compose.standalone.yml up -d
+#   4. Open https://<your-domain> and follow the setup wizard
+#
+# Services:
+#   postgres       — shared PostgreSQL 16 (two databases: assetiq + license_server)
+#   license-server — AssetIQ License Server (Spring Boot, port 8090 internal)
+#   backend        — AssetIQ Backend API (Spring Boot, port 8080 internal)
+#   frontend       — AssetIQ Web UI (Next.js, port 3000 internal)
+#   nginx          — Reverse proxy (ports 80 + 443 public)
+#
+# Ports exposed to the host:
+#   80  / 443 — nginx (HTTP redirects to HTTPS)
+#
+# Volumes:
+#   postgres_data   — database files (persist between restarts)
+#   license_keys    — RSA PEM files for the license server
+#   uploads         — user-uploaded files served by the backend
+
+version: "3.9"
+
+services:
+
+  # ── Database ──────────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: assetiq-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-assetiq}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_MULTIPLE_DATABASES: assetiq,license_server
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/create-multiple-postgresql-databases.sh:/docker-entrypoint-initdb.d/01-create-databases.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-assetiq}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [assetiq-net]
+
+  # ── License Server ─────────────────────────────────────────────────────────────
+  license-server:
+    build:
+      context: ../../assetiq-license-server
+      dockerfile: Dockerfile
+    container_name: assetiq-license-server
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SERVER_PORT: 8090
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/license_server
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-assetiq}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      SPRING_DATASOURCE_DRIVER_CLASS_NAME: org.postgresql.Driver
+      SPRING_JPA_DATABASE_PLATFORM: org.hibernate.dialect.PostgreSQLDialect
+      LICENSE_RSA_PRIVATE_KEY_PATH: /app/keys/private.pem
+      LICENSE_RSA_PUBLIC_KEY_PATH: /app/keys/public.pem
+      LICENSE_ADMIN_API_KEY: ${LICENSE_ADMIN_API_KEY}
+      LICENSE_RATE_LIMIT_RPM: ${LICENSE_RATE_LIMIT_RPM:-30}
+      LICENSE_ABUSE_MAX_FINGERPRINTS: ${LICENSE_ABUSE_MAX_FINGERPRINTS:-2}
+    volumes:
+      - license_keys:/app/keys:ro
+    networks: [assetiq-net]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8090/actuator/health || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+
+  # ── Backend API ────────────────────────────────────────────────────────────────
+  backend:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: assetiq-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      license-server:
+        condition: service_healthy
+    environment:
+      SERVER_PORT: 8080
+      APP_MODE: standalone
+      ASSETIQ_LICENSE_KEY: ${ASSETIQ_LICENSE_KEY}
+      LICENSE_SERVER_URL: http://license-server:8090
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/assetiq
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-assetiq}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      SPRING_DATASOURCE_DRIVER_CLASS_NAME: org.postgresql.Driver
+      SPRING_JPA_DATABASE_PLATFORM: org.hibernate.dialect.PostgreSQLDialect
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRATION_MS: ${JWT_EXPIRATION_MS:-86400000}
+      PAYSTACK_SECRET_KEY: ${PAYSTACK_SECRET_KEY:-}
+      STORAGE_TYPE: ${STORAGE_TYPE:-local}
+      STORAGE_LOCAL_BASE_DIR: /app/uploads
+    volumes:
+      - uploads:/app/uploads
+    networks: [assetiq-net]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/actuator/health || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+
+  # ── Web Frontend ───────────────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ../../Enterprise-Asset-manager-Frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_APP_MODE: standalone
+        NEXT_PUBLIC_API_URL: http://backend:8080
+    container_name: assetiq-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      NEXT_PUBLIC_APP_MODE: standalone
+      NEXT_PUBLIC_API_URL: http://backend:8080
+    networks: [assetiq-net]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/ || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+
+  # ── Nginx Reverse Proxy ────────────────────────────────────────────────────────
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: assetiq-nginx
+    restart: unless-stopped
+    depends_on:
+      - frontend
+      - backend
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/certs:/etc/nginx/certs:ro   # Mount your TLS cert + key here
+    # nginx needs both networks: internal (to proxy to services) + edge (public ports)
+    networks: [assetiq-net, assetiq-edge]
+
+# ── Volumes ────────────────────────────────────────────────────────────────────
+volumes:
+  postgres_data:
+  license_keys:
+    # Seed with: docker run --rm -v assetiq-standalone_license_keys:/keys alpine sh -c "..."
+    # Or use the generate-rsa-keys.sh script which writes directly to the named volume
+  uploads:
+
+# ── Networks ──────────────────────────────────────────────────────────────────
+# assetiq-internal: backend services that must never be directly reachable
+#   from the internet.  No outbound internet access from these containers.
+# assetiq-edge: nginx only — bridges the internal network to the host ports.
+networks:
+  assetiq-net:
+    driver: bridge
+    internal: true   # postgres, license-server, backend, frontend: no direct internet
+  assetiq-edge:
+    driver: bridge   # nginx alone sits on this network AND the host ports

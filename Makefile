@@ -1,6 +1,6 @@
 # Makefile for common tasks
-APP_NAME=demo
-JAR=target/demo-0.0.1-SNAPSHOT.jar
+APP_NAME=assetiq
+JAR=target/assetIQ-0.0.1-SNAPSHOT.jar
 PORT?=8082
 
 .PHONY: build run clean docker-build docker-run test

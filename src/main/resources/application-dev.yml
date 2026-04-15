@@ -1,0 +1,48 @@
+# ── Development profile ───────────────────────────────────────────────────────
+# Activated via: SPRING_PROFILES_ACTIVE=dev
+# Verbose logging, in-memory cache (no Redis needed), relaxed security constraints.
+
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+        use_sql_comments: true
+
+  # Use simple in-memory cache in dev so Redis is not required.
+  cache:
+    type: simple
+
+logging:
+  level:
+    com.assetiq: DEBUG
+    org.springframework.security: DEBUG
+    org.hibernate.SQL: DEBUG
+    org.hibernate.type.descriptor.sql.BasicBinder: TRACE
+
+server:
+  error:
+    include-message: always
+    include-binding-errors: always
+    include-stacktrace: always
+
+management:
+  endpoint:
+    health:
+      show-details: always
+      show-components: always
+
+# ── OpenAPI / Swagger ──────────────────────────────────────────────────────────
+springdoc:
+  swagger-ui:
+    enabled: true
+  api-docs:
+    enabled: true
+
+app:
+  startup:
+    # Allow dev startup without enforcing production secret constraints.
+    skip-secret-validation: true

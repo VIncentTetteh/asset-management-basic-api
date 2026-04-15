@@ -1,0 +1,352 @@
+spring:
+  application:
+    name: ${SPRING_APPLICATION_NAME:AssetIQ}
+
+  # ── Virtual Threads (Project Loom) ─────────────────────────────────────────
+  # Java 21 + Spring Boot 3.2+. Replaces Tomcat's platform-thread executor and
+  # the @Async / @Scheduled executors with virtual threads.
+  # Eliminates the thread-per-request bottleneck for all I/O-bound work.
+  threads:
+    virtual:
+      enabled: true
+
+  # ── Database ────────────────────────────────────────────────────────────────
+  datasource:
+    url: ${SPRING_DATASOURCE_URL}
+    username: ${SPRING_DATASOURCE_USERNAME}
+    password: ${SPRING_DATASOURCE_PASSWORD}
+    driver-class-name: ${SPRING_DATASOURCE_DRIVER_CLASS_NAME:org.postgresql.Driver}
+    hikari:
+      pool-name: AssetIQ-Pool
+      maximum-pool-size: ${DB_POOL_MAX:25}
+      minimum-idle: ${DB_POOL_MIN_IDLE:5}
+      # How long to wait for a free connection before throwing (ms).
+      connection-timeout: 20000
+      # Retire idle connections after 5 min to free DB-side resources.
+      idle-timeout: 300000
+      # Retire connections after 20 min regardless — must be < PG tcp_keepalives_idle.
+      max-lifetime: 1200000
+      # Keep-alive ping every 60 s to prevent silent mid-pool connection drops.
+      keepalive-time: 60000
+      # Verify a connection is alive (must be < connection-timeout).
+      validation-timeout: 5000
+      # Warn when a connection is held longer than this threshold.
+      # 60 s: Hibernate's ddl-auto=validate holds a connection while scanning the
+      # entire remote schema at startup (false-positive at 10 s). Runtime queries
+      # should never be anywhere near 60 s, so real leaks are still caught.
+      leak-detection-threshold: 60000
+
+  # ── JPA / Hibernate ─────────────────────────────────────────────────────────
+  jpa:
+    # database-platform is intentionally omitted: Hibernate 6 infers the dialect
+    # automatically from the JDBC URL. Specifying it explicitly triggers a
+    # HHH90000025 deprecation warning ("does not need to be specified explicitly").
+    hibernate:
+      # Flyway owns all schema changes — Hibernate must only validate.
+      # Override with HIBERNATE_DDL_AUTO=update for first-run local dev.
+      ddl-auto: ${HIBERNATE_DDL_AUTO:validate}
+    show-sql: false
+    # Never hold a DB connection open for the full HTTP lifecycle (OSIV anti-pattern).
+    open-in-view: false
+    properties:
+      hibernate:
+        # Disable debug decorators — they add per-query overhead in production.
+        format_sql: false
+        use_sql_comments: false
+        generate_statistics: false
+        jdbc:
+          batch_size: 25
+          fetch_size: 50
+        order_inserts: true
+        order_updates: true
+        # Batch-fetch associations to prevent N+1 queries.
+        default_batch_fetch_size: 25
+        # allow_jdbc_metadata_access is intentionally NOT set to false.
+        # Hibernate 6 uses one JDBC call at startup to auto-detect the PostgreSQL
+        # dialect. Disabling it requires an explicit hibernate.dialect, which itself
+        # triggers HHH90000025 ("does not need to be specified explicitly"). The
+        # auto-detection is accurate, the startup cost is a single lightweight query.
+        query:
+          in_clause_parameter_padding: true
+        envers:
+          audit_table_suffix: _aud
+          revision_field_name: rev
+          revision_type_field_name: revtype
+
+  # ── Flyway ──────────────────────────────────────────────────────────────────
+  flyway:
+    enabled: ${FLYWAY_ENABLED:true}
+    locations: classpath:db/migration
+    # Required the first time Flyway runs against a pre-existing schema.
+    baseline-on-migrate: true
+    baseline-version: 0
+    # FlywayRepairConfig calls repair() before every migrate(), so validate is safe.
+    validate-on-migrate: true
+
+  # ── Jackson ─────────────────────────────────────────────────────────────────
+  jackson:
+    serialization:
+      # false: pretty-printing wastes bytes on every response.
+      indent-output: false
+    default-property-inclusion: non_null
+    time-zone: UTC
+
+  # ── Redis Cache ─────────────────────────────────────────────────────────────
+  cache:
+    type: redis
+    redis:
+      # Default TTL: 10 min. Individual caches can override via @CacheConfig.
+      time-to-live: 600000
+      cache-null-values: false
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      # 2 s command timeout — a dead Redis node must not block threads for 60 s.
+      timeout: 2000
+      lettuce:
+        pool:
+          enabled: true
+          max-active: 16
+          max-idle: 8
+          min-idle: 2
+          max-wait: 2000ms
+          time-between-eviction-runs: 60s
+
+  # ── Async / Scheduled Executors ─────────────────────────────────────────────
+  # With virtual.threads=true Spring replaces these with virtual-thread executors.
+  # These bounds serve as fallback when virtual threads are disabled.
+  task:
+    execution:
+      pool:
+        core-size: 10
+        max-size: 50
+        queue-capacity: 500
+        keep-alive: 60s
+      thread-name-prefix: async-
+    scheduling:
+      pool:
+        size: 5
+      thread-name-prefix: sched-
+
+  # ── Graceful Shutdown ────────────────────────────────────────────────────────
+  # Allow in-flight requests to finish before the process exits.
+  # Railway sends SIGTERM on deploy — without this, requests are dropped mid-flight.
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+
+  # ── Email (SMTP) ─────────────────────────────────────────────────────────────
+  mail:
+    host: ${SMTP_HOST:}
+    port: ${SMTP_PORT:587}
+    username: ${SMTP_USERNAME:}
+    password: ${SMTP_PASSWORD:}
+    properties:
+      # Port 587 = STARTTLS (explicit TLS). If your provider uses port 465, swap:
+      # starttls.enable=false and ssl.enable=true.
+      "[mail.smtp.auth]": "${SMTP_AUTH:true}"
+      "[mail.smtp.starttls.enable]": "true"
+      "[mail.smtp.ssl.enable]": "false"
+
+  # ── Security (OAuth2) ────────────────────────────────────────────────────────
+  # OAuth2 provider config lives in application-oauth2.yml (activate that profile
+  # to enable SSO). No values here to avoid empty registrations on startup.
+
+# ── Server ──────────────────────────────────────────────────────────────────
+server:
+  # Railway (and most PaaS) inject PORT automatically; falls back to SERVER_PORT.
+  port: ${PORT:${SERVER_PORT:8085}}
+  shutdown: graceful
+  servlet:
+    context-path: /
+  compression:
+    # Gzip reduces JSON payloads 60–80% with negligible CPU cost.
+    enabled: true
+    mime-types: >-
+      application/json,application/xml,text/html,text/xml,
+      text/plain,application/javascript,text/css
+    min-response-size: 1024
+  tomcat:
+    threads:
+      max: 200
+      min-spare: 10
+    max-connections: 10000
+    accept-count: 200
+    connection-timeout: 5000
+    # Header size limits (prevents Swagger UI "Request Header Fields Too Large").
+    max-http-request-header-size: 64KB
+    max-http-form-post-size: 10MB
+    max-http-response-header-size: 64KB
+    max-http-header-count: 500
+  # Railway terminates TLS at the load balancer — only enable when self-hosting
+  # with a managed certificate by setting SSL_ENABLED=true.
+  ssl:
+    enabled: ${SSL_ENABLED:false}
+    key-store: ${SSL_KEYSTORE_PATH:}
+    key-store-password: ${SSL_KEYSTORE_PASSWORD:}
+    key-store-type: PKCS12
+    key-alias: asset-management
+  error:
+    include-message: never
+    include-binding-errors: never
+    include-stacktrace: never
+    include-exception: false
+
+# ── App ──────────────────────────────────────────────────────────────────────
+app:
+  # cloud = SaaS hosted (default). standalone = self-hosted, requires license key.
+  mode: ${APP_MODE:cloud}
+  license:
+    key: ${ASSETIQ_LICENSE_KEY:}
+    server-url: ${LICENSE_SERVER_URL:https://license.assetiq.io}
+  jwt:
+    # MUST be overridden in production. Generate with: openssl rand -base64 48
+    secret: ${APP_JWT_SECRET:this-default-secret-must-be-at-least-32-characters-long-change-in-production}
+    expiration: ${APP_JWT_EXPIRATION:86400000}
+  # Override with your real domains in production.
+  cors:
+    allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5173}
+  rate-limiting:
+    enabled: true
+    requests-per-minute: 100
+    requests-per-hour: 5000
+  correlation-id:
+    header-name: X-Request-ID
+    enabled: true
+  api:
+    version: v1
+    supported-versions: v1,v2
+  email:
+    enabled: ${APP_EMAIL_ENABLED:false}
+    from: ${APP_EMAIL_FROM:no-reply@assetiq.local}
+    from-name: ${APP_EMAIL_FROM_NAME:AssetIQ}
+    base-url: ${APP_EMAIL_BASE_URL:http://localhost:3000}
+    support: ${APP_EMAIL_SUPPORT:support@assetiq.local}
+  storage:
+    s3:
+      enabled: ${APP_STORAGE_S3_ENABLED:false}
+      bucket: ${APP_STORAGE_S3_BUCKET:}
+      region: ${APP_STORAGE_S3_REGION:us-east-1}
+      endpoint: ${APP_STORAGE_S3_ENDPOINT:}
+      path-style-access: ${APP_STORAGE_S3_PATH_STYLE:false}
+      kms-key-id: ${APP_STORAGE_S3_KMS_KEY_ID:}
+      report-prefix: ${APP_STORAGE_S3_REPORT_PREFIX:reports}
+      import-prefix: ${APP_STORAGE_S3_IMPORT_PREFIX:imports}
+      presign-minutes: ${APP_STORAGE_S3_PRESIGN_MINUTES:15}
+    org-override:
+      allowed: ${APP_STORAGE_ORG_OVERRIDE_ALLOWED:true}
+  billing:
+    default-currency: ${APP_BILLING_DEFAULT_CURRENCY:GHS}
+    callback-url: ${APP_BILLING_CALLBACK_URL:http://localhost:3000/billing/verify}
+    plans:
+      basic:
+        amount-minor: ${APP_BILLING_BASIC_AMOUNT:20000}
+        paystack-plan-code: ${APP_BILLING_BASIC_PAYSTACK_PLAN_CODE:}
+      premium:
+        amount-minor: ${APP_BILLING_PREMIUM_AMOUNT:100000}
+        paystack-plan-code: ${APP_BILLING_PREMIUM_PAYSTACK_PLAN_CODE:}
+
+# ── AI / LLM ─────────────────────────────────────────────────────────────────
+ai:
+  # Provider: groq (free) | anthropic (paid) | ollama (local)
+  provider: ${AI_PROVIDER:groq}
+
+groq:
+  api:
+    key: ${GROQ_API_KEY:}
+  model: ${GROQ_MODEL:llama-3.3-70b-versatile}
+
+anthropic:
+  api:
+    key: ${ANTHROPIC_API_KEY:}
+  model: ${ANTHROPIC_MODEL:claude-haiku-4-5-20251001}
+
+ollama:
+  base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
+  model: ${OLLAMA_MODEL:llama3.1:8b}
+
+# ── Paystack Billing ─────────────────────────────────────────────────────────
+paystack:
+  base-url: ${PAYSTACK_BASE_URL:https://api.paystack.co}
+  secret:
+    key: ${PAYSTACK_SECRET_KEY:}
+  public:
+    key: ${PAYSTACK_PUBLIC_KEY:}
+  timeout-seconds: ${PAYSTACK_TIMEOUT_SECONDS:30}
+
+# ── OpenAPI / Swagger ─────────────────────────────────────────────────────────
+# Enabled here for dev convenience; disabled in application-prod.yml.
+springdoc:
+  swagger-ui:
+    enabled: true
+    path: /swagger-ui.html
+    operations-sorter: method
+    tags-sorter: alpha
+  api-docs:
+    path: /v3/api-docs
+  show-actuator: false
+  show-login-endpoint: true
+
+# ── Actuator / Health Checks ──────────────────────────────────────────────────
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+      base-path: /actuator
+  endpoint:
+    health:
+      show-details: when-authorized
+      show-components: when-authorized
+      probes:
+        enabled: true
+  health:
+    probes:
+      enabled: true
+    livenessState:
+      enabled: true
+    readinessState:
+      enabled: true
+    mail:
+      enabled: ${APP_EMAIL_ENABLED:false}
+  metrics:
+    enable:
+      all: true
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+logging:
+  config: classpath:logback-spring.xml
+  level:
+    root: INFO
+    com.assetiq: INFO
+    org.springframework.security: WARN
+    org.hibernate.SQL: WARN
+    org.hibernate.type.descriptor.sql.BasicBinder: WARN
+    # Silence the 55 "Could not safely identify store assignment" INFO lines that
+    # Spring Data Redis emits for every JPA repository interface on startup.
+    # They are harmless — Redis correctly finds 0 Redis repositories — but noisy.
+    org.springframework.data.repository.config.RepositoryConfigurationExtensionSupport: WARN
+  pattern:
+    console: "%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+    file: "%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+
+# ── Sentry ────────────────────────────────────────────────────────────────────
+sentry:
+  # Leave empty to disable Sentry (e.g. local dev without a project).
+  dsn: ${SENTRY_DSN:}
+  environment: ${SENTRY_ENVIRONMENT:production}
+  # Sample 10% of transactions for performance tracing (1.0 = 100%).
+  traces-sample-rate: ${SENTRY_TRACES_SAMPLE_RATE:0.1}
+  # Never send PII (IPs, usernames) to Sentry.
+  send-default-pii: false
+  # Set to git SHA or version string in CI/CD to link events to a release.
+  release: ${SENTRY_RELEASE:}
+  logging:
+    minimum-event-level: error
+    minimum-breadcrumb-level: info

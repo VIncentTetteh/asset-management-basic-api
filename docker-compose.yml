@@ -1,11 +1,41 @@
+# Local development compose — starts only the infrastructure services the app needs.
+# The Spring Boot app itself is run via `mvn spring-boot:run` or your IDE, NOT here.
+#
+# Logstash has been removed. Logging and error tracking is handled by Sentry.
 services:
-  logstash:
-    image: docker.elastic.co/logstash/logstash:8.12.0
-    container_name: demo-logstash
+  postgres:
+    image: postgres:16-alpine
+    container_name: assetiq-postgres
     ports:
-      - "8009:8009"
-    volumes:
-      - ./logstash.conf:/usr/share/logstash/pipeline/logstash.conf:ro
+      - "5432:5432"
     environment:
-      - LS_JAVA_OPTS=-Xms256m -Xmx256m
+      POSTGRES_DB: ${POSTGRES_DB:-assetiq}
+      POSTGRES_USER: ${POSTGRES_USER:-assetiq}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-assetiq}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-assetiq}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: assetiq-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --requirepass ${REDIS_PASSWORD:-}
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  postgres_data:
+  redis_data:

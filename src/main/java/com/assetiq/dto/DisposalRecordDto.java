@@ -1,0 +1,35 @@
+package com.assetiq.dto;
+
+import com.assetiq.enums.DisposalMethod;
+import jakarta.validation.constraints.NotNull;
+import lombok.Data;
+
+
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.UUID;
+
+@Data
+public class DisposalRecordDto {
+    private UUID id;
+
+    @NotNull(message = "Asset ID is required")
+    private UUID assetId;
+
+    @NotNull(message = "Disposal method is required")
+    private DisposalMethod disposalMethod;
+
+    @NotNull(message = "Disposal date is required")
+    private LocalDate disposalDate;
+
+    private BigDecimal saleValue;
+
+    @NotNull(message = "Approved by user ID is required")
+    private UUID approvedById;
+
+    private String reason;
+
+    private String complianceDocumentUrl;
+
+    private UUID organisationId;
+}

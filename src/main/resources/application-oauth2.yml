@@ -1,0 +1,20 @@
+# ── OAuth2 profile ────────────────────────────────────────────────────────────
+# Activated via: SPRING_PROFILES_ACTIVE=oauth2 (combine with prod/dev as needed,
+# e.g. SPRING_PROFILES_ACTIVE=prod,oauth2)
+#
+# Required environment variables:
+#   OAUTH2_GOOGLE_CLIENT_ID
+#   OAUTH2_GOOGLE_CLIENT_SECRET
+
+spring:
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: ${OAUTH2_GOOGLE_CLIENT_ID}
+            client-secret: ${OAUTH2_GOOGLE_CLIENT_SECRET}
+            scope:
+              - openid
+              - profile
+              - email

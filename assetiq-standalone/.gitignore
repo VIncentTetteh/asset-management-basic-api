@@ -1,0 +1,10 @@
+# Secrets — never commit these
+.env
+keys/private.pem
+nginx/certs/server.key
+
+# Backups
+backups/
+
+# Postgres data (if running locally without named volume)
+postgres_data/

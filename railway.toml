@@ -1,0 +1,23 @@
+# Railway deployment configuration — https://docs.railway.com/reference/config-as-code
+#
+# Railway will auto-detect the Dockerfile and use it for the build.
+# Set all environment variables listed in .env.example in the Railway dashboard
+# (Variables tab) before deploying.
+
+[build]
+# Use the repo-root Dockerfile explicitly.
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+# The port your Spring Boot app listens on (SERVER_PORT env var).
+# Railway injects PORT automatically — the app reads it via SERVER_PORT.
+startCommand = "java -XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -Djava.security.egd=file:/dev/./urandom -jar app.jar"
+
+# Health check — Railway will wait for this to return 200 before routing traffic.
+healthcheckPath = "/actuator/health/readiness"
+healthcheckTimeout = 120
+
+# Restart policy on crashes.
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3

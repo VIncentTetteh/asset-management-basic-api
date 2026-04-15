@@ -1,0 +1,29 @@
+package com.assetiq.services;
+
+import com.assetiq.dto.AssetTransferDto;
+import java.util.Set;
+import java.util.UUID;
+
+public interface AssetTransferService {
+    AssetTransferDto createTransferRequest(AssetTransferDto transferDto);
+
+    AssetTransferDto getTransferById(UUID id);
+
+    Set<AssetTransferDto> getAllTransfers();
+
+    Set<AssetTransferDto> getTransfersByAsset(UUID assetId);
+
+    Set<AssetTransferDto> getTransfersFromDepartment(UUID departmentId);
+
+    Set<AssetTransferDto> getTransfersToDepartment(UUID departmentId);
+
+    Set<AssetTransferDto> getTransfersByRequester(UUID userId);
+
+    AssetTransferDto approveTransfer(UUID id); // C4: approver from SecurityContext
+
+    AssetTransferDto rejectTransfer(UUID id);
+
+    AssetTransferDto completeTransfer(UUID id);
+
+    void deleteTransfer(UUID id);
+}

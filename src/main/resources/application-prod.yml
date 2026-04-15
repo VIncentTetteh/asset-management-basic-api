@@ -1,0 +1,54 @@
+# ── Production profile ────────────────────────────────────────────────────────
+# Activated via: SPRING_PROFILES_ACTIVE=prod
+# Overrides application.yml for anything that must differ in production.
+
+spring:
+  jpa:
+    hibernate:
+      # Flyway manages all schema changes; Hibernate must only validate — never mutate.
+      ddl-auto: validate
+
+  cache:
+    type: redis
+
+logging:
+  level:
+    root: WARN
+    com.assetiq: INFO
+    org.springframework.security: WARN
+    org.hibernate.SQL: WARN
+    org.hibernate.type.descriptor.sql.BasicBinder: WARN
+
+server:
+  # Railway (and all major PaaS platforms) terminate TLS at the ingress/load balancer.
+  # The app receives plain HTTP internally — do NOT enable SSL here.
+  # If self-hosting with a managed certificate, set SSL_ENABLED=true in the environment.
+  ssl:
+    enabled: ${SSL_ENABLED:false}
+  error:
+    include-stacktrace: never
+    include-exception: false
+    include-message: never
+    include-binding-errors: never
+
+management:
+  endpoint:
+    health:
+      show-details: when-authorized
+      show-components: when-authorized
+
+# ── OpenAPI / Swagger ──────────────────────────────────────────────────────────
+# Disabled in production. Re-enable temporarily via SWAGGER_ENABLED=true.
+springdoc:
+  swagger-ui:
+    enabled: ${SWAGGER_ENABLED:false}
+  api-docs:
+    enabled: ${SWAGGER_ENABLED:false}
+
+# ── Security ───────────────────────────────────────────────────────────────────
+app:
+  startup:
+    # Prevent startup if the JWT secret is still the insecure default.
+    skip-secret-validation: false
+
+
