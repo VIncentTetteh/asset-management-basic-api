@@ -105,7 +105,7 @@ class RbacAuditServiceTest {
         assertThat(event.getTargetId()).isEqualTo(roleId.toString());
         assertThat(event.getOldValue()).contains("CREATE_ASSET");
         assertThat(event.getNewValue()).contains("EDIT_ASSET");
-        assertThat(event.isSuccess()).isTrue();
+        assertThat(event.getSuccess()).isTrue();
     }
 
     @Test
