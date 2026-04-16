@@ -2,7 +2,6 @@ package com.assetiq.config;
 
 import com.assetiq.models.Role;
 import com.assetiq.repositories.RoleRepository;
-import com.assetiq.security.RolePermissionDefaults;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -16,6 +15,12 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+/**
+ * Unit tests for {@link AdminRolePermissionBackfill}.
+ *
+ * Phase 2 / B-1: the backfill no longer touches the (removed) JSON permissions column.
+ * It now only ensures the {@code grantAllPermissions} flag is set on admin-named roles.
+ */
 @ExtendWith(MockitoExtension.class)
 class AdminRolePermissionBackfillTest {
 
@@ -23,36 +28,36 @@ class AdminRolePermissionBackfillTest {
     private RoleRepository roleRepository;
 
     @Test
-    void run_updatesOnlyActiveAdminRolesWithoutFullPermissions() throws Exception {
-        Role adminRoleNeedingUpdate = new Role();
-        adminRoleNeedingUpdate.setName("ADMIN");
-        adminRoleNeedingUpdate.setPermissions("[\"VIEW_ASSETS\"]");
+    void run_setsGrantAllFlagOnActiveAdminRolesLackingIt() throws Exception {
+        // ADMIN role that is missing the flag — should be patched.
+        Role adminNeedsFlag = new Role();
+        adminNeedsFlag.setName("ADMIN");
+        // grantAllPermissions defaults to false
 
-        Role orgAdminAlreadyFull = new Role();
-        orgAdminAlreadyFull.setName("ORG_ADMIN");
-        orgAdminAlreadyFull.setPermissions(RolePermissionDefaults.allPermissionsJson());
+        // ORG_ADMIN that already has the flag — should be skipped.
+        Role orgAdminAlreadySet = new Role();
+        orgAdminAlreadySet.setName("ORG_ADMIN");
+        orgAdminAlreadySet.setGrantAllPermissions(true);
 
-        Role nonAdminRole = new Role();
-        nonAdminRole.setName("VIEWER");
-        nonAdminRole.setPermissions("[\"VIEW_ASSETS\"]");
+        // Non-admin role — should never be touched.
+        Role viewerRole = new Role();
+        viewerRole.setName("VIEWER");
 
-        Role deletedAdminRole = new Role();
-        deletedAdminRole.setName("SUPER_ADMIN");
-        deletedAdminRole.setPermissions("[\"VIEW_ASSETS\"]");
-        deletedAdminRole.setDeletedAt(Instant.now());
+        // Deleted admin role — should be skipped even though the flag is missing.
+        Role deletedAdmin = new Role();
+        deletedAdmin.setName("SUPER_ADMIN");
+        deletedAdmin.setDeletedAt(Instant.now());
 
         when(roleRepository.findAll()).thenReturn(List.of(
-                adminRoleNeedingUpdate,
-                orgAdminAlreadyFull,
-                nonAdminRole,
-                deletedAdminRole));
+                adminNeedsFlag, orgAdminAlreadySet, viewerRole, deletedAdmin));
 
-        AdminRolePermissionBackfill backfill = new AdminRolePermissionBackfill(roleRepository);
-        backfill.run(new DefaultApplicationArguments(new String[0]));
+        new AdminRolePermissionBackfill(roleRepository)
+                .run(new DefaultApplicationArguments(new String[0]));
 
-        verify(roleRepository).save(adminRoleNeedingUpdate);
-        verify(roleRepository, never()).save(orgAdminAlreadyFull);
-        verify(roleRepository, never()).save(nonAdminRole);
-        verify(roleRepository, never()).save(deletedAdminRole);
+        // Only the active admin role missing the flag should have been saved.
+        verify(roleRepository).save(adminNeedsFlag);
+        verify(roleRepository, never()).save(orgAdminAlreadySet);
+        verify(roleRepository, never()).save(viewerRole);
+        verify(roleRepository, never()).save(deletedAdmin);
     }
 }

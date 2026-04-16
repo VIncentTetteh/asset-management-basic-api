@@ -2,6 +2,7 @@ package com.assetiq.services;
 
 import com.assetiq.models.Organisation;
 import com.assetiq.models.Role;
+import com.assetiq.models.RolePermission;
 import com.assetiq.repositories.RoleRepository;
 import com.assetiq.security.RolePermissionDefaults;
 import org.slf4j.Logger;
@@ -9,15 +10,19 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
-import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Seeds the standard set of platform roles for a given organisation.
  *
  * <p>Roles are idempotent: if a role with the same name already exists in the
- * organisation it is left unchanged. This makes the service safe to call both
- * on new-org creation and on application startup (e.g. via DevDataSeeder).
+ * organisation it is left unchanged unless it is an admin role that is missing the
+ * {@code grantAllPermissions} flag.  This makes the service safe to call both on
+ * new-org creation and on application startup (e.g. via DevDataSeeder).
  *
  * <h2>Standard roles</h2>
  * <ol>
@@ -61,11 +66,12 @@ public class DefaultRoleSeederService {
                     .findByNameAndOrganisationAndDeletedAtIsNull(def.name(), organisation)
                     .ifPresentOrElse(
                             existing -> {
-                                if (RolePermissionDefaults.isAdminRoleName(def.name())
-                                        && !Objects.equals(existing.getPermissions(), def.permissionsJson())) {
-                                    existing.setPermissions(def.permissionsJson());
+                                // Ensure admin roles always have the grantAll flag — idempotent guard.
+                                if (def.grantAll() && !existing.isGrantAllPermissions()) {
+                                    existing.setGrantAllPermissions(true);
+                                    existing.setSystemRole(true);
                                     roleRepository.save(existing);
-                                    log.info("[ROLE SEED] Updated role '{}' permissions for org '{}'",
+                                    log.info("[ROLE SEED] Set grantAllPermissions on role '{}' for org '{}'",
                                             def.name(), organisation.getName());
                                 } else {
                                     log.debug("[ROLE SEED] Role '{}' already exists – skipping", def.name());
@@ -75,8 +81,24 @@ public class DefaultRoleSeederService {
                                 Role role = new Role();
                                 role.setName(def.name());
                                 role.setDescription(def.description());
-                                role.setPermissions(def.permissionsJson());
+                                role.setSystemRole(def.systemRole());
+                                role.setGrantAllPermissions(def.grantAll());
                                 role.setOrganisation(organisation);
+
+                                // Populate permissions via the join table.
+                                // Grant-all roles skip individual rows — the cache service handles them.
+                                if (!def.grantAll()) {
+                                    Set<RolePermission> perms = def.parsePermissions().stream()
+                                            .map(name -> {
+                                                RolePermission rp = new RolePermission();
+                                                rp.setRole(role);
+                                                rp.setPermission(name);
+                                                return rp;
+                                            })
+                                            .collect(Collectors.toSet());
+                                    role.getRolePermissions().addAll(perms);
+                                }
+
                                 roleRepository.save(role);
                                 log.info("[ROLE SEED] Created role '{}' for org '{}'",
                                         def.name(), organisation.getName());
@@ -87,13 +109,39 @@ public class DefaultRoleSeederService {
 
     // ── Role Definitions ──────────────────────────────────────────────────────
 
-    record RoleDefinition(String name, String description, String permissionsJson) {}
+    /**
+     * Describes a platform role including its name, description, and permission set.
+     *
+     * <p>Permissions are stored as a JSON array string for readability in the source
+     * file; {@link #parsePermissions()} converts them to a {@code Set<String>} at use
+     * time.  Grant-all roles ({@code grantAll = true}) do not enumerate individual
+     * permissions — the {@link com.assetiq.security.PermissionCacheService} returns
+     * the full {@link com.assetiq.enums.Permission} set for them directly.
+     */
+    record RoleDefinition(String name, String description, String permissionsJson,
+                          boolean grantAll, boolean systemRole) {
+
+        /**
+         * Parses {@code permissionsJson} (a JSON array like {@code ["PERM1","PERM2"]})
+         * into a plain set of permission name strings.
+         * Returns all permission names when {@code grantAll} is true.
+         */
+        Set<String> parsePermissions() {
+            if (grantAll) return RolePermissionDefaults.allPermissionNames();
+            if (permissionsJson == null || permissionsJson.isBlank()) return Collections.emptySet();
+            // Strip JSON syntax — works for flat string arrays with no nesting.
+            String cleaned = permissionsJson.replaceAll("[\\[\\]\"\\s]", "");
+            if (cleaned.isEmpty()) return Collections.emptySet();
+            return Arrays.stream(cleaned.split(","))
+                    .map(String::trim)
+                    .filter(s -> !s.isEmpty())
+                    .collect(Collectors.toSet());
+        }
+    }
 
     /**
      * Ordered list of standard platform roles.
-     * Permissions are stored as JSON arrays for clarity and
-     * compatibility with both {@link com.assetiq.security.PermissionCacheService}
-     * parse formats.
+     * Permission arrays match the values in {@link com.assetiq.enums.Permission}.
      */
     static final List<RoleDefinition> PLATFORM_ROLES = List.of(
 
@@ -101,7 +149,9 @@ public class DefaultRoleSeederService {
         new RoleDefinition(
             "ADMIN",
             "Full platform access — all permissions granted. Intended for platform administrators.",
-            RolePermissionDefaults.allPermissionsJson()
+            null,   // grant-all: individual permissions not enumerated
+            true,   // grantAll
+            true    // systemRole
         ),
 
         // ── 2. ASSET_MANAGER ────────────────────────────────────────────────
@@ -119,7 +169,8 @@ public class DefaultRoleSeederService {
              "VIEW_DEPARTMENTS","VIEW_USERS",
              "APPROVE_REQUESTS","REJECT_REQUESTS",
              "VIEW_DEPRECIATION",
-             "VIEW_SOFTWARE_LICENSES"]"""
+             "VIEW_SOFTWARE_LICENSES"]""",
+            false, false
         ),
 
         // ── 3. PROCUREMENT_OFFICER ──────────────────────────────────────────
@@ -135,7 +186,8 @@ public class DefaultRoleSeederService {
              "VIEW_VENDOR_REVIEWS","MANAGE_VENDOR_REVIEWS",
              "APPROVE_REQUESTS","REJECT_REQUESTS","ESCALATE_REQUESTS",
              "VIEW_REPORTS","GENERATE_REPORTS",
-             "VIEW_DEPARTMENTS"]"""
+             "VIEW_DEPARTMENTS"]""",
+            false, false
         ),
 
         // ── 4. COMPLIANCE_OFFICER ───────────────────────────────────────────
@@ -151,7 +203,8 @@ public class DefaultRoleSeederService {
              "VIEW_LOCATIONS","VIEW_CATEGORIES",
              "VIEW_DEPARTMENTS","VIEW_USERS",
              "VIEW_SOFTWARE_LICENSES",
-             "VIEW_NETWORK_DISCOVERY","VIEW_CLOUD_ASSETS"]"""
+             "VIEW_NETWORK_DISCOVERY","VIEW_CLOUD_ASSETS"]""",
+            false, false
         ),
 
         // ── 5. IT_MANAGER ───────────────────────────────────────────────────
@@ -168,7 +221,8 @@ public class DefaultRoleSeederService {
              "SCHEDULE_MAINTENANCE","VIEW_MAINTENANCE","MARK_MAINTENANCE_COMPLETE",
              "VIEW_REPORTS","GENERATE_REPORTS",
              "VIEW_COMPLIANCE",
-             "VIEW_DEPARTMENTS","VIEW_USERS"]"""
+             "VIEW_DEPARTMENTS","VIEW_USERS"]""",
+            false, false
         ),
 
         // ── 6. FINANCE_MANAGER ──────────────────────────────────────────────
@@ -185,7 +239,8 @@ public class DefaultRoleSeederService {
              "VIEW_CONTRACTS","VIEW_SUPPLIERS",
              "VIEW_REPORTS","GENERATE_REPORTS","EXPORT_REPORTS",
              "APPROVE_REQUESTS","REJECT_REQUESTS",
-             "VIEW_DEPARTMENTS"]"""
+             "VIEW_DEPARTMENTS"]""",
+            false, false
         ),
 
         // ── 7. HR_MANAGER ───────────────────────────────────────────────────
@@ -198,7 +253,8 @@ public class DefaultRoleSeederService {
              "MANAGE_DEPARTMENTS","VIEW_DEPARTMENTS",
              "VIEW_LOCATIONS",
              "VIEW_REPORTS",
-             "REVIEW_ACCESS"]"""
+             "REVIEW_ACCESS"]""",
+            false, false
         ),
 
         // ── 8. VIEWER ───────────────────────────────────────────────────────
@@ -217,7 +273,8 @@ public class DefaultRoleSeederService {
              "VIEW_COMPLIANCE",
              "VIEW_NETWORK_DISCOVERY","VIEW_CLOUD_ASSETS",
              "VIEW_DEPRECIATION","VIEW_ROLES",
-             "VIEW_TCO"]"""
+             "VIEW_TCO"]""",
+            false, false
         )
     );
 }

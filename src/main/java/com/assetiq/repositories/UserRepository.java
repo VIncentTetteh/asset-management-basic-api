@@ -4,6 +4,7 @@ import com.assetiq.models.Organisation;
 import com.assetiq.models.User;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
 
 import java.util.List;
 import java.util.Optional;
@@ -30,6 +31,18 @@ public interface UserRepository extends JpaRepository<User, UUID> {
 
     @EntityGraph(attributePaths = {"role", "organisation", "department"})
     List<User> findAllByEmail(String email);
+
+    // ── Permission-cache path — loads the many-to-many roles collection ───────
+    // Used exclusively by PermissionCacheService.getRoleIdsForUser().
+    // Loading only "roles" (not the full auth-path associations) keeps this
+    // query lean; the session is open inside @Transactional so lazy access
+    // to other associations will work if ever needed.
+
+    @EntityGraph(attributePaths = {"roles"})
+    @Query("SELECT u FROM User u WHERE u.email = :email AND u.organisation.id = :orgId")
+    Optional<User> findWithRolesByEmailAndOrgId(
+            @org.springframework.data.repository.query.Param("email") String email,
+            @org.springframework.data.repository.query.Param("orgId")  UUID orgId);
 
     // ── Other queries (role/org/dept not accessed outside a transaction) ──────
 

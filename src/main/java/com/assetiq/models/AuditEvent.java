@@ -1,5 +1,6 @@
 package com.assetiq.models;
 
+import com.assetiq.enums.AuditEventType;
 import jakarta.persistence.*;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
@@ -10,8 +11,10 @@ import lombok.Setter;
 @Setter
 @EqualsAndHashCode(callSuper = true, onlyExplicitlyIncluded = true)
 @Table(name = "audit_event", indexes = {
-        @Index(name = "idx_audit_event_org_created_at", columnList = "organisation_id, created_at"),
-        @Index(name = "idx_audit_event_actor_created_at", columnList = "actor_id, created_at")
+        @Index(name = "idx_audit_event_org_created_at",    columnList = "organisation_id, created_at"),
+        @Index(name = "idx_audit_event_actor_created_at",  columnList = "actor_id, created_at"),
+        @Index(name = "idx_audit_event_event_type",        columnList = "event_type"),
+        @Index(name = "idx_audit_event_target_id",         columnList = "target_id")
 })
 public class AuditEvent extends BaseEntity {
 
@@ -58,5 +61,35 @@ public class AuditEvent extends BaseEntity {
 
     @Column(name = "response_time_ms")
     private Long responseTimeMs;
+
+    // ── Structured RBAC / security classification (Phase 4) ──────────────────
+
+    /**
+     * High-level category of this event.  Defaults to {@link AuditEventType#API_REQUEST}
+     * for generic HTTP events; set explicitly for RBAC and auth events.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "event_type", length = 50, nullable = false)
+    private AuditEventType eventType = AuditEventType.API_REQUEST;
+
+    /**
+     * The UUID (as string) of the resource that was the target of an RBAC change
+     * (e.g. the Role ID when permissions changed, the User ID when role was assigned).
+     */
+    @Column(name = "target_id", length = 100)
+    private String targetId;
+
+    /**
+     * Human-readable snapshot of the value before the change (comma-separated
+     * permission names, role name, etc.).  Kept short — max 1000 chars.
+     */
+    @Column(name = "old_value", length = 1000)
+    private String oldValue;
+
+    /**
+     * Human-readable snapshot of the value after the change.
+     */
+    @Column(name = "new_value", length = 1000)
+    private String newValue;
 }
 

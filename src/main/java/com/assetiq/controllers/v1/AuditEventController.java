@@ -1,6 +1,7 @@
 package com.assetiq.controllers.v1;
 
 import com.assetiq.dto.AuditEventDto;
+import com.assetiq.enums.AuditEventType;
 import com.assetiq.services.AuditEventService;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
@@ -27,6 +28,12 @@ public class AuditEventController {
         return ResponseEntity.ok(auditEventService.getEventById(id));
     }
 
+    /**
+     * List audit events with optional server-side filtering.
+     *
+     * @param eventType optional {@link AuditEventType} name to restrict results
+     *                  (e.g. {@code ROLE_PERMISSIONS_CHANGED}, {@code AUTH_FAILURE})
+     */
     @GetMapping
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','VIEW_AUDIT_LOGS','EXPORT_AUDIT_LOGS')")
     public ResponseEntity<List<AuditEventDto>> getEvents(
@@ -35,8 +42,9 @@ public class AuditEventController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant end,
             @RequestParam(required = false) Boolean success,
             @RequestParam(required = false) String method,
-            @RequestParam(required = false) String path) {
-        return ResponseEntity.ok(auditEventService.getEvents(actorId, start, end, success, method, path));
+            @RequestParam(required = false) String path,
+            @RequestParam(required = false) AuditEventType eventType) {
+        return ResponseEntity.ok(
+            auditEventService.getEvents(actorId, start, end, success, method, path, eventType));
     }
 }
-

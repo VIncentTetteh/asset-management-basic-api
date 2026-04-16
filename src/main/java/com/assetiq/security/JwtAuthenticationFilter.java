@@ -11,10 +11,12 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
+import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 
@@ -52,9 +54,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
-        String header = request.getHeader(HttpHeaders.AUTHORIZATION);
-        if (StringUtils.hasText(header) && header.startsWith("Bearer ")) {
-            String token = header.substring(7);
+
+        // F-1: resolve token from Authorization header first, then fall back to HttpOnly cookie.
+        // This preserves backward-compatibility for API clients and the desktop app while
+        // securing browser clients against XSS-based token theft.
+        String token = resolveToken(request);
+
+        if (StringUtils.hasText(token)) {
             try {
                 // Reject blacklisted tokens (e.g. tokens invalidated by logout)
                 if (jwtBlacklist.isBlacklisted(token)) {
@@ -107,5 +113,29 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             }
         }
         filterChain.doFilter(request, response);
+    }
+
+    /**
+     * Resolves the JWT from the request.
+     * Priority: Authorization: Bearer header → access_token HttpOnly cookie.
+     */
+    private static String resolveToken(HttpServletRequest request) {
+        // 1. Try Authorization header (API clients, desktop app)
+        String header = request.getHeader(HttpHeaders.AUTHORIZATION);
+        if (StringUtils.hasText(header) && header.startsWith("Bearer ")) {
+            return header.substring(7).trim();
+        }
+
+        // 2. Fall back to HttpOnly cookie (browser clients — F-1)
+        Cookie[] cookies = request.getCookies();
+        if (cookies != null) {
+            return Arrays.stream(cookies)
+                    .filter(c -> "access_token".equals(c.getName()))
+                    .map(Cookie::getValue)
+                    .filter(StringUtils::hasText)
+                    .findFirst()
+                    .orElse(null);
+        }
+        return null;
     }
 }

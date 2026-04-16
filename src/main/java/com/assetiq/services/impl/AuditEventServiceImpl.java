@@ -1,6 +1,7 @@
 package com.assetiq.services.impl;
 
 import com.assetiq.dto.AuditEventDto;
+import com.assetiq.enums.AuditEventType;
 import com.assetiq.models.AuditEvent;
 import com.assetiq.models.Organisation;
 import com.assetiq.repositories.AuditEventRepository;
@@ -36,18 +37,22 @@ public class AuditEventServiceImpl extends TenantAwareService implements AuditEv
         return mapToDto(event);
     }
 
+    /**
+     * P4-C: All filtering is now pushed to the database via a single parameterised
+     * JPQL query.  The previous implementation loaded every event for the org and
+     * filtered them in Java streams, which would OOM for a busy tenant.
+     */
     @Override
-    public List<AuditEventDto> getEvents(UUID actorId, Instant start, Instant end, Boolean success, String method, String path) {
+    public List<AuditEventDto> getEvents(UUID actorId, Instant start, Instant end,
+                                         Boolean success, String method, String path,
+                                         AuditEventType eventType) {
         Organisation org = requireTenantOrg();
-        String normalizedMethod = method != null ? method.toUpperCase(Locale.ROOT) : null;
+        // Normalise method to upper-case so UPPER(e.method) = UPPER(:method) matches
+        String normMethod = method != null ? method.toUpperCase(Locale.ROOT) : null;
 
-        return auditEventRepository.findByOrganisationAndDeletedAtIsNullOrderByCreatedAtDesc(org).stream()
-                .filter(e -> actorId == null || (e.getActor() != null && actorId.equals(e.getActor().getId())))
-                .filter(e -> start == null || (e.getCreatedAt() != null && !e.getCreatedAt().isBefore(start)))
-                .filter(e -> end == null || (e.getCreatedAt() != null && !e.getCreatedAt().isAfter(end)))
-                .filter(e -> success == null || success.equals(e.getSuccess()))
-                .filter(e -> normalizedMethod == null || normalizedMethod.equalsIgnoreCase(e.getMethod()))
-                .filter(e -> path == null || (e.getPath() != null && e.getPath().contains(path)))
+        return auditEventRepository
+                .findFiltered(org, actorId, start, end, success, normMethod, path, eventType)
+                .stream()
                 .map(this::mapToDto)
                 .collect(Collectors.toList());
     }
@@ -70,7 +75,11 @@ public class AuditEventServiceImpl extends TenantAwareService implements AuditEv
         dto.setUserAgent(event.getUserAgent());
         dto.setResponseTimeMs(event.getResponseTimeMs());
         dto.setCreatedAt(event.getCreatedAt());
+        // P4-B new fields
+        dto.setEventType(event.getEventType() != null ? event.getEventType().name() : null);
+        dto.setTargetId(event.getTargetId());
+        dto.setOldValue(event.getOldValue());
+        dto.setNewValue(event.getNewValue());
         return dto;
     }
 }
-

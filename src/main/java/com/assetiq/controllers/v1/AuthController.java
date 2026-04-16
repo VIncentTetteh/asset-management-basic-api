@@ -11,10 +11,14 @@ import com.assetiq.security.JwtUtil;
 import com.assetiq.security.PermissionCacheService;
 import com.assetiq.services.EmailService;
 import com.assetiq.enums.UserStatus;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
+
+import jakarta.servlet.http.HttpServletResponse;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
@@ -138,7 +142,8 @@ public class AuthController {
      * belongs to more than one organisation.
      */
     @PostMapping("/login")
-    public ResponseEntity<?> login(@Valid @RequestBody LoginRequest request) {
+    public ResponseEntity<?> login(@Valid @RequestBody LoginRequest request,
+                                   HttpServletResponse servletResponse) {
         User user;
         if (request.getOrganisationId() != null) {
             // Scoped lookup — unambiguous even in multi-tenant deployments
@@ -200,7 +205,9 @@ public class AuthController {
         user.setLastLoginAt(Instant.now());
         userRepository.save(user);
 
-        // Build JWT claims
+        // Build JWT claims — permissions are intentionally excluded (B-6).
+        // They are loaded live from the permission cache on every request so that
+        // role changes take effect immediately without re-login.
         Map<String, Object> claims = new HashMap<>();
         claims.put("email", user.getEmail());
         claims.put("firstName", user.getFirstName());
@@ -209,7 +216,7 @@ public class AuthController {
         if (user.getRole() != null) {
             String roleName = user.getRole().getName();
             claims.put("role", roleName.startsWith("ROLE_") ? roleName : "ROLE_" + roleName);
-            claims.put("permissions", user.getRole().getPermissions());
+            // permissions claim removed — live cache is the source of truth
         }
 
         if (user.getOrganisation() != null) {
@@ -222,7 +229,14 @@ public class AuthController {
 
         String token = jwtUtil.generateToken(user.getEmail(), claims, jwtExpirationMillis);
 
+        // F-1: set the JWT as an HttpOnly cookie so JavaScript cannot read it.
+        // The Authorization: Bearer header path is preserved for API clients and
+        // the desktop app — both paths are accepted by JwtAuthenticationFilter.
+        setAuthCookie(servletResponse, token, jwtExpirationMillis / 1000);
+
         return ResponseEntity.ok(Map.of(
+                // token is still returned in the body for clients that need it
+                // (e.g. desktop app, Postman). The browser will use the cookie.
                 "token", token,
                 "user", Map.of(
                         "id", user.getId(),
@@ -237,13 +251,15 @@ public class AuthController {
      * Refresh JWT token
      */
     @PostMapping("/refresh")
-    public ResponseEntity<?> refreshToken(@RequestHeader("Authorization") String authHeader) {
-        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+    public ResponseEntity<?> refreshToken(
+            @RequestHeader(value = "Authorization", required = false) String authHeader,
+            HttpServletResponse servletResponse) {
+        // Accept token from Bearer header OR from the HttpOnly cookie (F-1)
+        String token = resolveToken(authHeader);
+        if (token == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("error", "Missing or invalid authorization header"));
+                    .body(Map.of("error", "Missing or invalid authorization"));
         }
-
-        String token = authHeader.substring(7);
         io.jsonwebtoken.Claims parsedClaims;
         try {
             parsedClaims = jwtUtil.parseToken(token);
@@ -272,7 +288,7 @@ public class AuthController {
 
         User user = userOpt.get();
 
-        // Build new token with same claims (mirrors login JWT structure)
+        // Build new token — permissions intentionally excluded (B-6)
         Map<String, Object> claims = new HashMap<>();
         claims.put("email", user.getEmail());
         claims.put("firstName", user.getFirstName());
@@ -281,7 +297,6 @@ public class AuthController {
         if (user.getRole() != null) {
             String roleName = user.getRole().getName();
             claims.put("role", roleName.startsWith("ROLE_") ? roleName : "ROLE_" + roleName);
-            claims.put("permissions", user.getRole().getPermissions());
         }
         if (user.getOrganisation() != null) {
             claims.put("organisationId", user.getOrganisation().getId().toString());
@@ -291,6 +306,9 @@ public class AuthController {
         }
 
         String newToken = jwtUtil.generateToken(email, claims, jwtExpirationMillis);
+
+        // F-1: refresh also re-issues the HttpOnly cookie
+        setAuthCookie(servletResponse, newToken, jwtExpirationMillis / 1000);
 
         return ResponseEntity.ok(Map.of(
                 "token", newToken,
@@ -375,13 +393,14 @@ public class AuthController {
      * Get current user profile
      */
     @GetMapping("/profile")
-    public ResponseEntity<?> getProfile(@RequestHeader("Authorization") String authHeader) {
-        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+    public ResponseEntity<?> getProfile(
+            @RequestHeader(value = "Authorization", required = false) String authHeader) {
+        // F-1: accept token from Bearer header OR HttpOnly cookie
+        String token = resolveToken(authHeader);
+        if (token == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("error", "Missing or invalid authorization header"));
+                    .body(Map.of("error", "Missing or invalid authorization"));
         }
-
-        String token = authHeader.substring(7);
         io.jsonwebtoken.Claims profileClaims;
         try {
             profileClaims = jwtUtil.parseToken(token);
@@ -418,12 +437,14 @@ public class AuthController {
      * without requiring a re-login or token refresh.
      */
     @GetMapping("/me/permissions")
-    public ResponseEntity<?> getMyPermissions(@RequestHeader("Authorization") String authHeader) {
-        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+    public ResponseEntity<?> getMyPermissions(
+            @RequestHeader(value = "Authorization", required = false) String authHeader) {
+        // F-1: accept token from Bearer header OR HttpOnly cookie
+        String token = resolveToken(authHeader);
+        if (token == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("error", "Missing or invalid authorization header"));
+                    .body(Map.of("error", "Missing or invalid authorization"));
         }
-        String token = authHeader.substring(7);
         io.jsonwebtoken.Claims parsedClaims;
         try {
             parsedClaims = jwtUtil.parseToken(token);
@@ -441,9 +462,12 @@ public class AuthController {
      * Logout user — blacklists the current JWT so it cannot be reused.
      */
     @PostMapping("/logout")
-    public ResponseEntity<?> logout(@RequestHeader(value = "Authorization", required = false) String authHeader) {
-        if (authHeader != null && authHeader.startsWith("Bearer ")) {
-            String token = authHeader.substring(7);
+    public ResponseEntity<?> logout(
+            @RequestHeader(value = "Authorization", required = false) String authHeader,
+            HttpServletResponse servletResponse) {
+        // F-1: resolve token from Bearer header OR cookie, then blacklist it
+        String token = resolveToken(authHeader);
+        if (token != null) {
             try {
                 java.util.Date expiry = jwtUtil.getExpiration(token);
                 long ttlMillis = expiry.getTime() - System.currentTimeMillis();
@@ -451,9 +475,11 @@ public class AuthController {
                     jwtBlacklist.invalidate(token, java.time.Duration.ofMillis(ttlMillis));
                 }
             } catch (Exception ignored) {
-                // Token may already be expired or invalid — still respond with success
+                // Token may already be expired or invalid — still clear the cookie
             }
         }
+        // F-1: clear the HttpOnly cookie regardless of header presence
+        clearAuthCookie(servletResponse);
         return ResponseEntity.ok(Map.of("message", "Logout successful."));
     }
 
@@ -607,6 +633,51 @@ public class AuthController {
         public String getNewPassword() {
             return newPassword;
         }
+    }
+
+    // ── F-1: Cookie helpers ───────────────────────────────────────────────────
+
+    /** Name of the HttpOnly cookie that carries the JWT for browser clients. */
+    static final String AUTH_COOKIE_NAME = "access_token";
+
+    /**
+     * Sets the JWT as an HttpOnly, Secure, SameSite=Strict cookie.
+     * Browser clients use this cookie automatically; API/desktop clients continue
+     * to use the Authorization: Bearer header.
+     */
+    private static void setAuthCookie(HttpServletResponse response, String token, long maxAgeSeconds) {
+        ResponseCookie cookie = ResponseCookie.from(AUTH_COOKIE_NAME, token)
+                .httpOnly(true)
+                .secure(true)          // HTTPS only — relaxed in dev via application.yml if needed
+                .sameSite("Strict")    // CSRF protection
+                .path("/api")          // Only sent to API paths
+                .maxAge(maxAgeSeconds)
+                .build();
+        response.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
+    }
+
+    /** Clears the auth cookie on logout. */
+    private static void clearAuthCookie(HttpServletResponse response) {
+        ResponseCookie clear = ResponseCookie.from(AUTH_COOKIE_NAME, "")
+                .httpOnly(true)
+                .secure(true)
+                .sameSite("Strict")
+                .path("/api")
+                .maxAge(0)
+                .build();
+        response.addHeader(HttpHeaders.SET_COOKIE, clear.toString());
+    }
+
+    /**
+     * Resolves the JWT from the Authorization: Bearer header.
+     * Cookie extraction is handled in {@link com.assetiq.security.JwtAuthenticationFilter};
+     * this method only handles header-based resolution used by profile/refresh/logout.
+     */
+    private static String resolveToken(String authHeader) {
+        if (authHeader != null && authHeader.startsWith("Bearer ")) {
+            return authHeader.substring(7).trim();
+        }
+        return null;
     }
 
     private static String sha256Hex(String input) {

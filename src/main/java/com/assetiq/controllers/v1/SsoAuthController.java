@@ -326,7 +326,8 @@ public class SsoAuthController {
         if (user.getRole() != null) {
             String roleName = user.getRole().getName();
             claims.put("role", roleName.startsWith("ROLE_") ? roleName : "ROLE_" + roleName);
-            claims.put("permissions", user.getRole().getPermissions());
+            // Permissions intentionally excluded from the JWT (Phase 1 / B-6).
+            // They are resolved live from the permission cache on every request.
         }
         if (user.getOrganisation() != null) {
             claims.put("organisationId", user.getOrganisation().getId().toString());

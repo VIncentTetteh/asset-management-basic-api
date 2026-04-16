@@ -2,7 +2,6 @@ package com.assetiq.aspect;
 
 import io.github.bucket4j.Bucket;
 import io.github.bucket4j.ConsumptionProbe;
-import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import jakarta.servlet.FilterChain;
@@ -14,10 +13,22 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 
-import static com.assetiq.config.RateLimitingConfig.resolveBucket;
-import static com.assetiq.config.RateLimitingConfig.RateLimitConfig.*;
+import static com.assetiq.config.RateLimitingConfig.resolveGeneralBucket;
+import static com.assetiq.config.RateLimitingConfig.HEADER_REMAINING;
+import static com.assetiq.config.RateLimitingConfig.HEADER_RETRY_AFTER;
 
-@Component
+/**
+ * Servlet-layer rate limiting filter.
+ *
+ * NOTE: @Component is intentionally absent.  Rate limiting is enforced at the
+ * Spring MVC interceptor level by {@link com.assetiq.config.RateLimitingInterceptor},
+ * which applies the correct per-tier bucket (auth vs. general) and emits all
+ * standard rate-limit response headers.  Registering this filter as a Spring
+ * bean would create a duplicate enforcement layer that consumes two tokens per
+ * request from the same bucket.
+ *
+ * This class is kept for reference / standalone-mode use only.
+ */
 public class RateLimitingFilter extends OncePerRequestFilter {
 
     @Override
@@ -25,18 +36,15 @@ public class RateLimitingFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
 
         String clientKey = getClientKey(request);
-        Bucket bucket = resolveBucket(clientKey);
+        Bucket bucket = resolveGeneralBucket(clientKey);
 
         ConsumptionProbe probe = bucket.tryConsumeAndReturnRemaining(1);
 
         if (probe.isConsumed()) {
-            response.addHeader(RATE_LIMIT_HEADER, String.valueOf(probe.getRemainingTokens()));
-            // Probe consumed successfully
+            response.addHeader(HEADER_REMAINING, String.valueOf(probe.getRemainingTokens()));
             filterChain.doFilter(request, response);
         } else {
-            // Probe not consumed - rate limit exceeded
-            // For now, suggest 60 seconds wait time
-            response.addHeader("X-RateLimit-Retry-After-Seconds", "60");
+            response.addHeader(HEADER_RETRY_AFTER, "60");
             response.sendError(429, "Too many requests. Please retry after 60 seconds.");
         }
     }

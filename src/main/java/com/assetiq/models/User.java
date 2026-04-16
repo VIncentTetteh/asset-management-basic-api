@@ -8,6 +8,7 @@ import lombok.EqualsAndHashCode;
 
 
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.Set;
 
 @Entity
@@ -38,8 +39,31 @@ public class User extends BaseEntity {
 
     private String jobTitle;
 
+    /**
+     * Primary role — used for JWT {@code role} claim and backward-compatible
+     * single-role queries (e.g. {@code findByRoleId}).  Retained during the
+     * Phase 2 / B-5 transition; the {@link #roles} collection is the
+     * authoritative source for permission resolution.
+     */
     @ManyToOne(fetch = FetchType.LAZY)
     private Role role;
+
+    /**
+     * All roles assigned to this user (many-to-many via {@code user_roles}).
+     * Permission resolution in {@link com.assetiq.security.PermissionCacheService}
+     * unions the permissions from every role in this set, allowing fine-grained
+     * access control through role composition.
+     *
+     * <p>Populated from the {@code user_roles} join table; backfilled from
+     * {@link #role} by the V5 Flyway migration.
+     */
+    @ManyToMany(fetch = FetchType.LAZY)
+    @JoinTable(
+            name = "user_roles",
+            joinColumns        = @JoinColumn(name = "user_id"),
+            inverseJoinColumns = @JoinColumn(name = "role_id")
+    )
+    private Set<Role> roles = new HashSet<>();
 
     @Enumerated(EnumType.STRING)
     @Column(length = 20)

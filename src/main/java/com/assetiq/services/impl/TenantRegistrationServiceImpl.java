@@ -7,6 +7,7 @@ import com.assetiq.enums.UserStatus;
 import com.assetiq.models.Organisation;
 import com.assetiq.models.OrganisationSubscription;
 import com.assetiq.models.Role;
+import com.assetiq.models.RolePermission;
 import com.assetiq.models.SubscriptionPlan;
 import com.assetiq.models.User;
 import com.assetiq.repositories.OrganisationSubscriptionRepository;
@@ -15,7 +16,6 @@ import com.assetiq.repositories.RoleRepository;
 import com.assetiq.repositories.SubscriptionPlanRepository;
 import com.assetiq.repositories.UserRepository;
 import com.assetiq.security.JwtUtil;
-import com.assetiq.security.RolePermissionDefaults;
 import com.assetiq.services.EmailService;
 import com.assetiq.services.TenantRegistrationService;
 import org.springframework.beans.factory.annotation.Value;
@@ -26,7 +26,6 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.*;
-import java.util.stream.Collectors;
 
 @Service
 public class TenantRegistrationServiceImpl implements TenantRegistrationService {
@@ -92,18 +91,23 @@ public class TenantRegistrationServiceImpl implements TenantRegistrationService 
         org.setCreatedBy(request.getAdminEmail()); // Manually set for ownership filtering
         Organisation savedOrg = organisationRepository.save(org);
 
-        // Ensure default roles exist (ADMIN, USER)
+        // Ensure default roles exist (ADMIN, USER).
+        // Phase 2 / B-1: permissions live in role_permission join table;
+        // ADMIN uses grantAllPermissions=true so no individual rows are needed.
         Role adminRole = roleRepository.findByNameAndOrganisationId("ADMIN", savedOrg.getId()).orElseGet(() -> {
             Role r = new Role();
             r.setName("ADMIN");
             r.setDescription("Organisation administrator with full permissions");
-            r.setPermissions(RolePermissionDefaults.allPermissionsJson());
+            r.setGrantAllPermissions(true);
+            r.setSystemRole(true);
             r.setOrganisation(savedOrg);
-            r.setCreatedBy(request.getAdminEmail()); // Manually set for ownership filtering
+            r.setCreatedBy(request.getAdminEmail());
             return roleRepository.save(r);
         });
-        if (!Objects.equals(adminRole.getPermissions(), RolePermissionDefaults.allPermissionsJson())) {
-            adminRole.setPermissions(RolePermissionDefaults.allPermissionsJson());
+        // Idempotent guard: ensure flag is set if the role already existed without it.
+        if (!adminRole.isGrantAllPermissions()) {
+            adminRole.setGrantAllPermissions(true);
+            adminRole.setSystemRole(true);
             adminRole = roleRepository.save(adminRole);
         }
 
@@ -111,15 +115,20 @@ public class TenantRegistrationServiceImpl implements TenantRegistrationService 
             Role r = new Role();
             r.setName("USER");
             r.setDescription("Standard user role with limited permissions");
-            // Minimal view permissions
-            Set<String> perms = new HashSet<>(Arrays.asList(
+            r.setOrganisation(savedOrg);
+            r.setCreatedBy(request.getAdminEmail());
+            // Minimal view permissions via join table
+            Set<String> permNames = new HashSet<>(Arrays.asList(
                     Permission.VIEW_ASSETS.name(),
                     Permission.VIEW_USERS.name(),
                     Permission.VIEW_DEPARTMENTS.name(),
                     Permission.VIEW_REPORTS.name()));
-            r.setPermissions(asJsonArray(perms));
-            r.setOrganisation(savedOrg);
-            r.setCreatedBy(request.getAdminEmail()); // Manually set for ownership filtering
+            permNames.forEach(name -> {
+                RolePermission rp = new RolePermission();
+                rp.setRole(r);
+                rp.setPermission(name);
+                r.getRolePermissions().add(rp);
+            });
             return roleRepository.save(r);
         });
 
@@ -160,7 +169,7 @@ public class TenantRegistrationServiceImpl implements TenantRegistrationService 
         claims.put("lastName", savedUser.getLastName());
         String adminRoleName = adminRole.getName();
         claims.put("role", adminRoleName.startsWith("ROLE_") ? adminRoleName : "ROLE_" + adminRoleName);
-        claims.put("permissions", adminRole.getPermissions());
+        // Permissions intentionally excluded from JWT (Phase 1 / B-6) — resolved live from cache.
         claims.put("organisationId", savedOrg.getId().toString());
 
         long expiresMillis = 1000L * 60 * 60 * 24; // 24h
@@ -188,9 +197,4 @@ public class TenantRegistrationServiceImpl implements TenantRegistrationService 
         return response;
     }
 
-    private String asJsonArray(Collection<String> values) {
-        return values.stream()
-                .map(s -> "\"" + s + "\"")
-                .collect(Collectors.joining(",", "[", "]"));
-    }
 }
