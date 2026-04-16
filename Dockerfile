@@ -32,7 +32,7 @@ RUN chown assetiq:assetiq app.jar
 USER assetiq
 
 # Expose the default Spring Boot port (override via SERVER_PORT env var).
-EXPOSE 8085
+EXPOSE 8080
 
 # JVM tuning for containers:
 #   -XX:+UseContainerSupport  — respect cgroup memory/CPU limits
