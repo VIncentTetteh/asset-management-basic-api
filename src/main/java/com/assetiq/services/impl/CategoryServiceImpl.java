@@ -1,12 +1,15 @@
 package com.assetiq.services.impl;
 
 import com.assetiq.dto.CategoryDto;
+import com.assetiq.config.CachingConfig;
 import com.assetiq.models.Category;
 import com.assetiq.models.Organisation;
 import com.assetiq.repositories.CategoryRepository;
 import com.assetiq.repositories.OrganisationRepository;
 import com.assetiq.services.CategoryService;
 import com.assetiq.services.TenantAwareService;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,12 +31,14 @@ public class CategoryServiceImpl extends TenantAwareService implements CategoryS
     }
 
     @Override
+    @CacheEvict(value = CachingConfig.CacheNames.CATEGORIES, allEntries = true)
     public CategoryDto createCategory(CategoryDto categoryDto, UUID organisationId) {
         // organisationId param is ignored — always use tenant context
         Organisation org = requireTenantOrg();
 
         Category category = new Category();
         category.setName(categoryDto.getName());
+        category.setDescription(categoryDto.getDescription());
         category.setAssetPrefixCode(categoryDto.getAssetPrefixCode());
         category.setDefaultWarrantyPeriodMonths(categoryDto.getDefaultWarrantyPeriodMonths());
         category.setOrganisation(org);
@@ -50,6 +55,7 @@ public class CategoryServiceImpl extends TenantAwareService implements CategoryS
 
     @Override
     @Transactional(readOnly = true)
+    @Cacheable(value = CachingConfig.CacheNames.CATEGORIES, key = "T(com.assetiq.multitenancy.TenantContext).getOrganisationId().toString() + ':one:' + #id.toString()")
     public CategoryDto getCategoryById(UUID id) {
         Organisation org = requireTenantOrg();
         Category category = categoryRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
@@ -59,6 +65,7 @@ public class CategoryServiceImpl extends TenantAwareService implements CategoryS
 
     @Override
     @Transactional(readOnly = true)
+    @Cacheable(value = CachingConfig.CacheNames.CATEGORIES, key = "T(com.assetiq.multitenancy.TenantContext).getOrganisationId().toString() + ':list'")
     public Set<CategoryDto> getCategoriesByOrganisation(UUID organisationId) {
         // Always scope to tenant context, ignore param
         Organisation org = requireTenantOrg();
@@ -69,6 +76,7 @@ public class CategoryServiceImpl extends TenantAwareService implements CategoryS
 
     @Override
     @Transactional(readOnly = true)
+    @Cacheable(value = CachingConfig.CacheNames.CATEGORIES, key = "T(com.assetiq.multitenancy.TenantContext).getOrganisationId().toString() + ':children:' + #parentCategoryId.toString()")
     public Set<CategoryDto> getSubCategories(UUID parentCategoryId) {
         Organisation org = requireTenantOrg();
         categoryRepository.findByIdAndOrganisationAndDeletedAtIsNull(parentCategoryId, org)
@@ -79,12 +87,14 @@ public class CategoryServiceImpl extends TenantAwareService implements CategoryS
     }
 
     @Override
+    @CacheEvict(value = CachingConfig.CacheNames.CATEGORIES, allEntries = true)
     public CategoryDto updateCategory(UUID id, CategoryDto categoryDto) {
         Organisation org = requireTenantOrg();
         Category category = categoryRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
                 .orElseThrow(() -> new IllegalArgumentException("Category not found"));
 
         category.setName(categoryDto.getName());
+        category.setDescription(categoryDto.getDescription());
         category.setAssetPrefixCode(categoryDto.getAssetPrefixCode());
         category.setDefaultWarrantyPeriodMonths(categoryDto.getDefaultWarrantyPeriodMonths());
 
@@ -92,6 +102,7 @@ public class CategoryServiceImpl extends TenantAwareService implements CategoryS
     }
 
     @Override
+    @CacheEvict(value = CachingConfig.CacheNames.CATEGORIES, allEntries = true)
     public CategoryDto patchCategory(UUID id, CategoryDto categoryDto) {
         Organisation org = requireTenantOrg();
         Category category = categoryRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
@@ -99,6 +110,9 @@ public class CategoryServiceImpl extends TenantAwareService implements CategoryS
 
         if (categoryDto.getName() != null) {
             category.setName(categoryDto.getName());
+        }
+        if (categoryDto.getDescription() != null) {
+            category.setDescription(categoryDto.getDescription());
         }
         if (categoryDto.getAssetPrefixCode() != null) {
             category.setAssetPrefixCode(categoryDto.getAssetPrefixCode());
@@ -117,6 +131,7 @@ public class CategoryServiceImpl extends TenantAwareService implements CategoryS
     }
 
     @Override
+    @CacheEvict(value = CachingConfig.CacheNames.CATEGORIES, allEntries = true)
     public void deleteCategory(UUID id) {
         Organisation org = requireTenantOrg();
         Category category = categoryRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
@@ -129,6 +144,7 @@ public class CategoryServiceImpl extends TenantAwareService implements CategoryS
         CategoryDto dto = new CategoryDto();
         dto.setId(category.getId());
         dto.setName(category.getName());
+        dto.setDescription(category.getDescription());
         dto.setAssetPrefixCode(category.getAssetPrefixCode());
         dto.setDefaultWarrantyPeriodMonths(category.getDefaultWarrantyPeriodMonths());
         if (category.getParentCategory() != null) {
