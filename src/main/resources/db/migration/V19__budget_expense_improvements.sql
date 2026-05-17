@@ -56,6 +56,7 @@ BEGIN
     END IF;
 END $$;
 
+ALTER TABLE expenses ADD COLUMN IF NOT EXISTS expense_date     DATE;
 ALTER TABLE expenses ADD COLUMN IF NOT EXISTS title            VARCHAR(255);
 ALTER TABLE expenses ADD COLUMN IF NOT EXISTS rejection_reason TEXT;
 ALTER TABLE expenses ADD COLUMN IF NOT EXISTS department_id    UUID REFERENCES department(id) ON DELETE SET NULL;
