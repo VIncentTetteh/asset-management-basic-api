@@ -5,6 +5,7 @@ import com.assetiq.enums.LeaseStatus;
 import com.assetiq.enums.NotificationType;
 import com.assetiq.models.*;
 import com.assetiq.repositories.*;
+import com.assetiq.services.CurrencyResolver;
 import com.assetiq.services.LeaseRecordService;
 import com.assetiq.services.NotificationService;
 import com.assetiq.services.TenantAwareService;
@@ -30,19 +31,22 @@ public class LeaseRecordServiceImpl extends TenantAwareService implements LeaseR
     private final SupplierRepository supplierRepository;
     private final DepartmentRepository departmentRepository;
     private final NotificationService notificationService;
+    private final CurrencyResolver currencyResolver;
 
     public LeaseRecordServiceImpl(LeaseRecordRepository leaseRecordRepository,
                                   AssetRepository assetRepository,
                                   SupplierRepository supplierRepository,
                                   DepartmentRepository departmentRepository,
                                   OrganisationRepository organisationRepository,
-                                  NotificationService notificationService) {
+                                  NotificationService notificationService,
+                                  CurrencyResolver currencyResolver) {
         super(organisationRepository);
         this.leaseRecordRepository = leaseRecordRepository;
         this.assetRepository = assetRepository;
         this.supplierRepository = supplierRepository;
         this.departmentRepository = departmentRepository;
         this.notificationService = notificationService;
+        this.currencyResolver = currencyResolver;
     }
 
     // ── Create ────────────────────────────────────────────────────────────────
@@ -63,7 +67,7 @@ public class LeaseRecordServiceImpl extends TenantAwareService implements LeaseR
         record.setStartDate(dto.getStartDate());
         record.setEndDate(dto.getEndDate());
         record.setMonthlyPayment(dto.getMonthlyPayment());
-        record.setCurrency(dto.getCurrency() != null ? dto.getCurrency().toUpperCase() : "USD");
+        record.setCurrency(currencyResolver.resolveOrDefault(dto.getCurrency()));
         record.setAutoRenew(dto.getAutoRenew() != null ? dto.getAutoRenew() : false);
         record.setNoticePeriodDays(dto.getNoticePeriodDays() != null ? dto.getNoticePeriodDays() : 30);
         record.setNotes(dto.getNotes());

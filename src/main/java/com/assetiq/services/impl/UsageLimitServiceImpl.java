@@ -11,10 +11,19 @@ import com.assetiq.repositories.UserRepository;
 import com.assetiq.services.UsageLimitService;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Optional;
 
+/**
+ * Limit-enforcement checks. Marked {@code @Transactional(readOnly = true)} at
+ * the class level because {@link #resolvePlan} walks through the lazy
+ * {@code OrganisationSubscription → SubscriptionPlan} association; without an
+ * open Hibernate session those proxy accesses throw
+ * {@link org.hibernate.LazyInitializationException}.
+ */
 @Service
+@Transactional(readOnly = true)
 public class UsageLimitServiceImpl implements UsageLimitService {
 
     private final OrganisationSubscriptionRepository organisationSubscriptionRepository;

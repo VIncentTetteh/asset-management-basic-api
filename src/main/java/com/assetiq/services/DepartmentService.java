@@ -9,6 +9,7 @@ public interface DepartmentService {
     DepartmentDto create(DepartmentDto dto);
     DepartmentDto get(UUID id);
     List<DepartmentDto> list();
+    List<DepartmentDto> listSubDepartments(UUID parentDepartmentId);
     DepartmentDto update(UUID id, DepartmentDto dto);
     DepartmentDto patch(UUID id, DepartmentDto dto);
     void delete(UUID id);

@@ -1,6 +1,7 @@
 package com.assetiq.services.impl;
 
 import com.assetiq.dto.SupplierDto;
+import com.assetiq.config.CachingConfig;
 import com.assetiq.models.Supplier;
 import com.assetiq.models.Organisation;
 import com.assetiq.enums.SupplierStatus;
@@ -10,6 +11,8 @@ import com.assetiq.services.SupplierService;
 import com.assetiq.services.TenantAwareService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -33,6 +36,7 @@ public class SupplierServiceImpl extends TenantAwareService implements SupplierS
     }
 
     @Override
+    @CacheEvict(value = CachingConfig.CacheNames.SUPPLIERS, allEntries = true)
     public SupplierDto createSupplier(SupplierDto supplierDto) {
         Organisation org = requireTenantOrg();
 
@@ -55,6 +59,7 @@ public class SupplierServiceImpl extends TenantAwareService implements SupplierS
 
     @Override
     @Transactional(readOnly = true)
+    @Cacheable(value = CachingConfig.CacheNames.SUPPLIERS, key = "T(com.assetiq.multitenancy.TenantContext).getOrganisationId().toString() + ':one:' + #id.toString()")
     public SupplierDto getSupplierById(UUID id) {
         Organisation org = requireTenantOrg();
         Supplier supplier = supplierRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
@@ -64,6 +69,7 @@ public class SupplierServiceImpl extends TenantAwareService implements SupplierS
 
     @Override
     @Transactional(readOnly = true)
+    @Cacheable(value = CachingConfig.CacheNames.SUPPLIERS, key = "T(com.assetiq.multitenancy.TenantContext).getOrganisationId().toString() + ':list'")
     public Set<SupplierDto> getSuppliersByOrganisation() {
         Organisation org = requireTenantOrg();
         return supplierRepository.findByOrganisationAndDeletedAtIsNull(org).stream()
@@ -72,6 +78,7 @@ public class SupplierServiceImpl extends TenantAwareService implements SupplierS
     }
 
     @Override
+    @CacheEvict(value = CachingConfig.CacheNames.SUPPLIERS, allEntries = true)
     public SupplierDto updateSupplier(UUID id, SupplierDto supplierDto) {
         Organisation org = requireTenantOrg();
         Supplier supplier = supplierRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
@@ -93,6 +100,7 @@ public class SupplierServiceImpl extends TenantAwareService implements SupplierS
     }
 
     @Override
+    @CacheEvict(value = CachingConfig.CacheNames.SUPPLIERS, allEntries = true)
     public SupplierDto patchSupplier(UUID id, SupplierDto supplierDto) {
         Organisation org = requireTenantOrg();
         Supplier supplier = supplierRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
@@ -132,6 +140,7 @@ public class SupplierServiceImpl extends TenantAwareService implements SupplierS
     }
 
     @Override
+    @CacheEvict(value = CachingConfig.CacheNames.SUPPLIERS, allEntries = true)
     public void deleteSupplier(UUID id) {
         Organisation org = requireTenantOrg();
         Supplier supplier = supplierRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
@@ -143,6 +152,7 @@ public class SupplierServiceImpl extends TenantAwareService implements SupplierS
 
     @Override
     @Transactional(readOnly = true)
+    @Cacheable(value = CachingConfig.CacheNames.SUPPLIERS, key = "T(com.assetiq.multitenancy.TenantContext).getOrganisationId().toString() + ':email:' + #email")
     public SupplierDto getSupplierByEmail(String email) {
         Organisation org = requireTenantOrg();
         Supplier supplier = supplierRepository.findByEmailAndOrganisationAndDeletedAtIsNull(email, org)

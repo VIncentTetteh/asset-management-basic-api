@@ -1,6 +1,7 @@
 package com.assetiq.services.impl;
 
 import com.assetiq.dto.*;
+import com.assetiq.config.CachingConfig;
 import com.assetiq.enums.PaymentStatus;
 import com.assetiq.enums.SubscriptionStatus;
 import com.assetiq.exceptions.PaymentGatewayException;
@@ -13,6 +14,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -23,6 +25,7 @@ import java.security.MessageDigest;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
+import java.util.Locale;
 import java.util.stream.Collectors;
 
 @Service
@@ -43,6 +46,15 @@ public class BillingServiceImpl extends TenantAwareService implements BillingSer
     @org.springframework.beans.factory.annotation.Value("${app.billing.callback-url:}")
     private String defaultCallbackUrl;
 
+    /**
+     * P1-6: Comma-separated list of Paystack payment channels to enable for
+     * this deployment. Ghana defaults include {@code mobile_money} so MTN,
+     * Telecel, and AirtelTigo wallets appear on the hosted checkout.
+     * Legacy fallback is {@code card,bank} so non-Ghana regions still work.
+     */
+    @org.springframework.beans.factory.annotation.Value("${app.billing.paystack.channels:card,mobile_money,bank,ussd}")
+    private String paystackChannelsCsv;
+
     public BillingServiceImpl(
             OrganisationRepository organisationRepository,
             SubscriptionPlanRepository subscriptionPlanRepository,
@@ -62,10 +74,36 @@ public class BillingServiceImpl extends TenantAwareService implements BillingSer
         this.objectMapper = objectMapper;
     }
 
+    /**
+     * Plan codes we keep in the DB for backward compatibility with existing
+     * tenant subscriptions, but that should NOT be offered on the public
+     * Only these subscription packages may be returned or checked out.
+     */
+    private static final Set<String> PUBLIC_PLAN_CODES = Set.of(
+            "FREEMIUM", "BASIC", "BUSINESS", "ENTERPRISE");
+
+    /**
+     * Display order for the pricing surface. ENTERPRISE sorts last even though
+     * its {@code amountMinor} is 0 (custom-quote plans render a "Contact sales"
+     * CTA). All other tiers follow the ladder; any future tier that isn't on
+     * this map falls to the end.
+     */
+    private static final Map<com.assetiq.enums.BillingPlanTier, Integer> TIER_DISPLAY_ORDER = Map.of(
+            com.assetiq.enums.BillingPlanTier.FREEMIUM, 0,
+            com.assetiq.enums.BillingPlanTier.BASIC, 1,
+            com.assetiq.enums.BillingPlanTier.BUSINESS, 2,
+            com.assetiq.enums.BillingPlanTier.ENTERPRISE, 3);
+
     @Override
     @Transactional(readOnly = true)
+    @Cacheable(value = CachingConfig.CacheNames.BILLING_PLANS, key = "'active-public'")
     public List<SubscriptionPlanDto> listPlans() {
         return subscriptionPlanRepository.findByActiveIsTrueAndDeletedAtIsNullOrderByAmountMinorAsc().stream()
+                .filter(p -> PUBLIC_PLAN_CODES.contains(p.getCode()))
+                .sorted(Comparator
+                        .comparingInt((SubscriptionPlan p) ->
+                                TIER_DISPLAY_ORDER.getOrDefault(p.getTier(), Integer.MAX_VALUE))
+                        .thenComparingLong(p -> p.getAmountMinor() == null ? 0L : p.getAmountMinor()))
                 .map(this::toPlanDto)
                 .collect(Collectors.toList());
     }
@@ -84,11 +122,21 @@ public class BillingServiceImpl extends TenantAwareService implements BillingSer
         String actorEmail = requireActorEmail();
         SubscriptionPlan targetPlan = subscriptionPlanRepository.findByCodeAndDeletedAtIsNull(request.getPlanCode())
                 .filter(SubscriptionPlan::getActive)
+                .filter(plan -> PUBLIC_PLAN_CODES.contains(plan.getCode()))
                 .orElseThrow(() -> new IllegalArgumentException("Unknown or inactive plan"));
 
+        // Reject checkout on zero-amount plans with a message the portal can
+        // render verbatim.
         if (targetPlan.getTier() == com.assetiq.enums.BillingPlanTier.FREEMIUM
                 || targetPlan.getAmountMinor() == null || targetPlan.getAmountMinor() <= 0) {
-            throw new IllegalArgumentException("Cannot initiate checkout for a free plan");
+            if (targetPlan.getTier() == com.assetiq.enums.BillingPlanTier.ENTERPRISE) {
+                throw new IllegalArgumentException(
+                        "Enterprise pricing is custom — please contact sales for a quote.");
+            }
+            throw new IllegalArgumentException(
+                    "Freemium activates automatically on sign-up — no checkout needed. " +
+                    "To move an existing paid subscription back to Freemium, turn off " +
+                    "auto-renew and your plan will downgrade at the end of the current period.");
         }
 
         String reference = generateReference(org);
@@ -108,6 +156,13 @@ public class BillingServiceImpl extends TenantAwareService implements BillingSer
                 "planCode", targetPlan.getCode()));
         if (targetPlan.getPaystackPlanCode() != null && !targetPlan.getPaystackPlanCode().isBlank()) {
             payload.put("plan", targetPlan.getPaystackPlanCode());
+        }
+        // P1-6: Attach configured payment channels so Paystack surfaces
+        // MoMo (MTN / Telecel / AirtelTigo), USSD, card, and bank transfer
+        // on the hosted checkout page.
+        List<String> channels = resolvePaystackChannels();
+        if (!channels.isEmpty()) {
+            payload.put("channels", channels);
         }
 
         JsonNode response = paystackGatewayService.initializeTransaction(payload);
@@ -360,6 +415,7 @@ public class BillingServiceImpl extends TenantAwareService implements BillingSer
         dto.setMaxEmployees(plan.getMaxEmployees());
         dto.setAnalyticsEnabled(plan.getAnalyticsEnabled());
         dto.setAuditRetentionDays(plan.getAuditRetentionDays());
+        dto.setDiscountPercent(plan.getDiscountPercent());
         return dto;
     }
 
@@ -376,5 +432,23 @@ public class BillingServiceImpl extends TenantAwareService implements BillingSer
         dto.setCurrentAssetCount(assetRepository.countByOrganisationAndDeletedAtIsNull(org));
         dto.setCurrentEmployeeCount(userRepository.countByOrganisationAndDeletedAtIsNull(org));
         return dto;
+    }
+
+    /**
+     * Parse the {@code app.billing.paystack.channels} CSV into a clean list of
+     * lower-cased, non-blank channel names. Unknown tokens pass through — we
+     * defer to Paystack's own validation rather than maintaining a blocklist
+     * that goes stale the moment Paystack launches a new channel.
+     */
+    private List<String> resolvePaystackChannels() {
+        if (paystackChannelsCsv == null || paystackChannelsCsv.isBlank()) {
+            return List.of();
+        }
+        return Arrays.stream(paystackChannelsCsv.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .map(s -> s.toLowerCase(Locale.ROOT))
+                .distinct()
+                .collect(Collectors.toList());
     }
 }

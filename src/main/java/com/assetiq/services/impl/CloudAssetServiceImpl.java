@@ -1,5 +1,6 @@
 package com.assetiq.services.impl;
 
+import com.assetiq.cloudsync.CloudSyncDispatcher;
 import com.assetiq.dto.CloudAssetDto;
 import com.assetiq.dto.CloudCostSummaryDto;
 import com.assetiq.enums.CloudProvider;
@@ -10,7 +11,10 @@ import com.assetiq.repositories.CloudAssetRepository;
 import com.assetiq.repositories.CloudCostRecordRepository;
 import com.assetiq.repositories.OrganisationRepository;
 import com.assetiq.services.CloudAssetService;
+import com.assetiq.services.CurrencyResolver;
 import com.assetiq.services.TenantAwareService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
@@ -28,15 +32,23 @@ import java.util.stream.Collectors;
 @Transactional
 public class CloudAssetServiceImpl extends TenantAwareService implements CloudAssetService {
 
+    private static final Logger log = LoggerFactory.getLogger(CloudAssetServiceImpl.class);
+
     private final CloudAssetRepository cloudAssetRepo;
     private final CloudCostRecordRepository costRepo;
+    private final CurrencyResolver currencyResolver;
+    private final CloudSyncDispatcher cloudSyncDispatcher;
 
     public CloudAssetServiceImpl(OrganisationRepository organisationRepository,
                                  CloudAssetRepository cloudAssetRepo,
-                                 CloudCostRecordRepository costRepo) {
+                                 CloudCostRecordRepository costRepo,
+                                 CurrencyResolver currencyResolver,
+                                 CloudSyncDispatcher cloudSyncDispatcher) {
         super(organisationRepository);
         this.cloudAssetRepo = cloudAssetRepo;
         this.costRepo = costRepo;
+        this.currencyResolver = currencyResolver;
+        this.cloudSyncDispatcher = cloudSyncDispatcher;
     }
 
     @Override
@@ -129,7 +141,7 @@ public class CloudAssetServiceImpl extends TenantAwareService implements CloudAs
         }).collect(Collectors.toList());
 
         String currency = assets.stream().map(CloudAsset::getCurrency).filter(Objects::nonNull)
-                .findFirst().orElse("USD");
+                .findFirst().orElseGet(currencyResolver::defaultForCurrentTenant);
 
         CloudCostSummaryDto summary = new CloudCostSummaryDto();
         summary.setTotalMonthlyCost(total);
@@ -152,10 +164,30 @@ public class CloudAssetServiceImpl extends TenantAwareService implements CloudAs
         record.setCloudAsset(asset);
         record.setBillingMonth(month);
         record.setAmount(amount);
-        record.setCurrency(asset.getCurrency() != null ? asset.getCurrency() : "USD");
+        record.setCurrency(asset.getCurrency() != null ? asset.getCurrency() : currencyResolver.defaultForCurrentTenant());
         record.setServiceName(serviceName);
         record.setOrganisation(org);
         costRepo.save(record);
+    }
+
+    // ── Cloud Sync ────────────────────────────────────────────────────────────
+
+    @Override
+    public int syncFromCloud(CloudProvider provider, List<String> regions) {
+        Organisation org = requireTenantOrg();
+        int upserted = cloudSyncDispatcher.syncProvider(provider, org, regions);
+        log.info("[CloudSync] syncFromCloud({}) complete for org {} — {} asset(s) upserted",
+                provider, org.getId(), upserted);
+        return upserted;
+    }
+
+    @Override
+    public int syncAll(List<String> regions) {
+        Organisation org = requireTenantOrg();
+        int upserted = cloudSyncDispatcher.syncAll(org, regions);
+        log.info("[CloudSync] syncAll complete for org {} — {} total asset(s) upserted",
+                org.getId(), upserted);
+        return upserted;
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────────
@@ -169,7 +201,7 @@ public class CloudAssetServiceImpl extends TenantAwareService implements CloudAs
         if (dto.getStatus() != null) entity.setStatus(dto.getStatus());
         entity.setAccountId(dto.getAccountId());
         entity.setMonthlyCostEstimate(dto.getMonthlyCostEstimate());
-        entity.setCurrency(dto.getCurrency() != null ? dto.getCurrency() : "USD");
+        entity.setCurrency(currencyResolver.resolveOrDefault(dto.getCurrency()));
         entity.setEnvironment(dto.getEnvironment());
         entity.setTags(dto.getTags());
         entity.setDescription(dto.getDescription());

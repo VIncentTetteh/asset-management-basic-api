@@ -186,8 +186,8 @@ public class AnalyticsServiceImpl implements AnalyticsService {
                 .map(b -> b.getSpentAmount() != null ? b.getSpentAmount() : BigDecimal.ZERO)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-        double budgetUtilization = totalBudget.signum() > 0 
-                ? actualSpend.divide(totalBudget, 4, RoundingMode.HALF_UP).doubleValue() * 100 
+        double budgetUtilization = totalBudget.signum() > 0
+                ? actualSpend.divide(totalBudget, 4, RoundingMode.HALF_UP).doubleValue() * 100
                 : 0.0;
 
         Map<String, Object> response = new LinkedHashMap<>();

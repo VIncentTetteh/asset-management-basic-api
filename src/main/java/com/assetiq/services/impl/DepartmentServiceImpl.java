@@ -1,6 +1,7 @@
 package com.assetiq.services.impl;
 
 import com.assetiq.dto.DepartmentDto;
+import com.assetiq.config.CachingConfig;
 import com.assetiq.models.Department;
 import com.assetiq.models.Organisation;
 import com.assetiq.multitenancy.TenantContext;
@@ -15,6 +16,8 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 import com.assetiq.repositories.UserRepository;
 import com.assetiq.models.User;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 
 @Service
 public class DepartmentServiceImpl implements DepartmentService {
@@ -32,6 +35,7 @@ public class DepartmentServiceImpl implements DepartmentService {
     }
 
     @Override
+    @CacheEvict(value = CachingConfig.CacheNames.DEPARTMENTS, allEntries = true)
     public DepartmentDto create(DepartmentDto dto) {
 
         if (dto.getName() == null || dto.getName().trim().isEmpty()) {
@@ -97,6 +101,7 @@ public class DepartmentServiceImpl implements DepartmentService {
     }
 
     @Override
+    @Cacheable(value = CachingConfig.CacheNames.DEPARTMENTS, key = "T(com.assetiq.multitenancy.TenantContext).getOrganisationId().toString() + ':one:' + #id.toString()", unless = "#result == null")
     public DepartmentDto get(UUID id) {
         if (!TenantContext.hasOrganisationId()) {
             throw new IllegalArgumentException("Organisation context is required (X-Organisation-Id header missing)");
@@ -111,6 +116,7 @@ public class DepartmentServiceImpl implements DepartmentService {
     }
 
     @Override
+    @Cacheable(value = CachingConfig.CacheNames.DEPARTMENTS, key = "T(com.assetiq.multitenancy.TenantContext).getOrganisationId().toString() + ':list'")
     public List<DepartmentDto> list() {
         if (!TenantContext.hasOrganisationId()) {
             throw new IllegalArgumentException("Organisation context is required (X-Organisation-Id header missing)");
@@ -125,6 +131,26 @@ public class DepartmentServiceImpl implements DepartmentService {
     }
 
     @Override
+    @Cacheable(value = CachingConfig.CacheNames.DEPARTMENTS, key = "T(com.assetiq.multitenancy.TenantContext).getOrganisationId().toString() + ':children:' + #parentDepartmentId.toString()")
+    public List<DepartmentDto> listSubDepartments(UUID parentDepartmentId) {
+        if (!TenantContext.hasOrganisationId()) {
+            throw new IllegalArgumentException("Organisation context is required (X-Organisation-Id header missing)");
+        }
+
+        UUID orgId = TenantContext.getOrganisationId();
+        Organisation org = organisationRepository.findById(orgId)
+                .orElseThrow(() -> new IllegalArgumentException("Organisation not found: " + orgId));
+
+        departmentRepository.findByIdAndOrganisationAndDeletedAtIsNull(parentDepartmentId, org)
+                .orElseThrow(() -> new IllegalArgumentException("Parent department not found in your organisation"));
+
+        List<Department> result = departmentRepository
+                .findAllByOrganisationAndParentDepartmentIdAndDeletedAtIsNull(org, parentDepartmentId);
+        return result.stream().map(this::toDto).collect(Collectors.toList());
+    }
+
+    @Override
+    @CacheEvict(value = CachingConfig.CacheNames.DEPARTMENTS, allEntries = true)
     public DepartmentDto update(UUID id, DepartmentDto dto) {
         if (!TenantContext.hasOrganisationId()) {
             throw new IllegalArgumentException("Organisation context is required (X-Organisation-Id header missing)");
@@ -182,11 +208,13 @@ public class DepartmentServiceImpl implements DepartmentService {
     }
 
     @Override
+    @CacheEvict(value = CachingConfig.CacheNames.DEPARTMENTS, allEntries = true)
     public DepartmentDto patch(UUID id, DepartmentDto dto) {
         return update(id, dto);
     }
 
     @Override
+    @CacheEvict(value = CachingConfig.CacheNames.DEPARTMENTS, allEntries = true)
     public void delete(UUID id) {
         if (!TenantContext.hasOrganisationId()) {
             throw new IllegalArgumentException("Organisation context is required (X-Organisation-Id header missing)");

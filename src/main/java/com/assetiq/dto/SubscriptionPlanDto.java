@@ -16,5 +16,6 @@ public class SubscriptionPlanDto {
     private Integer maxEmployees;
     private Boolean analyticsEnabled;
     private Integer auditRetentionDays;
+    private java.math.BigDecimal discountPercent;
 }
 

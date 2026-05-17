@@ -4,6 +4,7 @@ import com.assetiq.dto.OrganisationDto;
 import com.assetiq.models.Organisation;
 import com.assetiq.multitenancy.TenantContext;
 import com.assetiq.repositories.OrganisationRepository;
+import com.assetiq.services.CurrencyResolver;
 import com.assetiq.services.DefaultRoleSeederService;
 import com.assetiq.services.OrganisationService;
 import jakarta.persistence.EntityNotFoundException;
@@ -62,6 +63,13 @@ public class OrganisationServiceImpl implements OrganisationService {
             organisation.setTimezone(dto.getTimezone());
         if (dto.getStatus() != null)
             organisation.setStatus(dto.getStatus());
+
+        // P1-1: Explicit billing currency wins; otherwise derive from country.
+        if (dto.getBillingCurrency() != null && !dto.getBillingCurrency().isBlank()) {
+            organisation.setBillingCurrency(dto.getBillingCurrency().trim().toUpperCase());
+        } else {
+            organisation.setBillingCurrency(CurrencyResolver.currencyForCountry(dto.getCountry()));
+        }
 
         Organisation saved = organisationRepository.save(organisation);
 
@@ -132,6 +140,8 @@ public class OrganisationServiceImpl implements OrganisationService {
             o.setTimezone(dto.getTimezone());
         if (dto.getStatus() != null)
             o.setStatus(dto.getStatus());
+        if (dto.getBillingCurrency() != null && !dto.getBillingCurrency().isBlank())
+            o.setBillingCurrency(dto.getBillingCurrency().trim().toUpperCase());
 
         Organisation saved = organisationRepository.save(o);
         return toDto(saved);
@@ -209,6 +219,7 @@ public class OrganisationServiceImpl implements OrganisationService {
         dto.setContactPhone(o.getContactPhone());
         dto.setTimezone(o.getTimezone());
         dto.setStatus(o.getStatus());
+        dto.setBillingCurrency(o.getBillingCurrency());
         return dto;
     }
 }

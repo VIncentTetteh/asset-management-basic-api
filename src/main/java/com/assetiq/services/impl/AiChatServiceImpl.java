@@ -490,6 +490,12 @@ By Severity: %s
 
         } catch (RuntimeException e) {
             throw e;
+        } catch (java.io.IOException | InterruptedException e) {
+            if (e instanceof InterruptedException) Thread.currentThread().interrupt();
+            log.error("[AI-RAG] Anthropic API unreachable — returning fallback response", e);
+            return new AiChatResponse(
+                    "AI service is temporarily unavailable. Please try again later.",
+                    conversationId(request));
         } catch (Exception e) {
             throw new RuntimeException("Failed to reach Anthropic API: " + e.getMessage(), e);
         }
@@ -548,6 +554,12 @@ By Severity: %s
 
         } catch (RuntimeException e) {
             throw e;
+        } catch (java.io.IOException | InterruptedException e) {
+            if (e instanceof InterruptedException) Thread.currentThread().interrupt();
+            log.error("[AI-RAG] {} API unreachable — returning fallback response", aiProvider, e);
+            return new AiChatResponse(
+                    "AI service is temporarily unavailable. Please try again later.",
+                    conversationId(request));
         } catch (Exception e) {
             throw new RuntimeException("Failed to reach " + aiProvider + " API: " + e.getMessage(), e);
         }

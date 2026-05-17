@@ -36,7 +36,19 @@ public class Budget extends BaseEntity {
     @Column(nullable = false, precision = 15, scale = 2)
     private BigDecimal spentAmount = BigDecimal.ZERO;
 
-    private String currency = "USD";
+    /** Running total of SUBMITTED expenses not yet approved. Decremented on approve/reject. */
+    @Column(name = "committed_amount", nullable = false, precision = 15, scale = 2)
+    private BigDecimal committedAmount = BigDecimal.ZERO;
+
+    /** Fires a BUDGET_THRESHOLD notification when spent / total reaches this %. Default 80. */
+    @Column(name = "alert_threshold_pct", nullable = false)
+    private Integer alertThresholdPct = 80;
+
+    /** Reason recorded alongside the last POST /budgets/{id}/adjustment call. */
+    @Column(name = "last_adjustment_note", columnDefinition = "TEXT")
+    private String lastAdjustmentNote;
+
+    private String currency = "GHS";
 
     @Column(nullable = false)
     private LocalDate periodStart;

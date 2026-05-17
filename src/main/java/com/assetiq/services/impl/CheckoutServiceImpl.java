@@ -190,9 +190,12 @@ public class CheckoutServiceImpl extends TenantAwareService implements CheckoutS
     private User resolveCurrentUser(Organisation org) {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         if (auth != null && auth.getName() != null) {
-            return userRepository.findByEmailAndOrganisationId(auth.getName(), org.getId()).orElse(null);
+            return userRepository.findByEmailAndOrganisationId(auth.getName(), org.getId())
+                    .orElseThrow(() -> new org.springframework.security.access.AccessDeniedException(
+                            "Authenticated user not found in organisation"));
         }
-        return null;
+        throw new org.springframework.security.access.AccessDeniedException(
+                "No authenticated user in security context");
     }
 
     private CheckoutRecordDto toDto(CheckoutRecord r) {

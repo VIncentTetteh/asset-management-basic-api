@@ -1,6 +1,10 @@
 package com.assetiq.controllers.v1;
 
+import com.assetiq.dto.BudgetAdjustmentRequest;
 import com.assetiq.dto.BudgetDto;
+import com.assetiq.dto.BudgetSummaryDto;
+import com.assetiq.dto.ExpenseDto;
+import com.assetiq.dto.PagedResponseDto;
 import com.assetiq.services.BudgetService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -27,6 +31,13 @@ public class BudgetController {
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_BUDGETS','APPROVE_BUDGET')")
     public ResponseEntity<BudgetDto> create(@Valid @RequestBody BudgetDto dto) {
         return ResponseEntity.status(HttpStatus.CREATED).body(budgetService.create(dto));
+    }
+
+    // /summary must come before /{id} so Spring MVC does not treat "summary" as a UUID path variable
+    @GetMapping("/summary")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','VIEW_BUDGETS')")
+    public ResponseEntity<BudgetSummaryDto> getSummary() {
+        return ResponseEntity.ok(budgetService.getSummary());
     }
 
     @GetMapping("/{id}")
@@ -59,7 +70,10 @@ public class BudgetController {
      * Records spend against a budget.
      * POST /api/v1/budgets/{id}/spend
      * Body: { "amount": 5000.00 }
+     *
+     * @deprecated Use POST /{id}/adjustment instead, which records the note and tracks committed amount.
      */
+    @Deprecated
     @PostMapping("/{id}/spend")
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_BUDGETS','APPROVE_BUDGET')")
     public ResponseEntity<BudgetDto> recordSpend(
@@ -70,6 +84,22 @@ public class BudgetController {
             return ResponseEntity.badRequest().build();
         }
         return ResponseEntity.ok(budgetService.recordSpend(id, amount));
+    }
+
+    @GetMapping("/{id}/expenses")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','VIEW_BUDGETS')")
+    public ResponseEntity<PagedResponseDto<ExpenseDto>> getBudgetExpenses(
+            @PathVariable UUID id,
+            @RequestParam(defaultValue = "0")  int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return ResponseEntity.ok(budgetService.getExpenses(id, page, size));
+    }
+
+    @PostMapping("/{id}/adjustment")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_BUDGETS','APPROVE_BUDGET')")
+    public ResponseEntity<BudgetDto> recordAdjustment(@PathVariable UUID id,
+            @Valid @RequestBody BudgetAdjustmentRequest request) {
+        return ResponseEntity.ok(budgetService.recordAdjustment(id, request));
     }
 
     @DeleteMapping("/{id}")

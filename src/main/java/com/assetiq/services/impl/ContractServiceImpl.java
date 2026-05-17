@@ -6,6 +6,7 @@ import com.assetiq.models.Contract;
 import com.assetiq.models.Organisation;
 import com.assetiq.repositories.*;
 import com.assetiq.services.ContractService;
+import com.assetiq.services.CurrencyResolver;
 import com.assetiq.services.TenantAwareService;
 import jakarta.transaction.Transactional;
 import org.springframework.stereotype.Service;
@@ -23,15 +24,18 @@ public class ContractServiceImpl extends TenantAwareService implements ContractS
     private final ContractRepository contractRepository;
     private final SupplierRepository supplierRepository;
     private final AssetRepository assetRepository;
+    private final CurrencyResolver currencyResolver;
 
     public ContractServiceImpl(OrganisationRepository organisationRepository,
                                ContractRepository contractRepository,
                                SupplierRepository supplierRepository,
-                               AssetRepository assetRepository) {
+                               AssetRepository assetRepository,
+                               CurrencyResolver currencyResolver) {
         super(organisationRepository);
         this.contractRepository = contractRepository;
         this.supplierRepository = supplierRepository;
         this.assetRepository = assetRepository;
+        this.currencyResolver = currencyResolver;
     }
 
     @Override
@@ -44,6 +48,7 @@ public class ContractServiceImpl extends TenantAwareService implements ContractS
     }
 
     @Override
+    @Transactional
     public ContractDto getById(UUID id) {
         Organisation org = requireTenantOrg();
         return toDto(contractRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
@@ -51,6 +56,7 @@ public class ContractServiceImpl extends TenantAwareService implements ContractS
     }
 
     @Override
+    @Transactional
     public List<ContractDto> listAll() {
         Organisation org = requireTenantOrg();
         return contractRepository.findByOrganisationAndDeletedAtIsNullOrderByEndDateAsc(org)
@@ -58,6 +64,7 @@ public class ContractServiceImpl extends TenantAwareService implements ContractS
     }
 
     @Override
+    @Transactional
     public List<ContractDto> listExpiringSoon(int days) {
         Organisation org = requireTenantOrg();
         LocalDate cutoff = LocalDate.now().plusDays(days);
@@ -126,7 +133,7 @@ public class ContractServiceImpl extends TenantAwareService implements ContractS
         contract.setEndDate(dto.getEndDate());
         contract.setAlertDaysBefore(dto.getAlertDaysBefore() != null ? dto.getAlertDaysBefore() : 30);
         contract.setValue(dto.getValue());
-        contract.setCurrency(dto.getCurrency() != null ? dto.getCurrency() : "USD");
+        contract.setCurrency(currencyResolver.resolveOrDefault(dto.getCurrency()));
         contract.setAutoRenew(dto.isAutoRenew());
         contract.setDocumentUrl(dto.getDocumentUrl());
         contract.setNotes(dto.getNotes());

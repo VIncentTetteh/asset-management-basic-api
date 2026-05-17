@@ -1,6 +1,8 @@
 package com.assetiq.controllers.v1;
 
 import com.assetiq.dto.ExpenseDto;
+import com.assetiq.dto.ExpenseFilterRequest;
+import com.assetiq.dto.PagedResponseDto;
 import com.assetiq.services.ExpenseService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -40,8 +42,8 @@ public class ExpenseController {
 
     @GetMapping
     @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','ROLE_USER')")
-    public ResponseEntity<List<ExpenseDto>> listAll() {
-        return ResponseEntity.ok(expenseService.listAll());
+    public ResponseEntity<PagedResponseDto<ExpenseDto>> list(@ModelAttribute ExpenseFilterRequest req) {
+        return ResponseEntity.ok(expenseService.listPaged(req));
     }
 
     /** Returns only SUBMITTED expenses awaiting approval. */

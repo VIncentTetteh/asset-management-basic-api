@@ -16,6 +16,7 @@ import com.assetiq.repositories.RoleRepository;
 import com.assetiq.repositories.SubscriptionPlanRepository;
 import com.assetiq.repositories.UserRepository;
 import com.assetiq.security.JwtUtil;
+import com.assetiq.services.CurrencyResolver;
 import com.assetiq.services.EmailService;
 import com.assetiq.services.TenantRegistrationService;
 import org.springframework.beans.factory.annotation.Value;
@@ -89,6 +90,14 @@ public class TenantRegistrationServiceImpl implements TenantRegistrationService 
         org.setTaxId(request.getTaxId());
         org.setContactPhone(request.getContactPhone());
         org.setCreatedBy(request.getAdminEmail()); // Manually set for ownership filtering
+
+        // P1-12: Infer the billing currency from the registered country so every
+        // downstream flow (billing, checkout, asset pricing) uses the right
+        // currency from day one. Blank / unknown countries fall back to the
+        // platform default (GHS) — see CurrencyResolver#currencyForCountry.
+        String inferredCurrency = CurrencyResolver.currencyForCountry(request.getCountry());
+        org.setBillingCurrency(inferredCurrency);
+
         Organisation savedOrg = organisationRepository.save(org);
 
         // Ensure default roles exist (ADMIN, USER).

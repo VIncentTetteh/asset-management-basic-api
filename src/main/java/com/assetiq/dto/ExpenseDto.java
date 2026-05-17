@@ -11,6 +11,7 @@ import lombok.Setter;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.UUID;
 
 @Getter
@@ -29,6 +30,13 @@ public class ExpenseDto {
     private UUID submittedById;
     private String submittedByName;
     private UUID approvedById;
+
+    /** Actual date the expense was incurred (distinct from createdAt submission date). */
+    private LocalDate expenseDate;
+
+    /** Budget name resolved server-side — avoids a second round-trip on the frontend. */
+    private String linkedBudgetName;
+
     private Instant approvedAt;
     private String rejectionReason;
     private String receiptUrl;

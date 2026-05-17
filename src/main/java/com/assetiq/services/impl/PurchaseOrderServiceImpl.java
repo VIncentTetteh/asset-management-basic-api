@@ -10,6 +10,7 @@ import com.assetiq.models.Supplier;
 import com.assetiq.models.User;
 import com.assetiq.repositories.*;
 import com.assetiq.enums.NotificationType;
+import com.assetiq.services.CurrencyResolver;
 import com.assetiq.services.NotificationService;
 import com.assetiq.services.PurchaseOrderService;
 import com.assetiq.services.TenantAwareService;
@@ -37,6 +38,7 @@ public class PurchaseOrderServiceImpl extends TenantAwareService implements Purc
     private final UserRepository userRepository;
     private final BudgetRepository budgetRepository;
     private final NotificationService notificationService;
+    private final CurrencyResolver currencyResolver;
 
     public PurchaseOrderServiceImpl(PurchaseOrderRepository poRepository,
             OrganisationRepository organisationRepository,
@@ -44,7 +46,8 @@ public class PurchaseOrderServiceImpl extends TenantAwareService implements Purc
             SupplierRepository supplierRepository,
             UserRepository userRepository,
             BudgetRepository budgetRepository,
-            NotificationService notificationService) {
+            NotificationService notificationService,
+            CurrencyResolver currencyResolver) {
         super(organisationRepository);
         this.poRepository = poRepository;
         this.departmentRepository = departmentRepository;
@@ -52,6 +55,7 @@ public class PurchaseOrderServiceImpl extends TenantAwareService implements Purc
         this.userRepository = userRepository;
         this.budgetRepository = budgetRepository;
         this.notificationService = notificationService;
+        this.currencyResolver = currencyResolver;
     }
 
     @Override
@@ -69,7 +73,7 @@ public class PurchaseOrderServiceImpl extends TenantAwareService implements Purc
         PurchaseOrder po = new PurchaseOrder();
         po.setPoNumber(poDto.getPoNumber());
         po.setTotalAmount(poDto.getTotalAmount());
-        po.setCurrency(poDto.getCurrency() != null ? poDto.getCurrency() : "USD");
+        po.setCurrency(currencyResolver.resolveOrDefault(poDto.getCurrency()));
         po.setStatus(poDto.getStatus() != null ? poDto.getStatus() : POStatus.DRAFT);
         po.setRemarks(poDto.getRemarks());
         po.setOrganisation(org);

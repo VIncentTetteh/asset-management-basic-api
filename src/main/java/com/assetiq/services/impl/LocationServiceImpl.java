@@ -1,12 +1,15 @@
 package com.assetiq.services.impl;
 
 import com.assetiq.dto.LocationDto;
+import com.assetiq.config.CachingConfig;
 import com.assetiq.models.Location;
 import com.assetiq.models.Organisation;
 import com.assetiq.repositories.LocationRepository;
 import com.assetiq.repositories.OrganisationRepository;
 import com.assetiq.services.LocationService;
 import com.assetiq.services.TenantAwareService;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,6 +31,7 @@ public class LocationServiceImpl extends TenantAwareService implements LocationS
     }
 
     @Override
+    @CacheEvict(value = CachingConfig.CacheNames.LOCATIONS, allEntries = true)
     public LocationDto createLocation(LocationDto locationDto, UUID organisationId) {
         // Always use tenant context, ignore param
         Organisation org = requireTenantOrg();
@@ -62,6 +66,7 @@ public class LocationServiceImpl extends TenantAwareService implements LocationS
 
     @Override
     @Transactional(readOnly = true)
+    @Cacheable(value = CachingConfig.CacheNames.LOCATIONS, key = "T(com.assetiq.multitenancy.TenantContext).getOrganisationId().toString() + ':one:' + #id.toString()")
     public LocationDto getLocationById(UUID id) {
         Organisation org = requireTenantOrg();
         Location location = locationRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
@@ -71,6 +76,7 @@ public class LocationServiceImpl extends TenantAwareService implements LocationS
 
     @Override
     @Transactional(readOnly = true)
+    @Cacheable(value = CachingConfig.CacheNames.LOCATIONS, key = "T(com.assetiq.multitenancy.TenantContext).getOrganisationId().toString() + ':list'")
     public Set<LocationDto> getLocationsByOrganisation(UUID organisationId) {
         // Always scope to tenant context, ignore param
         Organisation org = requireTenantOrg();
@@ -81,6 +87,7 @@ public class LocationServiceImpl extends TenantAwareService implements LocationS
 
     @Override
     @Transactional(readOnly = true)
+    @Cacheable(value = CachingConfig.CacheNames.LOCATIONS, key = "T(com.assetiq.multitenancy.TenantContext).getOrganisationId().toString() + ':children:' + #parentLocationId.toString()")
     public Set<LocationDto> getSubLocations(UUID parentLocationId) {
         Organisation org = requireTenantOrg();
         locationRepository.findByIdAndOrganisationAndDeletedAtIsNull(parentLocationId, org)
@@ -91,6 +98,7 @@ public class LocationServiceImpl extends TenantAwareService implements LocationS
     }
 
     @Override
+    @CacheEvict(value = CachingConfig.CacheNames.LOCATIONS, allEntries = true)
     public LocationDto updateLocation(UUID id, LocationDto locationDto) {
         Organisation org = requireTenantOrg();
         Location location = locationRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
@@ -130,6 +138,7 @@ public class LocationServiceImpl extends TenantAwareService implements LocationS
     }
 
     @Override
+    @CacheEvict(value = CachingConfig.CacheNames.LOCATIONS, allEntries = true)
     public LocationDto patchLocation(UUID id, LocationDto locationDto) {
         Organisation org = requireTenantOrg();
         Location location = locationRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
@@ -183,6 +192,7 @@ public class LocationServiceImpl extends TenantAwareService implements LocationS
     }
 
     @Override
+    @CacheEvict(value = CachingConfig.CacheNames.LOCATIONS, allEntries = true)
     public void deleteLocation(UUID id) {
         Organisation org = requireTenantOrg();
         Location location = locationRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)

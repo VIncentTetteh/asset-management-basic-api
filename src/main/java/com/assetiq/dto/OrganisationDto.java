@@ -33,4 +33,10 @@ public class OrganisationDto {
     private String timezone;
 
     private OrganisationStatus status;
+
+    /**
+     * ISO-4217 alpha-3 currency code used as the default for this tenant's
+     * money-valued records. See {@code V9__organisation_billing_currency.sql}.
+     */
+    private String billingCurrency;
 }

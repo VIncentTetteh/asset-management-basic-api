@@ -8,6 +8,7 @@ import lombok.Setter;
 import jakarta.persistence.*;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.UUID;
 
 @Entity
@@ -26,7 +27,11 @@ public class Expense extends BaseEntity {
     private BigDecimal amount;
 
     @Column(length = 3)
-    private String currency = "USD";
+    private String currency = "GHS";
+
+    /** The date the cost was actually incurred. Maps to the existing expense_date column (V7). */
+    @Column(name = "expense_date")
+    private LocalDate expenseDate;
 
     @Column(nullable = false)
     @Enumerated(EnumType.STRING)

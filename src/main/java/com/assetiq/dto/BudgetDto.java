@@ -28,6 +28,24 @@ public class BudgetDto {
 
     private BigDecimal spentAmount;
 
+    /** Pending-approval expenses linked to this budget. */
+    private BigDecimal committedAmount;
+
+    /**
+     * Computed: totalAmount - spentAmount - committedAmount.
+     * True available headroom accounting for in-flight approvals.
+     */
+    private BigDecimal availableAmount;
+
+    /**
+     * Linear projection: spentAmount / elapsedDays * totalPeriodDays.
+     * Null when period hasn't started or totalAmount is zero.
+     */
+    private BigDecimal forecastedSpend;
+
+    /** Configurable alert threshold (default 80). */
+    private Integer alertThresholdPct;
+
     private String currency;
 
     @NotNull
@@ -72,6 +90,18 @@ public class BudgetDto {
 
     public BigDecimal getSpentAmount() { return spentAmount; }
     public void setSpentAmount(BigDecimal spentAmount) { this.spentAmount = spentAmount; }
+
+    public BigDecimal getCommittedAmount() { return committedAmount; }
+    public void setCommittedAmount(BigDecimal committedAmount) { this.committedAmount = committedAmount; }
+
+    public BigDecimal getAvailableAmount() { return availableAmount; }
+    public void setAvailableAmount(BigDecimal availableAmount) { this.availableAmount = availableAmount; }
+
+    public BigDecimal getForecastedSpend() { return forecastedSpend; }
+    public void setForecastedSpend(BigDecimal forecastedSpend) { this.forecastedSpend = forecastedSpend; }
+
+    public Integer getAlertThresholdPct() { return alertThresholdPct; }
+    public void setAlertThresholdPct(Integer alertThresholdPct) { this.alertThresholdPct = alertThresholdPct; }
 
     public String getCurrency() { return currency; }
     public void setCurrency(String currency) { this.currency = currency; }
