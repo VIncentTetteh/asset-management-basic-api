@@ -45,4 +45,7 @@ public class OrgSsoConfigDto {
     private String spEntityId;
 
     private String assertionConsumerServiceUrl;
+
+    /** Email domain for SSO auto-discovery (e.g. "company.com"). Stored on the Organisation. */
+    private String emailDomain;
 }

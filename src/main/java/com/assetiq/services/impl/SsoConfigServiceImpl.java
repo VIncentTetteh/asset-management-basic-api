@@ -1,12 +1,15 @@
 package com.assetiq.services.impl;
 
 import com.assetiq.dto.OrgSsoConfigDto;
+import com.assetiq.config.CachingConfig;
 import com.assetiq.enums.SsoProvider;
-import com.assetiq.models.OrgSsoConfig;
 import com.assetiq.models.Organisation;
+import com.assetiq.models.OrgSsoConfig;
 import com.assetiq.repositories.OrgSsoConfigRepository;
 import com.assetiq.repositories.OrganisationRepository;
 import com.assetiq.services.SsoConfigService;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,17 +30,16 @@ public class SsoConfigServiceImpl implements SsoConfigService {
     }
 
     @Override
+    @Cacheable(value = CachingConfig.CacheNames.SSO_CONFIG_BY_ORG, key = "#orgId.toString()", unless = "#result == null")
     public OrgSsoConfigDto getByOrgId(UUID orgId) {
-        OrgSsoConfig config = ssoConfigRepository.findByOrganisationId(orgId)
+        return ssoConfigRepository.findByOrganisationId(orgId)
+                .map(this::toDto)
                 .orElse(null);
-        if (config == null) {
-            return null;
-        }
-        return toDto(config);
     }
 
     @Override
     @Transactional
+    @CacheEvict(value = CachingConfig.CacheNames.SSO_CONFIG_BY_ORG, key = "#orgId.toString()")
     public OrgSsoConfigDto saveOAuth2Config(UUID orgId, OrgSsoConfigDto dto) {
         Organisation org = requireOrg(orgId);
         OrgSsoConfig config = ssoConfigRepository.findByOrganisationId(orgId)
@@ -58,12 +60,14 @@ public class SsoConfigServiceImpl implements SsoConfigService {
         if (dto.getScopes() != null)
             config.setScopes(dto.getScopes());
         config.setRedirectUri(dto.getRedirectUri());
+        persistEmailDomain(org, dto.getEmailDomain());
 
         return toDto(ssoConfigRepository.save(config));
     }
 
     @Override
     @Transactional
+    @CacheEvict(value = CachingConfig.CacheNames.SSO_CONFIG_BY_ORG, key = "#orgId.toString()")
     public OrgSsoConfigDto saveSamlConfig(UUID orgId, OrgSsoConfigDto dto) {
         Organisation org = requireOrg(orgId);
         OrgSsoConfig config = ssoConfigRepository.findByOrganisationId(orgId)
@@ -77,12 +81,14 @@ public class SsoConfigServiceImpl implements SsoConfigService {
         config.setIdpMetadataUrl(dto.getIdpMetadataUrl());
         config.setSpEntityId(dto.getSpEntityId());
         config.setAssertionConsumerServiceUrl(dto.getAssertionConsumerServiceUrl());
+        persistEmailDomain(org, dto.getEmailDomain());
 
         return toDto(ssoConfigRepository.save(config));
     }
 
     @Override
     @Transactional
+    @CacheEvict(value = CachingConfig.CacheNames.SSO_CONFIG_BY_ORG, key = "#orgId.toString()")
     public OrgSsoConfigDto setEnabled(UUID orgId, boolean enabled) {
         requireOrg(orgId);
         OrgSsoConfig config = ssoConfigRepository.findByOrganisationId(orgId)
@@ -97,6 +103,13 @@ public class SsoConfigServiceImpl implements SsoConfigService {
     private Organisation requireOrg(UUID orgId) {
         return organisationRepository.findByIdAndDeletedAtIsNull(orgId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Organisation not found"));
+    }
+
+    private void persistEmailDomain(Organisation org, String raw) {
+        if (raw == null) return;
+        String domain = raw.trim().toLowerCase();
+        org.setEmailDomain(domain.isEmpty() ? null : domain);
+        organisationRepository.save(org);
     }
 
     private OrgSsoConfigDto toDto(OrgSsoConfig config) {
@@ -114,6 +127,7 @@ public class SsoConfigServiceImpl implements SsoConfigService {
         dto.setIdpMetadataUrl(config.getIdpMetadataUrl());
         dto.setSpEntityId(config.getSpEntityId());
         dto.setAssertionConsumerServiceUrl(config.getAssertionConsumerServiceUrl());
+        dto.setEmailDomain(config.getOrganisation().getEmailDomain());
         return dto;
     }
 }
