@@ -1,10 +1,11 @@
 package com.assetiq.controllers.v1;
 
 import com.assetiq.dto.AssetDto;
+import com.assetiq.dto.AssetFilterRequest;
 import com.assetiq.dto.AssetHistoryEventDto;
 import com.assetiq.dto.AssetImportResultDto;
+import com.assetiq.dto.PagedResponseDto;
 import com.assetiq.dto.TcoDto;
-import com.assetiq.enums.AssetStatus;
 import com.assetiq.models.IdempotencyRecord;
 import com.assetiq.models.Organisation;
 import com.assetiq.multitenancy.TenantContext;
@@ -36,7 +37,6 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.List;
-import java.util.Set;
 import java.util.UUID;
 
 @RestController
@@ -86,31 +86,18 @@ public class AssetController {
     }
 
     /**
-     * List assets with optional filters.
-     * Query params (mutually exclusive, first match wins):
-     * ?status=IN_USE – filter by AssetStatus
-     * ?departmentId=<uuid> – filter by department
-     * ?categoryId=<uuid> – filter by category
+     * List assets with server-side combined filtering and pagination.
+     *
+     * GET /api/v1/assets?search=laptop&status=IN_USE&departmentId=uuid&page=0&size=20&sort=name,asc
+     *
+     * All parameters optional. Present parameters are AND-combined.
+     * Sortable fields: name, assetTag, serialNumber, manufacturer, model,
+     *                  purchaseCost, purchaseDate, createdAt, updatedAt, status, condition.
      */
     @GetMapping
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','VIEW_ASSETS')")
-    public ResponseEntity<?> list(
-            @RequestParam(required = false) AssetStatus status,
-            @RequestParam(required = false) UUID departmentId,
-            @RequestParam(required = false) UUID categoryId) {
-
-        if (status != null) {
-            Set<AssetDto> result = assetService.listByStatus(status);
-            return ResponseEntity.ok(result);
-        } else if (departmentId != null) {
-            Set<AssetDto> result = assetService.listByDepartment(departmentId);
-            return ResponseEntity.ok(result);
-        } else if (categoryId != null) {
-            Set<AssetDto> result = assetService.listByCategory(categoryId);
-            return ResponseEntity.ok(result);
-        }
-        List<AssetDto> all = assetService.list();
-        return ResponseEntity.ok(all);
+    public ResponseEntity<PagedResponseDto<AssetDto>> list(@ModelAttribute AssetFilterRequest req) {
+        return ResponseEntity.ok(assetService.listPaged(req));
     }
 
     @PostMapping("/{id}/assign/{departmentId}")

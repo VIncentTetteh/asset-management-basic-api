@@ -1,14 +1,18 @@
 package com.assetiq.services.impl;
 
 import com.assetiq.dto.AssetDto;
+import com.assetiq.dto.AssetFilterRequest;
 import com.assetiq.dto.AssetHistoryEventDto;
+import com.assetiq.dto.PagedResponseDto;
 import com.assetiq.dto.TcoDto;
+import com.assetiq.repositories.AssetSpecification;
 import com.assetiq.enums.AssetStatus;
 import com.assetiq.models.*;
 import com.assetiq.multitenancy.TenantContext;
 import com.assetiq.repositories.*;
 import com.assetiq.enums.NotificationType;
 import com.assetiq.services.AssetService;
+import com.assetiq.services.CurrencyResolver;
 import com.assetiq.services.EmailService;
 import com.assetiq.services.NotificationService;
 import com.assetiq.services.UsageLimitService;
@@ -18,6 +22,10 @@ import jakarta.persistence.EntityManager;
 import jakarta.transaction.Transactional;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -54,6 +62,7 @@ public class AssetServiceImpl implements AssetService {
     private final DisposalRecordRepository disposalRecordRepository;
     private final NotificationService notificationService;
     private final EmailService emailService;
+    private final CurrencyResolver currencyResolver;
 
     @Value("${app.email.base-url:http://localhost:3000}")
     private String baseUrl;
@@ -73,7 +82,8 @@ public class AssetServiceImpl implements AssetService {
             MaintenanceRecordRepository maintenanceRecordRepository,
             DisposalRecordRepository disposalRecordRepository,
             NotificationService notificationService,
-            EmailService emailService) {
+            EmailService emailService,
+            CurrencyResolver currencyResolver) {
         this.assetRepository = assetRepository;
         this.departmentRepository = departmentRepository;
         this.organisationRepository = organisationRepository;
@@ -90,6 +100,7 @@ public class AssetServiceImpl implements AssetService {
         this.disposalRecordRepository = disposalRecordRepository;
         this.notificationService = notificationService;
         this.emailService = emailService;
+        this.currencyResolver = currencyResolver;
     }
 
     // ────────────────────────────────────────────────────
@@ -160,8 +171,9 @@ public class AssetServiceImpl implements AssetService {
         asset.setModel(dto.getModel());
         asset.setPurchaseDate(dto.getPurchaseDate());
         asset.setPurchaseCost(dto.getPurchaseCost());
-        if (dto.getCurrency() != null)
-            asset.setCurrency(dto.getCurrency());
+        // P1-2: Fall through to tenant billing currency when caller omits the value
+        // so we never silently stamp a hard-coded USD / GHS onto cross-currency tenants.
+        asset.setCurrency(currencyResolver.resolveOrDefault(dto.getCurrency()));
         asset.setDepreciationMethod(dto.getDepreciationMethod());
         asset.setUsefulLifeMonths(dto.getUsefulLifeMonths());
         asset.setResidualValue(dto.getResidualValue());
@@ -246,6 +258,7 @@ public class AssetServiceImpl implements AssetService {
     }
 
     @Override
+    @Transactional
     public AssetDto get(UUID id) {
         Organisation org = requireTenantOrg();
         Asset asset = assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org).orElse(null);
@@ -253,6 +266,7 @@ public class AssetServiceImpl implements AssetService {
     }
 
     @Override
+    @Transactional
     public List<AssetDto> list() {
         Organisation org = requireTenantOrg();
         return assetRepository.findAllByOrganisationAndDeletedAtIsNull(org)
@@ -466,6 +480,7 @@ public class AssetServiceImpl implements AssetService {
     // ────────────────────────────────────────────────────
 
     @Override
+    @Transactional
     public Set<AssetDto> listByStatus(AssetStatus status) {
         Organisation org = requireTenantOrg();
         return assetRepository.findByOrganisationIdAndStatusAndDeletedAtIsNull(org.getId(), status)
@@ -473,6 +488,7 @@ public class AssetServiceImpl implements AssetService {
     }
 
     @Override
+    @Transactional
     public Set<AssetDto> listByDepartment(UUID departmentId) {
         Organisation org = requireTenantOrg();
         // Ensure the department belongs to this tenant
@@ -483,6 +499,7 @@ public class AssetServiceImpl implements AssetService {
     }
 
     @Override
+    @Transactional
     public Set<AssetDto> listByCategory(UUID categoryId) {
         Organisation org = requireTenantOrg();
         // Ensure category belongs to this tenant
@@ -490,6 +507,45 @@ public class AssetServiceImpl implements AssetService {
                 .orElseThrow(() -> new IllegalArgumentException("Category not found in your organisation"));
         return assetRepository.findByOrganisationAndCategoryIdAndDeletedAtIsNull(org, categoryId)
                 .stream().map(this::toDto).collect(Collectors.toSet());
+    }
+
+    private static final Set<String> SORTABLE_FIELDS = Set.of(
+        "name", "assetTag", "serialNumber", "manufacturer", "model",
+        "purchaseCost", "purchaseDate", "createdAt", "updatedAt", "status", "condition"
+    );
+
+    @Override
+    @Transactional
+    public PagedResponseDto<AssetDto> listPaged(AssetFilterRequest req) {
+        Organisation org = requireTenantOrg();
+
+        int pageNum  = (req.page() != null && req.page()  >= 0) ? req.page()              : 0;
+        int pageSize = (req.size() != null && req.size()  >  0) ? Math.min(req.size(), 100) : 20;
+
+        Sort sort = resolveSort(req.sort());
+        Pageable pageable = PageRequest.of(pageNum, pageSize, sort);
+
+        Page<Asset> page = assetRepository.findAll(AssetSpecification.filtered(org, req), pageable);
+
+        PagedResponseDto<AssetDto> response = new PagedResponseDto<>();
+        response.setTotal(page.getTotalElements());
+        response.setLimit(pageSize);
+        response.setOffset((long) pageNum * pageSize);
+        response.setItems(page.getContent().stream().map(this::toDto).collect(Collectors.toList()));
+        return response;
+    }
+
+    private Sort resolveSort(String sortParam) {
+        if (sortParam == null || sortParam.isBlank()) {
+            return Sort.by(Sort.Direction.ASC, "name");
+        }
+        String[] parts = sortParam.split(",", 2);
+        String field = parts[0].trim();
+        Sort.Direction dir = (parts.length > 1 && "desc".equalsIgnoreCase(parts[1].trim()))
+            ? Sort.Direction.DESC : Sort.Direction.ASC;
+        return SORTABLE_FIELDS.contains(field)
+            ? Sort.by(dir, field)
+            : Sort.by(Sort.Direction.ASC, "name");
     }
 
     // ────────────────────────────────────────────────────

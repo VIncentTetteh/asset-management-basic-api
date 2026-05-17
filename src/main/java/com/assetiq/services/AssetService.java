@@ -1,7 +1,9 @@
 package com.assetiq.services;
 
 import com.assetiq.dto.AssetDto;
+import com.assetiq.dto.AssetFilterRequest;
 import com.assetiq.dto.AssetHistoryEventDto;
+import com.assetiq.dto.PagedResponseDto;
 import com.assetiq.dto.TcoDto;
 import com.assetiq.enums.AssetStatus;
 
@@ -15,6 +17,8 @@ public interface AssetService {
     AssetDto get(UUID id);
 
     List<AssetDto> list();
+
+    PagedResponseDto<AssetDto> listPaged(AssetFilterRequest req);
 
     Set<AssetDto> listByStatus(AssetStatus status);
 
