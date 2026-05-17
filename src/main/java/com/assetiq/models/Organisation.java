@@ -53,4 +53,14 @@ public class Organisation extends BaseEntity {
     @OneToMany(mappedBy = "organisation", cascade = CascadeType.ALL)
     private Set<Role> roles;
 
+    /**
+     * ISO-4217 3-letter currency code for billing (nullable).
+     * Used by CurrencyResolver as the tenant's default currency.
+     */
+    @Column(length = 3)
+    private String billingCurrency;
+
+    @Column(name = "email_domain", unique = true, nullable = true)
+    private String emailDomain;
+
 }
