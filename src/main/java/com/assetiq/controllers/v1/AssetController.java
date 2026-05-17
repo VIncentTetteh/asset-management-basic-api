@@ -4,6 +4,7 @@ import com.assetiq.dto.AssetDto;
 import com.assetiq.dto.AssetFilterRequest;
 import com.assetiq.dto.AssetHistoryEventDto;
 import com.assetiq.dto.AssetImportResultDto;
+import com.assetiq.dto.AssetStatsDto;
 import com.assetiq.dto.PagedResponseDto;
 import com.assetiq.dto.TcoDto;
 import com.assetiq.models.IdempotencyRecord;
@@ -98,6 +99,17 @@ public class AssetController {
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','VIEW_ASSETS')")
     public ResponseEntity<PagedResponseDto<AssetDto>> list(@ModelAttribute AssetFilterRequest req) {
         return ResponseEntity.ok(assetService.listPaged(req));
+    }
+
+    /**
+     * Aggregate counts per status + assigned/unassigned totals for the current tenant.
+     * Cheap GROUP BY query — safe to call on every page load.
+     * GET /api/v1/assets/stats
+     */
+    @GetMapping("/stats")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','VIEW_ASSETS')")
+    public ResponseEntity<AssetStatsDto> getStats() {
+        return ResponseEntity.ok(assetService.getStats());
     }
 
     @PostMapping("/{id}/assign/{departmentId}")

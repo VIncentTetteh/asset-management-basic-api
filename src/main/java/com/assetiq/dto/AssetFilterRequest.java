@@ -24,6 +24,8 @@ public record AssetFilterRequest(
     UUID categoryId,
     UUID locationId,
     UUID assignedUserId,
+    /** true = only assets with an assigned user; false = only unassigned; null = no filter */
+    Boolean assigned,
 
     @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
     LocalDate purchaseDateFrom,

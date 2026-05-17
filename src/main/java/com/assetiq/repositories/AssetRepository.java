@@ -68,6 +68,14 @@ public interface AssetRepository extends JpaRepository<Asset, UUID>, JpaSpecific
 
         long countByOrganisationAndDeletedAtIsNull(Organisation organisation);
 
+        /** Per-status counts for the org — returns [status (String), count (Long)] rows. */
+        @Query("SELECT a.status, COUNT(a) FROM Asset a WHERE a.organisation = :org AND a.deletedAt IS NULL GROUP BY a.status")
+        List<Object[]> countGroupedByStatus(@Param("org") Organisation org);
+
+        /** Count assets with an assigned user. */
+        @Query("SELECT COUNT(a) FROM Asset a WHERE a.organisation = :org AND a.deletedAt IS NULL AND a.assignedUser IS NOT NULL")
+        long countAssigned(@Param("org") Organisation org);
+
         /** Assets whose warranty expires on or before {@code cutoff} and are not yet disposed. */
         @Query("SELECT a FROM Asset a WHERE a.deletedAt IS NULL AND a.warrantyExpiryDate IS NOT NULL AND a.warrantyExpiryDate <= :cutoff AND a.status <> 'DISPOSED'")
         List<Asset> findWarrantyExpiringSoon(@Param("cutoff") LocalDate cutoff);

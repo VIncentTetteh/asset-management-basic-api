@@ -3,6 +3,7 @@ package com.assetiq.services.impl;
 import com.assetiq.dto.AssetDto;
 import com.assetiq.dto.AssetFilterRequest;
 import com.assetiq.dto.AssetHistoryEventDto;
+import com.assetiq.dto.AssetStatsDto;
 import com.assetiq.dto.PagedResponseDto;
 import com.assetiq.dto.TcoDto;
 import com.assetiq.repositories.AssetSpecification;
@@ -761,5 +762,34 @@ public class AssetServiceImpl implements AssetService {
             throw new IllegalArgumentException("Asset not found for QR payload: " + payload);
         }
         return result;
+    }
+
+    @Override
+    @org.springframework.transaction.annotation.Transactional(readOnly = true)
+    public AssetStatsDto getStats() {
+        Organisation org = requireTenantOrg();
+
+        AssetStatsDto stats = new AssetStatsDto();
+        stats.setTotal(assetRepository.countByOrganisationAndDeletedAtIsNull(org));
+
+        for (Object[] row : assetRepository.countGroupedByStatus(org)) {
+            String statusName = row[0] == null ? "" : row[0].toString();
+            long count = row[1] == null ? 0L : ((Number) row[1]).longValue();
+            switch (statusName) {
+                case "IN_USE"      -> stats.setInUse(count);
+                case "IN_STOCK"    -> stats.setInStock(count);
+                case "MAINTENANCE" -> stats.setMaintenance(count);
+                case "RETIRED"     -> stats.setRetired(count);
+                case "DISPOSED"    -> stats.setDisposed(count);
+                case "RESERVED"    -> stats.setReserved(count);
+                case "MISSING"     -> stats.setMissing(count);
+                default            -> { /* ignore unknown statuses */ }
+            }
+        }
+
+        long assigned = assetRepository.countAssigned(org);
+        stats.setAssigned(assigned);
+        stats.setUnassigned(stats.getTotal() - assigned);
+        return stats;
     }
 }

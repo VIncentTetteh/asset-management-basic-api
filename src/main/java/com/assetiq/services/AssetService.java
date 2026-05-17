@@ -3,6 +3,7 @@ package com.assetiq.services;
 import com.assetiq.dto.AssetDto;
 import com.assetiq.dto.AssetFilterRequest;
 import com.assetiq.dto.AssetHistoryEventDto;
+import com.assetiq.dto.AssetStatsDto;
 import com.assetiq.dto.PagedResponseDto;
 import com.assetiq.dto.TcoDto;
 import com.assetiq.enums.AssetStatus;
@@ -49,4 +50,7 @@ public interface AssetService {
      * Returns the full AssetDto if found and belongs to the current tenant.
      */
     AssetDto getByQrPayload(String payload);
+
+    /** Per-status counts + assigned/unassigned totals for the current tenant org. */
+    AssetStatsDto getStats();
 }

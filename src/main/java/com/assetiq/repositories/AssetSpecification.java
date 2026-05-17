@@ -38,6 +38,8 @@ public final class AssetSpecification {
             if (req.categoryId()     != null) predicates.add(cb.equal(root.get("category").get("id"),     req.categoryId()));
             if (req.locationId()     != null) predicates.add(cb.equal(root.get("location").get("id"),     req.locationId()));
             if (req.assignedUserId() != null) predicates.add(cb.equal(root.get("assignedUser").get("id"), req.assignedUserId()));
+            if (Boolean.TRUE.equals(req.assigned()))  predicates.add(cb.isNotNull(root.get("assignedUser")));
+            if (Boolean.FALSE.equals(req.assigned())) predicates.add(cb.isNull(root.get("assignedUser")));
 
             if (req.purchaseDateFrom()     != null) predicates.add(cb.greaterThanOrEqualTo(root.get("purchaseDate"),    req.purchaseDateFrom()));
             if (req.purchaseDateTo()       != null) predicates.add(cb.lessThanOrEqualTo(root.get("purchaseDate"),       req.purchaseDateTo()));
