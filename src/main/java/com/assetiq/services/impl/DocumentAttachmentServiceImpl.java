@@ -11,8 +11,10 @@ import com.assetiq.repositories.UserRepository;
 import com.assetiq.services.DocumentAttachmentService;
 import com.assetiq.services.TenantAwareService;
 import com.assetiq.storage.OrgAwareStorageService;
+import com.assetiq.storage.StoredObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -154,14 +156,38 @@ public class DocumentAttachmentServiceImpl extends TenantAwareService implements
                 .findByIdAndOrganisationAndDeletedAtIsNull(attachmentId, org)
                 .orElseThrow(() -> new IllegalArgumentException("Attachment not found: " + attachmentId));
 
+        // Returns null when presigned URL is unavailable (e.g. S3 disabled);
+        // the controller falls back to the /download streaming endpoint in that case.
         return orgAwareStorageService
                 .createPresignedGetUrl(
                         attachment.getStorageKey(),
                         attachment.getOriginalName(),
                         attachment.getContentType(),
                         Duration.ofMinutes(15))
+                .orElse(null);
+    }
+
+    // ── Stream file bytes ─────────────────────────────────────────────────────
+
+    @Override
+    @Transactional(readOnly = true)
+    public ResponseEntity<byte[]> streamFile(UUID attachmentId) {
+        Organisation org = requireTenantOrg();
+        DocumentAttachment attachment = attachmentRepository
+                .findByIdAndOrganisationAndDeletedAtIsNull(attachmentId, org)
+                .orElseThrow(() -> new IllegalArgumentException("Attachment not found: " + attachmentId));
+
+        StoredObject stored = orgAwareStorageService.get(attachment.getStorageKey())
                 .orElseThrow(() -> new IllegalStateException(
-                        "Could not generate download URL for attachment: " + attachmentId));
+                        "File not found in storage for attachment: " + attachmentId));
+
+        return ResponseEntity.ok()
+                .header("Content-Type", attachment.getContentType())
+                .header("Content-Disposition",
+                        "inline; filename=\"" + attachment.getOriginalName() + "\"")
+                .header("Content-Length", String.valueOf(stored.bytes().length))
+                .header("Cache-Control", "no-store")
+                .body(stored.bytes());
     }
 
     // ── Delete ────────────────────────────────────────────────────────────────

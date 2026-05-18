@@ -3,6 +3,7 @@ package com.assetiq.controllers.v1;
 import com.assetiq.dto.DocumentAttachmentDto;
 import com.assetiq.enums.AttachmentEntityType;
 import com.assetiq.services.DocumentAttachmentService;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -50,13 +51,40 @@ public class DocumentController {
 
     /**
      * GET /api/v1/documents/{id}/url
-     * Generate a 15-minute presigned download URL for one attachment.
+     * Returns a download URL for one attachment.
+     * When S3 is enabled, this is a 15-minute presigned URL served directly from S3.
+     * When S3 is disabled, this falls back to the backend streaming endpoint URL
+     * ({@code /api/v1/documents/{id}/download}) so the frontend can use a single
+     * code path regardless of storage configuration.
      */
     @GetMapping("/{id}/url")
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER')")
-    public ResponseEntity<Map<String, String>> getDownloadUrl(@PathVariable UUID id) {
-        String url = documentService.getDownloadUrl(id);
-        return ResponseEntity.ok(Map.of("url", url));
+    public ResponseEntity<Map<String, String>> getDownloadUrl(
+            @PathVariable UUID id,
+            HttpServletRequest request) {
+        String presignedUrl = documentService.getDownloadUrl(id);
+        if (presignedUrl != null) {
+            return ResponseEntity.ok(Map.of("url", presignedUrl));
+        }
+        // S3 presigning unavailable — return the backend streaming endpoint as fallback.
+        String baseUrl = request.getScheme() + "://" + request.getServerName()
+                + (request.getServerPort() == 80 || request.getServerPort() == 443
+                   ? "" : ":" + request.getServerPort());
+        String streamUrl = baseUrl + "/api/v1/documents/" + id + "/download";
+        return ResponseEntity.ok(Map.of("url", streamUrl));
+    }
+
+    /**
+     * GET /api/v1/documents/{id}/download
+     * Streams raw file bytes for an attachment.
+     * Primary use-case: in-memory storage (S3 disabled) where no presigned URL exists.
+     * Also works with S3 — fetches the object and streams it — though clients should
+     * prefer the presigned URL from {@code /url} to avoid proxying large files.
+     */
+    @GetMapping("/{id}/download")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER')")
+    public ResponseEntity<byte[]> download(@PathVariable UUID id) {
+        return documentService.streamFile(id);
     }
 
     /**
