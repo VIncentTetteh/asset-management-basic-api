@@ -11,4 +11,6 @@ public interface CheckoutRecordRepository extends JpaRepository<CheckoutRecord, 
     List<CheckoutRecord> findByCheckedOutByAndDeletedAtIsNull(User user);
     Optional<CheckoutRecord> findByAssetAndStatusAndDeletedAtIsNull(Asset asset, CheckoutStatus status);
     List<CheckoutRecord> findByOrganisationAndStatusAndDeletedAtIsNull(Organisation org, CheckoutStatus status);
+    List<CheckoutRecord> findByEmployeeAndDeletedAtIsNullOrderByCheckedOutAtDesc(Employee employee);
+    List<CheckoutRecord> findByEmployeeAndStatusAndDeletedAtIsNull(Employee employee, CheckoutStatus status);
 }

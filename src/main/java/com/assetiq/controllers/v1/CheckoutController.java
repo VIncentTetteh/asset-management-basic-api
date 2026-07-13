@@ -29,6 +29,23 @@ public class CheckoutController {
         return ResponseEntity.ok(checkoutService.checkOut(assetId, userId, dto));
     }
 
+    /** Check out an asset to an employee (who may not be a system user). */
+    @PostMapping("/assets/{assetId}/employees/{employeeId}")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','CHECKOUT_ASSET','MANAGE_EMPLOYEES')")
+    public ResponseEntity<CheckoutRecordDto> checkOutToEmployee(
+            @PathVariable UUID assetId,
+            @PathVariable UUID employeeId,
+            @RequestBody(required = false) CheckoutRecordDto dto) {
+        return ResponseEntity.ok(checkoutService.checkOutToEmployee(assetId, employeeId, dto));
+    }
+
+    /** All checkout records for an employee, newest first. */
+    @GetMapping("/employees/{employeeId}")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','CHECKOUT_ASSET','VIEW_EMPLOYEES','MANAGE_EMPLOYEES')")
+    public ResponseEntity<List<CheckoutRecordDto>> listByEmployee(@PathVariable UUID employeeId) {
+        return ResponseEntity.ok(checkoutService.listByEmployee(employeeId));
+    }
+
     /** Check in (return) a previously checked-out asset. */
     @PostMapping("/{checkoutRecordId}/checkin")
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','CHECKOUT_ASSET','VIEW_ASSETS')")

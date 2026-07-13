@@ -23,6 +23,15 @@ public class CheckoutRecord extends BaseEntity {
     @JoinColumn(name = "checked_out_by_id", nullable = false)
     private User checkedOutBy;
 
+    /**
+     * Optional employee recipient. When set, {@code checkedOutBy} is the acting
+     * custodian of record (e.g. the admin issuing the asset) and this is the
+     * person the asset was physically issued to.
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "employee_id")
+    private Employee employee;
+
     @Column(nullable = false)
     private Instant checkedOutAt;
 

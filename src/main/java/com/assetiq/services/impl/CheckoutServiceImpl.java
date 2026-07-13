@@ -32,12 +32,14 @@ public class CheckoutServiceImpl extends TenantAwareService implements CheckoutS
     private final CheckoutRecordRepository checkoutRepository;
     private final AssetRepository assetRepository;
     private final UserRepository userRepository;
+    private final EmployeeRepository employeeRepository;
     private final NotificationService notificationService;
     private final AssetStateTransitionService stateTransitionService;
 
     public CheckoutServiceImpl(CheckoutRecordRepository checkoutRepository,
                                AssetRepository assetRepository,
                                UserRepository userRepository,
+                               EmployeeRepository employeeRepository,
                                OrganisationRepository organisationRepository,
                                NotificationService notificationService,
                                AssetStateTransitionService stateTransitionService) {
@@ -45,6 +47,7 @@ public class CheckoutServiceImpl extends TenantAwareService implements CheckoutS
         this.checkoutRepository = checkoutRepository;
         this.assetRepository = assetRepository;
         this.userRepository = userRepository;
+        this.employeeRepository = employeeRepository;
         this.notificationService = notificationService;
         this.stateTransitionService = stateTransitionService;
     }
@@ -92,6 +95,52 @@ public class CheckoutServiceImpl extends TenantAwareService implements CheckoutS
                 saved.getId(), null);
 
         log.info("Asset {} checked out to user {} (record={})", assetId, userId, saved.getId());
+        return toDto(saved);
+    }
+
+    @Override
+    public CheckoutRecordDto checkOutToEmployee(UUID assetId, UUID employeeId, CheckoutRecordDto dto) {
+        Organisation org = requireTenantOrg();
+
+        Asset asset = assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(assetId, org)
+                .orElseThrow(() -> new IllegalArgumentException("Asset not found: " + assetId));
+
+        checkoutRepository.findByAssetAndStatusAndDeletedAtIsNull(asset, CheckoutStatus.ACTIVE)
+                .ifPresent(existing -> {
+                    throw new IllegalStateException(
+                            "Asset '" + asset.getName() + "' is already checked out. Check it in first.");
+                });
+
+        Employee employee = employeeRepository.findByIdAndOrganisationAndDeletedAtIsNull(employeeId, org)
+                .orElseThrow(() -> new IllegalArgumentException("Employee not found: " + employeeId));
+
+        User actor = resolveCurrentUser(org);
+
+        CheckoutRecord record = new CheckoutRecord();
+        record.setAsset(asset);
+        record.setCheckedOutBy(actor);
+        record.setEmployee(employee);
+        record.setCheckedOutAt(Instant.now());
+        record.setExpectedReturnDate(dto != null ? dto.getExpectedReturnDate() : null);
+        record.setConditionOnCheckout(dto != null ? dto.getConditionOnCheckout() : null);
+        record.setNotes(dto != null ? dto.getNotes() : null);
+        record.setStatus(CheckoutStatus.ACTIVE);
+        record.setOrganisation(org);
+
+        if (asset.getStatus() != AssetStatus.IN_USE) {
+            stateTransitionService.transition(asset, AssetStatus.IN_USE, actor,
+                    "Checked out to employee " + employee.getFullName());
+        }
+
+        CheckoutRecord saved = checkoutRepository.save(record);
+
+        notificationService.notifyOrgAdmins(org, NotificationType.CHECKOUT,
+                "Asset Checked Out",
+                "Asset '" + asset.getName() + "' has been checked out to employee "
+                        + employee.getFullName() + ".",
+                saved.getId(), null);
+
+        log.info("Asset {} checked out to employee {} (record={})", assetId, employeeId, saved.getId());
         return toDto(saved);
     }
 
@@ -175,6 +224,16 @@ public class CheckoutServiceImpl extends TenantAwareService implements CheckoutS
 
     @Override
     @Transactional(readOnly = true)
+    public List<CheckoutRecordDto> listByEmployee(UUID employeeId) {
+        Organisation org = requireTenantOrg();
+        Employee employee = employeeRepository.findByIdAndOrganisationAndDeletedAtIsNull(employeeId, org)
+                .orElseThrow(() -> new IllegalArgumentException("Employee not found: " + employeeId));
+        return checkoutRepository.findByEmployeeAndDeletedAtIsNullOrderByCheckedOutAtDesc(employee)
+                .stream().map(this::toDto).collect(Collectors.toList());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public List<CheckoutRecordDto> listOverdue() {
         Organisation org = requireTenantOrg();
         LocalDate today = LocalDate.now();
@@ -216,6 +275,10 @@ public class CheckoutServiceImpl extends TenantAwareService implements CheckoutS
         dto.setNotes(r.getNotes());
         dto.setStatus(r.getStatus());
         dto.setOrganisationId(r.getOrganisation().getId());
+        if (r.getEmployee() != null) {
+            dto.setEmployeeId(r.getEmployee().getId());
+            dto.setEmployeeName(r.getEmployee().getFullName());
+        }
         return dto;
     }
 }

@@ -115,6 +115,11 @@ public enum Permission {
 
     // Vendor performance reviews
     VIEW_VENDOR_REVIEWS,
-    MANAGE_VENDOR_REVIEWS
+    MANAGE_VENDOR_REVIEWS,
+
+    // Employee management (HR records + onboarding/offboarding with asset handover)
+    VIEW_EMPLOYEES,
+    MANAGE_EMPLOYEES,
+    OFFBOARD_EMPLOYEE
 }
 

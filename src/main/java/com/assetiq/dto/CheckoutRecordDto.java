@@ -33,4 +33,6 @@ public class CheckoutRecordDto {
     private String notes;
     private CheckoutStatus status;
     private UUID organisationId;
+    private UUID employeeId;
+    private String employeeName;
 }
