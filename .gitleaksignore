@@ -1,0 +1,13 @@
+# Historical findings: dev JWTs in docs/logs from old commits.
+# All were invalidated by the 2026-07-13 APP_JWT_SECRET rotation (see docs/SECRETS.md in the backend repo).
+# New findings must NEVER be added here without a security review.
+a10d7d7486163d430df8ea30f84fba9a3ee59cf9:ELECTRON_FRONTEND_END_TO_END_DOCS.md:generic-api-key:159
+a10d7d7486163d430df8ea30f84fba9a3ee59cf9:ELECTRON_FRONTEND_END_TO_END_DOCS.md:generic-api-key:192
+c048933a99784a7de577e4fa9e05096097257dd4:DETAILED_CHANGELOG.md:curl-auth-header:178
+c048933a99784a7de577e4fa9e05096097257dd4:api_payload_log.txt:jwt:10
+daf2d2ed596a70c270cdbce069c2ca8d4d2b5c2c:COMPLETE_API_DOCUMENTATION_FOR_FRONTEND.md:generic-api-key:53
+daf2d2ed596a70c270cdbce069c2ca8d4d2b5c2c:COMPLETE_API_DOCUMENTATION_FOR_FRONTEND.md:generic-api-key:86
+95a11d5f79aa6b5e6892a3b6449dd26452a1d485:401_ERROR_RESOLVED.md:generic-api-key:85
+95a11d5f79aa6b5e6892a3b6449dd26452a1d485:QUICK_FIX_401_ERROR.md:generic-api-key:60
+b5025bd6d1ce29eccbd1311721ef8ab606295ee2:API_DOCUMENTATION.md:generic-api-key:311
+b5025bd6d1ce29eccbd1311721ef8ab606295ee2:API_DOCUMENTATION.md:generic-api-key:333

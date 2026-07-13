@@ -38,5 +38,6 @@ build/
 .vscode/
 
 .claude
-.gitignore
-.env.example
+
+# dependencies
+node_modules/
