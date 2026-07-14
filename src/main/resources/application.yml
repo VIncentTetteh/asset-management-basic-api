@@ -144,11 +144,17 @@ spring:
     username: ${SMTP_USERNAME:}
     password: ${SMTP_PASSWORD:}
     properties:
-      # Port 587 = STARTTLS (explicit TLS). If your provider uses port 465, swap:
-      # starttls.enable=false and ssl.enable=true.
+      # Port 587 = STARTTLS (explicit TLS). Port 465 = implicit TLS: set
+      # SMTP_STARTTLS=false and SMTP_SSL=true. Using STARTTLS against a 465
+      # endpoint hangs the socket waiting for a plaintext greeting.
       "[mail.smtp.auth]": "${SMTP_AUTH:true}"
-      "[mail.smtp.starttls.enable]": "true"
-      "[mail.smtp.ssl.enable]": "false"
+      "[mail.smtp.starttls.enable]": "${SMTP_STARTTLS:true}"
+      "[mail.smtp.ssl.enable]": "${SMTP_SSL:false}"
+      # Hard timeouts so a misconfigured/unreachable SMTP server can never
+      # hang a thread (and with it a pooled DB connection) indefinitely.
+      "[mail.smtp.connectiontimeout]": "5000"
+      "[mail.smtp.timeout]": "10000"
+      "[mail.smtp.writetimeout]": "10000"
 
   # ── Security (OAuth2) ────────────────────────────────────────────────────────
   # OAuth2 provider config lives in application-oauth2.yml (activate that profile
@@ -212,18 +218,75 @@ app:
     enabled: true
     requests-per-minute: 100
     requests-per-hour: 5000
+    # CIDR ranges of trusted reverse proxies.
+    # X-Forwarded-For is only honoured when the TCP remoteAddr falls within one
+    # of these ranges, preventing clients from spoofing their IP address.
+    # In production set this to your load balancer's egress CIDR, e.g.:
+    #   trusted-proxy-cidrs:
+    #     - "10.0.0.0/8"
+    # Leave unset (default) to always use remoteAddr — safe for direct-connect setups.
   correlation-id:
     header-name: X-Request-ID
     enabled: true
   api:
     version: v1
-    supported-versions: v1,v2
+    supported-versions: v1
   email:
     enabled: ${APP_EMAIL_ENABLED:false}
     from: ${APP_EMAIL_FROM:no-reply@assetiq.local}
     from-name: ${APP_EMAIL_FROM_NAME:AssetIQ}
     base-url: ${APP_EMAIL_BASE_URL:http://localhost:3000}
     support: ${APP_EMAIL_SUPPORT:support@assetiq.local}
+  # ── SSO ──────────────────────────────────────────────────────────────────────
+  sso:
+    saml:
+      # Set to true to load SAML IdP metadata and register Spring Security SAML2 SPs.
+      # Leave false in environments without a SAML IdP (avoids metadata download at startup).
+      enabled: ${APP_SSO_SAML_ENABLED:false}
+
+  # ── Webhook DLQ retry ─────────────────────────────────────────────────────
+  webhook:
+    dlq:
+      # How often to scan for failed deliveries eligible for retry (ms).
+      retry-interval-ms: ${APP_WEBHOOK_DLQ_INTERVAL_MS:300000}        # 5 min
+      # Total attempts (primary + DLQ) beyond which a delivery is abandoned.
+      max-total-attempts: ${APP_WEBHOOK_DLQ_MAX_ATTEMPTS:20}
+      # Events older than this are abandoned.
+      max-age-hours: ${APP_WEBHOOK_DLQ_MAX_AGE_HOURS:24}
+      # Minimum gap between retry attempts for the same delivery (min).
+      min-retry-gap-minutes: ${APP_WEBHOOK_DLQ_GAP_MINUTES:5}
+
+  # ── Import job recovery ───────────────────────────────────────────────────
+  import:
+    recovery:
+      # How often to scan for stuck QUEUED/PROCESSING jobs (ms).
+      interval-ms: ${APP_IMPORT_RECOVERY_INTERVAL_MS:600000}           # 10 min
+      # QUEUED jobs older than this are considered lost (seconds).
+      queued-timeout-seconds: ${APP_IMPORT_RECOVERY_QUEUED_TIMEOUT:300}
+      # PROCESSING jobs older than this are considered crashed (seconds).
+      processing-timeout-seconds: ${APP_IMPORT_RECOVERY_PROCESSING_TIMEOUT:1800}
+
+  # ── Multi-cloud asset discovery ──────────────────────────────────────────
+  cloud:
+    azure:
+      # Azure AD tenant (directory) ID
+      tenant-id: ${AZURE_TENANT_ID:}
+      # Service-principal application (client) ID
+      client-id: ${AZURE_CLIENT_ID:}
+      # Service-principal client secret
+      client-secret: ${AZURE_CLIENT_SECRET:}
+      # Target Azure subscription to scan
+      subscription-id: ${AZURE_SUBSCRIPTION_ID:}
+    gcp:
+      # GCP project ID to scan
+      project-id: ${GCP_PROJECT_ID:}
+      # Base64-encoded service-account JSON key
+      # Generate with: base64 -w 0 sa-key.json
+      service-account-key: ${GCP_SERVICE_ACCOUNT_KEY:}
+      # Alternative: path to a service-account JSON key file on disk
+      # (e.g. mounted as a Kubernetes secret). Ignored when service-account-key is set.
+      credentials-file: ${GOOGLE_APPLICATION_CREDENTIALS:}
+
   storage:
     s3:
       enabled: ${APP_STORAGE_S3_ENABLED:false}
@@ -238,15 +301,24 @@ app:
     org-override:
       allowed: ${APP_STORAGE_ORG_OVERRIDE_ALLOWED:true}
   billing:
-    default-currency: ${APP_BILLING_DEFAULT_CURRENCY:GHS}
+    default-currency: ${APP_BILLING_DEFAULT_CURRENCY:USD}
     callback-url: ${APP_BILLING_CALLBACK_URL:http://localhost:3000/billing/verify}
+    # Paystack supports card + mobile money (MTN, Telecel, AirtelTigo)
+    # + bank + USSD on Ghana accounts. Enumerated here so the channel list is
+    # forwarded to initializeTransaction.
+    paystack:
+      channels: ${APP_BILLING_PAYSTACK_CHANNELS:card,mobile_money,bank,ussd}
+    # Public plan ladder. Amounts are in minor units (cents for USD).
     plans:
       basic:
-        amount-minor: ${APP_BILLING_BASIC_AMOUNT:20000}
+        amount-minor: ${APP_BILLING_BASIC_AMOUNT:9900}
         paystack-plan-code: ${APP_BILLING_BASIC_PAYSTACK_PLAN_CODE:}
-      premium:
-        amount-minor: ${APP_BILLING_PREMIUM_AMOUNT:100000}
-        paystack-plan-code: ${APP_BILLING_PREMIUM_PAYSTACK_PLAN_CODE:}
+      business:
+        amount-minor: ${APP_BILLING_BUSINESS_AMOUNT:10000}  # $100.00
+        paystack-plan-code: ${APP_BILLING_BUSINESS_PAYSTACK_PLAN_CODE:}
+      business-annual:
+        amount-minor: ${APP_BILLING_BUSINESS_ANNUAL_AMOUNT:108000}  # $1,080.00 (10% off $1,200)
+        paystack-plan-code: ${APP_BILLING_BUSINESS_ANNUAL_PAYSTACK_PLAN_CODE:}
 
 # ── AI / LLM ─────────────────────────────────────────────────────────────────
 ai:

@@ -6,6 +6,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
 import org.thymeleaf.TemplateEngine;
@@ -50,6 +51,12 @@ public class EmailServiceImpl implements EmailService {
         log.info("[EMAIL] SMTP host: {}", smtpHost);
     }
 
+    /**
+     * Dispatched async: email must never block a request thread (a hung SMTP
+     * socket previously held the caller's DB connection and starved the pool).
+     * Failures are logged, never propagated to the triggering request.
+     */
+    @Async
     @Override
     public void sendTemplate(String to, String subject, String template, Map<String, Object> model) {
         if (to == null || to.isBlank()) {
