@@ -75,9 +75,10 @@ public class AnalyticsController {
      */
     @GetMapping("/maintenance")
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','VIEW_REPORTS','GENERATE_REPORTS')")
-    public ResponseEntity<Map<String, Object>> getMaintenanceAnalytics() {
+    public ResponseEntity<Map<String, Object>> getMaintenanceAnalytics(
+            @RequestParam(defaultValue = "month") String period) {
         Organisation org = requireOrg();
-        return ResponseEntity.ok(analyticsService.getMaintenanceAnalytics(org));
+        return ResponseEntity.ok(analyticsService.getMaintenanceAnalytics(period, org));
     }
 
     /**

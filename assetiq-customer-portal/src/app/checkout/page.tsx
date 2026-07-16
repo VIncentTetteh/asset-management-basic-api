@@ -1,27 +1,53 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
+import { useState, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { ArrowLeft, Loader2, Lock, CreditCard } from "lucide-react";
-import { PLANS, PLAN_LIST, type PlanId } from "@/lib/plans";
+import { ArrowLeft, Loader2, Lock, CreditCard, Smartphone, Banknote, Hash } from "lucide-react";
+import { PLANS, PLAN_LIST, isContactSalesPlan, type PlanId } from "@/lib/plans";
+
+/**
+ * P1-8: Mobile-money badges. AssetIQ's Ghana customers pay primarily with
+ * MTN MoMo / Telecel Cash / AirtelTigo Money, so the checkout surface
+ * should broadcast those rails alongside card / bank transfer / USSD.
+ */
+const CHANNEL_BADGES: { label: string; icon: React.ComponentType<{ className?: string }> }[] = [
+  { label: "MTN MoMo", icon: Smartphone },
+  { label: "Telecel Cash", icon: Smartphone },
+  { label: "AirtelTigo Money", icon: Smartphone },
+  { label: "Card", icon: CreditCard },
+  { label: "Bank Transfer", icon: Banknote },
+  { label: "USSD", icon: Hash },
+];
+
+// Business is the highlighted paid tier and the checkout default when ?plan= is missing.
+const DEFAULT_PLAN: PlanId = "BUSINESS";
 
 function CheckoutForm() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
-  const initialPlan = (searchParams.get("plan") as PlanId) ?? "PROFESSIONAL";
-  const [selectedPlan, setSelectedPlan] = useState<PlanId>(
-    PLANS[initialPlan] ? initialPlan : "PROFESSIONAL"
-  );
-  const [email, setEmail]     = useState("");
+  const initialPlanParam = searchParams.get("plan") as PlanId | null;
+  const initialPlan: PlanId =
+    initialPlanParam && PLANS[initialPlanParam] ? initialPlanParam : DEFAULT_PLAN;
+
+  const [selectedPlan, setSelectedPlan] = useState<PlanId>(initialPlan);
+  const [email, setEmail] = useState("");
   const [orgName, setOrgName] = useState("");
   const [loading, setLoading] = useState(false);
-  const [error, setError]     = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const plan = PLANS[selectedPlan];
+  const salesOnly = isContactSalesPlan(plan);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (salesOnly) {
+      window.location.href = `mailto:sales@assetiq.app?subject=Enterprise plan enquiry&body=Org: ${encodeURIComponent(
+        orgName,
+      )}%0AEmail: ${encodeURIComponent(email)}`;
+      return;
+    }
+
     setError(null);
     setLoading(true);
 
@@ -35,7 +61,6 @@ function CheckoutForm() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Checkout failed");
 
-      // Redirect to Paystack hosted page
       window.location.href = data.authorizationUrl;
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Something went wrong");
@@ -58,14 +83,15 @@ function CheckoutForm() {
           <div>
             <h1 className="text-2xl font-bold text-slate-900">Complete your order</h1>
             <p className="text-sm text-slate-500 mt-1">
-              Your license key will be emailed immediately after payment.
+              Pay in Ghana cedis with MTN MoMo, Telecel Cash, AirtelTigo Money, card, bank, or USSD.
+              Your license key is emailed immediately after payment.
             </p>
           </div>
 
           {/* Plan selector */}
           <div>
             <label className="block text-sm font-semibold text-slate-700 mb-2">Plan</label>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
               {PLAN_LIST.map((p) => (
                 <button
                   key={p.id}
@@ -78,7 +104,9 @@ function CheckoutForm() {
                   }`}
                 >
                   <p className="text-xs font-bold text-slate-900">{p.name}</p>
-                  <p className="text-xs text-slate-500 mt-0.5">{p.priceDisplay}/yr</p>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {isContactSalesPlan(p) ? "Custom quote" : `${p.priceDisplay}/mo`}
+                  </p>
                 </button>
               ))}
             </div>
@@ -94,7 +122,7 @@ function CheckoutForm() {
                 id="orgName"
                 type="text"
                 required
-                placeholder="Acme Corporation"
+                placeholder="Kwabenya Depot Ltd"
                 value={orgName}
                 onChange={(e) => setOrgName(e.target.value)}
                 className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm text-slate-900
@@ -111,7 +139,7 @@ function CheckoutForm() {
                 id="email"
                 type="email"
                 required
-                placeholder="admin@acme.com"
+                placeholder="admin@kwabenya.com.gh"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm text-slate-900
@@ -137,11 +165,31 @@ function CheckoutForm() {
                          disabled:opacity-60"
             >
               {loading ? (
-                <><Loader2 className="h-4 w-4 animate-spin" /> Redirecting to payment…</>
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" /> Redirecting to Paystack…
+                </>
+              ) : salesOnly ? (
+                <>Email sales@assetiq.app</>
               ) : (
-                <><CreditCard className="h-4 w-4" /> Pay {plan.priceDisplay} with Paystack</>
+                <>
+                  <CreditCard className="h-4 w-4" /> Pay {plan.priceDisplay} / month
+                </>
               )}
             </button>
+
+            {/* MoMo + channel badges */}
+            {!salesOnly && (
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                {CHANNEL_BADGES.map(({ label, icon: Icon }) => (
+                  <span
+                    key={label}
+                    className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-600"
+                  >
+                    <Icon className="h-3 w-3" /> {label}
+                  </span>
+                ))}
+              </div>
+            )}
 
             <div className="flex items-center justify-center gap-1.5 text-xs text-slate-400">
               <Lock className="h-3 w-3" /> Secured by Paystack · 256-bit SSL
@@ -164,7 +212,10 @@ function CheckoutForm() {
                 { label: "Assets", value: plan.limits.assets },
                 { label: "Users", value: plan.limits.users },
                 { label: "Departments", value: plan.limits.departments },
-                { label: "Duration", value: "1 year" },
+                {
+                  label: "Billing",
+                  value: salesOnly ? "Custom" : `${plan.interval} · ${plan.currency}`,
+                },
               ].map(({ label, value }) => (
                 <div key={label} className="flex justify-between">
                   <span className="text-slate-500">{label}</span>
@@ -176,7 +227,9 @@ function CheckoutForm() {
             </div>
 
             <div className="border-t border-slate-100 pt-4 flex justify-between">
-              <span className="font-semibold text-slate-900">Total</span>
+              <span className="font-semibold text-slate-900">
+                {salesOnly ? "Total" : "Total (monthly)"}
+              </span>
               <span className="font-bold text-slate-900">{plan.priceDisplay}</span>
             </div>
 

@@ -2,26 +2,54 @@
 
 Self-hosted edition of AssetIQ. All data stays on your server.
 
-## Quick start
+There are **two installation modes**. Pick one.
+
+## Mode A — Prebuilt images (recommended for customers)
+
+No source code required. Pulls signed, checksummed images from the AssetIQ container registry.
 
 ```bash
-# 1. Clone / copy the full source tree so sibling directories exist:
-#    assetiq-standalone/        ← this directory
-#    Enterprise-Asset-Manager/  ← backend
-#    Enterprise-Asset-manager-Frontend/  ← web UI
-#    assetiq-license-server/    ← license server
-#    assetiq-customer-portal/   ← (optional) customer-facing purchase portal
-
-# 2. Run the interactive setup wizard (generates keys, certs, and .env)
+# 1. Run the interactive setup wizard (generates keys, certs, and .env)
 cd assetiq-standalone
 ./scripts/setup-standalone.sh
 
-# 3. Build and start the stack
-docker compose -f docker-compose.standalone.yml up -d --build
+# 2. Authenticate to the registry (once)
+docker login ghcr.io   # use the read:packages PAT that AssetIQ sends you
 
-# 4. Open your browser
+# 3. Pull & start
+docker compose -f docker-compose.standalone.images.yml pull
+docker compose -f docker-compose.standalone.images.yml up -d
+
+# 4. Verify
+./scripts/health-check.sh
+
+# 5. Open your browser
 open https://localhost
 ```
+
+## Mode B — Build from source (AssetIQ staff / advanced operators)
+
+Requires **all four** sibling directories to be co-located:
+
+```
+parent/
+├── assetiq-standalone/                   ← this directory
+├── Enterprise-Asset-Manager/             ← backend
+├── Enterprise-Asset-manager-Frontend/    ← web UI
+├── assetiq-license-server/               ← license server
+└── assetiq-customer-portal/              ← customer portal (optional for self-host)
+```
+
+```bash
+cd assetiq-standalone
+./scripts/setup-standalone.sh
+docker compose -f docker-compose.standalone.yml up -d --build
+open https://localhost
+```
+
+> **Heads-up:** The `build` mode will fail with a missing-context error if any of
+> the sibling directories above is absent. If you only have
+> `Enterprise-Asset-Manager/` on disk, use **Mode A**.
 
 ## Directory structure
 

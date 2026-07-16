@@ -98,6 +98,9 @@ public class SsoController {
     @Value("${app.sso.allowed-exchange-redirect-prefixes:assetiq://,eam://,exp://,http://localhost,http://127.0.0.1}")
     private String allowedExchangeRedirectPrefixes;
 
+    @Value("${app.auth.cookie-secure:false}")
+    private boolean authCookieSecure;
+
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
             .followRedirects(HttpClient.Redirect.NORMAL)
@@ -721,7 +724,7 @@ public class SsoController {
 
     private void setAuthCookie(HttpServletResponse response, String token, long maxAgeSec) {
         ResponseCookie cookie = ResponseCookie.from("access_token", token)
-                .httpOnly(true).secure(true).sameSite("Lax").path("/api").maxAge(maxAgeSec).build();
+                .httpOnly(true).secure(authCookieSecure).sameSite("Lax").path("/api").maxAge(maxAgeSec).build();
         response.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
     }
 

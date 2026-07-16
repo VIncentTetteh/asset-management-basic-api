@@ -482,17 +482,18 @@ class EamIntegrationHarnessTest {
 
     @Test
     void auditRetention_softDeletesOldAuditEvents() {
-        // Tenants start on FREEMIUM (auditRetentionDays=7), so create an event older than 7 days.
+        // This harness exercises billing upgrades too, so make the event older than every seeded plan retention window.
         Organisation organisation = organisationRepository.findByIdAndDeletedAtIsNull(organisationId).orElseThrow();
 
         UUID oldAuditId = UUID.randomUUID();
-        Instant createdAt = Instant.now().minus(Duration.ofDays(8));
+        Instant createdAt = Instant.now().minus(Duration.ofDays(400));
 
         jdbcTemplate.update(
-                "INSERT INTO audit_event (id, organisation_id, method, path, response_status, success, created_at, updated_at, deleted_at) " +
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)",
+                "INSERT INTO audit_event (id, organisation_id, event_type, method, path, response_status, success, created_at, updated_at, deleted_at) " +
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
                 oldAuditId,
                 organisation.getId(),
+                "API_REQUEST",
                 "GET",
                 "/api/v1/assets",
                 200,

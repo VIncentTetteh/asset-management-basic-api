@@ -1,6 +1,7 @@
 package com.assetiq.controllers.v1;
 
 import com.assetiq.exceptions.PaymentGatewayException;
+import com.assetiq.services.FeatureDisabledException;
 import jakarta.persistence.EntityNotFoundException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -113,6 +114,21 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return new ResponseEntity<>(
                 errorBody(403, ex.getMessage() != null ? ex.getMessage() : "Operation not permitted", "FORBIDDEN_UNSUPPORTED_OPERATION"),
                 HttpStatus.FORBIDDEN);
+    }
+
+    // P0-8: A method guarded by @FeatureFlagGate was invoked while the flag
+    // was OFF for the current tenant. Default behaviour: 404 so the feature's
+    // existence stays hidden. Callers that set throwNotImplemented=true (e.g.
+    // public docs features) get a 501 instead.
+    @ExceptionHandler(FeatureDisabledException.class)
+    public ResponseEntity<Object> handleFeatureDisabled(FeatureDisabledException ex) {
+        HttpStatus status = ex.isNotImplemented()
+                ? HttpStatus.NOT_IMPLEMENTED
+                : HttpStatus.NOT_FOUND;
+        String code = ex.isNotImplemented() ? "FEATURE_NOT_IMPLEMENTED" : "NOT_FOUND";
+        return new ResponseEntity<>(
+                errorBody(status.value(), ex.getMessage(), code),
+                status);
     }
 
     @ExceptionHandler(Exception.class)

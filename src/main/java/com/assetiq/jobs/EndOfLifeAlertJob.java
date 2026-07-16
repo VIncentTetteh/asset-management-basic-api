@@ -1,11 +1,14 @@
 package com.assetiq.jobs;
 
+import com.assetiq.enums.NotificationType;
 import com.assetiq.models.Asset;
+import com.assetiq.models.Organisation;
 import com.assetiq.repositories.AssetRepository;
 import com.assetiq.repositories.ContractRepository;
 import com.assetiq.repositories.SoftwareLicenseRepository;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import com.assetiq.services.NotificationService;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -14,46 +17,34 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 /**
- * Scheduled job that detects and logs end-of-life conditions across assets,
- * software licenses, and contracts.
- *
- * <p>In production this would dispatch notifications (email, webhook, in-app alert)
- * instead of just logging. The alerting integration is injected as a separate
- * notification service to keep this class focused on detection only.
+ * Scheduled job that detects end-of-life conditions across assets,
+ * software licenses, and contracts, and dispatches in-app notifications
+ * to all ORG_ADMIN users in each affected organisation.
  *
  * Runs daily at 08:00 UTC.
  */
 @Component
+@RequiredArgsConstructor
+@Slf4j
 public class EndOfLifeAlertJob {
-
-    private static final Logger log = LoggerFactory.getLogger(EndOfLifeAlertJob.class);
 
     /** Alert threshold for warranty expiry and license/contract expiry (days). */
     private static final int WARRANTY_ALERT_DAYS = 30;
-    private static final int LICENSE_ALERT_DAYS = 30;
+    private static final int LICENSE_ALERT_DAYS  = 30;
     private static final int CONTRACT_ALERT_DAYS = 30;
 
-    private final AssetRepository assetRepository;
+    private final AssetRepository           assetRepository;
     private final SoftwareLicenseRepository licenseRepository;
-    private final ContractRepository contractRepository;
-
-    public EndOfLifeAlertJob(AssetRepository assetRepository,
-                             SoftwareLicenseRepository licenseRepository,
-                             ContractRepository contractRepository) {
-        this.assetRepository = assetRepository;
-        this.licenseRepository = licenseRepository;
-        this.contractRepository = contractRepository;
-    }
+    private final ContractRepository        contractRepository;
+    private final NotificationService       notificationService;
 
     @Scheduled(cron = "0 0 8 * * *", zone = "UTC")
     public void run() {
         log.info("[EOL-Alert] Starting end-of-life alert scan");
-
         checkWarrantyExpiry();
         checkAssetEndOfLife();
         checkLicenseExpiry();
         checkContractExpiry();
-
         log.info("[EOL-Alert] Scan complete");
     }
 
@@ -64,11 +55,24 @@ public class EndOfLifeAlertJob {
         List<Asset> expiring = assetRepository.findWarrantyExpiringSoon(cutoff);
         if (expiring.isEmpty()) return;
 
-        log.warn("[EOL-Alert] {} asset(s) have warranties expiring within {} days:", expiring.size(), WARRANTY_ALERT_DAYS);
-        expiring.forEach(a -> log.warn("  Asset '{}' (id={}) — warranty expires {}",
-                a.getName(), a.getId(), a.getWarrantyExpiryDate()));
+        log.warn("[EOL-Alert] {} asset(s) have warranties expiring within {} days",
+                expiring.size(), WARRANTY_ALERT_DAYS);
 
-        // TODO: dispatch notification via NotificationService
+        expiring.forEach(asset -> {
+            Organisation org = asset.getOrganisation();
+            String title   = "Warranty Expiring Soon: " + asset.getName();
+            String message = String.format(
+                    "Asset '%s' (tag: %s) has a warranty expiring on %s — within %d days.",
+                    asset.getName(),
+                    asset.getAssetTag() != null ? asset.getAssetTag() : "N/A",
+                    asset.getWarrantyExpiryDate(),
+                    WARRANTY_ALERT_DAYS);
+            String actionUrl = "/assets/" + asset.getId();
+
+            log.debug("[EOL-Alert] Dispatching WARRANTY_EXPIRY notification for asset {}", asset.getId());
+            notificationService.notifyOrgAdmins(
+                    org, NotificationType.WARRANTY_EXPIRY, title, message, asset.getId(), actionUrl);
+        });
     }
 
     // ---- End of useful life ----
@@ -85,46 +89,74 @@ public class EndOfLifeAlertJob {
 
         if (eolAssets.isEmpty()) return;
 
-        log.warn("[EOL-Alert] {} asset(s) have reached end of useful life:", eolAssets.size());
-        eolAssets.forEach(a -> {
-            LocalDate eolDate = a.getPurchaseDate().plusMonths(a.getUsefulLifeMonths());
-            log.warn("  Asset '{}' (id={}) — EOL date was {}", a.getName(), a.getId(), eolDate);
-        });
+        log.warn("[EOL-Alert] {} asset(s) have reached end of useful life", eolAssets.size());
 
-        // TODO: dispatch notification via NotificationService
+        eolAssets.forEach(asset -> {
+            Organisation org  = asset.getOrganisation();
+            LocalDate eolDate = asset.getPurchaseDate().plusMonths(asset.getUsefulLifeMonths());
+            String title      = "Asset End of Useful Life: " + asset.getName();
+            String message    = String.format(
+                    "Asset '%s' (tag: %s) reached its end of useful life on %s and may require replacement or disposal.",
+                    asset.getName(),
+                    asset.getAssetTag() != null ? asset.getAssetTag() : "N/A",
+                    eolDate);
+            String actionUrl = "/assets/" + asset.getId();
+
+            log.debug("[EOL-Alert] Dispatching END_OF_LIFE notification for asset {}", asset.getId());
+            notificationService.notifyOrgAdmins(
+                    org, NotificationType.END_OF_LIFE, title, message, asset.getId(), actionUrl);
+        });
     }
 
     // ---- Software license expiry ----
 
     private void checkLicenseExpiry() {
         LocalDate cutoff = LocalDate.now().plusDays(LICENSE_ALERT_DAYS);
-        // Reuse the repository's expiring-soon query (all orgs)
-        // In a proper notification flow, group by org and send per-org emails
-        long count = licenseRepository.findAll().stream()
+        licenseRepository.findAll().stream()
                 .filter(l -> l.getDeletedAt() == null
-                        && l.getExpiryDate() != null
-                        && !l.getExpiryDate().isAfter(cutoff))
-                .count();
+                          && l.getExpiryDate() != null
+                          && !l.getExpiryDate().isAfter(cutoff))
+                .forEach(license -> {
+                    Organisation org = license.getOrganisation();
+                    String title     = "Software License Expiring: " + license.getName();
+                    String message   = String.format(
+                            "Software license '%s' (vendor: %s) expires on %s — within %d days.",
+                            license.getName(),
+                            license.getVendor() != null ? license.getVendor() : "Unknown",
+                            license.getExpiryDate(),
+                            LICENSE_ALERT_DAYS);
+                    String actionUrl = "/software-licenses/" + license.getId();
 
-        if (count > 0) {
-            log.warn("[EOL-Alert] {} software license(s) expiring within {} days", count, LICENSE_ALERT_DAYS);
-            // TODO: dispatch notification via NotificationService
-        }
+                    log.debug("[EOL-Alert] Dispatching DEPRECATION notification for license {}", license.getId());
+                    notificationService.notifyOrgAdmins(
+                            org, NotificationType.DEPRECATION, title, message, license.getId(), actionUrl);
+                });
     }
 
     // ---- Contract expiry ----
 
     private void checkContractExpiry() {
         LocalDate cutoff = LocalDate.now().plusDays(CONTRACT_ALERT_DAYS);
-        long count = contractRepository.findAll().stream()
+        contractRepository.findAll().stream()
                 .filter(c -> c.getDeletedAt() == null
-                        && c.getEndDate() != null
-                        && !c.getEndDate().isAfter(cutoff))
-                .count();
+                          && c.getEndDate() != null
+                          && !c.getEndDate().isAfter(cutoff))
+                .forEach(contract -> {
+                    Organisation org = contract.getOrganisation();
+                    String title     = "Contract Expiring: " + contract.getTitle();
+                    String supplierName = contract.getSupplier() != null ? contract.getSupplier().getName() : "Unknown";
+                    String message   = String.format(
+                            "Contract '%s' (vendor: %s, number: %s) expires on %s — within %d days.",
+                            contract.getTitle(),
+                            supplierName,
+                            contract.getContractNumber() != null ? contract.getContractNumber() : "N/A",
+                            contract.getEndDate(),
+                            CONTRACT_ALERT_DAYS);
+                    String actionUrl = "/contracts/" + contract.getId();
 
-        if (count > 0) {
-            log.warn("[EOL-Alert] {} contract(s) expiring within {} days", count, CONTRACT_ALERT_DAYS);
-            // TODO: dispatch notification via NotificationService
-        }
+                    log.debug("[EOL-Alert] Dispatching MAINTENANCE notification for contract {}", contract.getId());
+                    notificationService.notifyOrgAdmins(
+                            org, NotificationType.MAINTENANCE, title, message, contract.getId(), actionUrl);
+                });
     }
 }

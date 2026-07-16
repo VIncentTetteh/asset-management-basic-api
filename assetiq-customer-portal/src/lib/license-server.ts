@@ -15,7 +15,17 @@ function adminHeaders() {
   };
 }
 
-export type Plan = "STARTER" | "PROFESSIONAL" | "ENTERPRISE";
+/**
+ * License tier codes accepted by the License Server.
+ *
+ * P1-4 / P1-17a: The portal's active plan IDs map to these tiers 1:1.
+ * Only the four current subscription package codes are accepted.
+ */
+export type Plan =
+  | "FREEMIUM"
+  | "BASIC"
+  | "BUSINESS"
+  | "ENTERPRISE";
 
 export interface IssuedKey {
   id: string;

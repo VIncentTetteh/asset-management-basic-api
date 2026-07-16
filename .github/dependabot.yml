@@ -1,0 +1,45 @@
+# Dependabot configuration for automated dependency updates.
+# Keeps Maven, GitHub Actions, and the frontend npm ecosystem up to date
+# with weekly PRs opened on Monday/Tuesday mornings (Africa/Accra timezone).
+
+version: 2
+updates:
+  - package-ecosystem: "maven"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "Africa/Accra"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "java"
+    ignore:
+      # Spring Boot BOM manages transitive versions — let it decide on majors
+      - dependency-name: "org.springframework.boot:*"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "Africa/Accra"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "ci"
+
+  - package-ecosystem: "npm"
+    directory: "/assetiq-customer-portal"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "08:00"
+      timezone: "Africa/Accra"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "frontend"

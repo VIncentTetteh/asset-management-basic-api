@@ -19,7 +19,7 @@ export function rateLimit(options: { windowMs: number; max: number }) {
   // Prune stale entries periodically so the Map doesn't grow unbounded
   const prune = () => {
     const now = Date.now();
-    for (const [key, entry] of store) {
+    for (const [key, entry] of Array.from(store.entries())) {
       if (entry.resetAt < now) store.delete(key);
     }
   };

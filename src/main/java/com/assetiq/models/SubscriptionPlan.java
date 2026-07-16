@@ -27,7 +27,7 @@ public class SubscriptionPlan extends BaseEntity {
     private BillingPlanTier tier;
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 20)
+    @Column(name = "\"interval\"", nullable = false, length = 20)
     private BillingInterval interval;
 
     // Amount in minor units (kobo / cents)
@@ -35,7 +35,7 @@ public class SubscriptionPlan extends BaseEntity {
     private Long amountMinor;
 
     @Column(nullable = false, length = 10)
-    private String currency = "GHC";
+    private String currency = "GHS";
 
     @Column(nullable = false)
     private Integer maxAssets;
@@ -54,5 +54,7 @@ public class SubscriptionPlan extends BaseEntity {
 
     @Column(length = 120)
     private String paystackPlanCode;
-}
 
+    @Column(precision = 5, scale = 2)
+    private java.math.BigDecimal discountPercent;
+}

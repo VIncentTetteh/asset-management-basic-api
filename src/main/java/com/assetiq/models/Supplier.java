@@ -46,7 +46,6 @@ public class Supplier extends BaseEntity {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(nullable = false)
-    @EqualsAndHashCode.Exclude
     @ToString.Exclude
     private Organisation organisation;
 

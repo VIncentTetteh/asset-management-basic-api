@@ -1,121 +1,79 @@
 package com.assetiq.config;
 
-import io.github.bucket4j.Bandwidth;
-import io.github.bucket4j.Bucket;
-import io.github.bucket4j.Refill;
+import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
 
-import java.time.Duration;
-import java.util.Map;
-import java.util.Collections;
-import java.util.LinkedHashMap;
-import java.util.concurrent.TimeUnit;
+import java.util.List;
 
 /**
- * Rate limiting configuration backed by two separate bounded, expiring bucket caches:
+ * Rate limiting constants and configuration.
  *
- *  - AUTH bucket  : strict — 5 requests / minute, 20 requests / hour.
- *                   Applied to /api/v1/auth/** and /api/v1/mfa/** endpoints to
- *                   prevent brute-force credential attacks.
+ * Bucket state is no longer held here — it lives in Redis, managed by
+ * {@link RedisRateLimiter}. This class only carries the limit parameters
+ * and the trusted-proxy list used by {@link RateLimitingInterceptor}.
  *
- *  - GENERAL bucket: relaxed — 100 requests / minute.
- *                   Applied to all other /api/** paths.
- *
- * Bucket keys are namespaced ("auth:<clientKey>" vs "api:<clientKey>") so each
- * client gets independent counters for the two tiers.
- *
- * Memory safety: each cache is bounded at MAX_BUCKETS entries with LRU eviction
- * AND a 1-hour TTL on creation time.  For very high-traffic production deployments
- * swap the LinkedHashMap for a Caffeine cache (spring-boot-starter-cache already
- * brings caffeine on the classpath via spring-cache auto-configuration).
+ * <h3>Trusted proxies</h3>
+ * {@code app.rate-limiting.trusted-proxy-cidrs} — list of CIDR ranges whose
+ * traffic may have the {@code X-Forwarded-For} header trusted. In production
+ * set this to your load balancer's egress IP range (e.g. the ALB/Nginx CIDR).
+ * Requests from untrusted remoteAddr fall back to using remoteAddr directly,
+ * making header spoofing impossible.
  */
 @Configuration
+@ConfigurationProperties(prefix = "app.rate-limiting")
 public class RateLimitingConfig {
 
     // ── Limits ────────────────────────────────────────────────────────────────
 
-    /** Requests allowed per minute for auth endpoints (login, MFA, token refresh). */
+    /** Requests allowed per minute on auth endpoints (login, MFA, token refresh). */
     public static final int AUTH_REQUESTS_PER_MINUTE  = 5;
-    /** Hourly hard-cap for auth endpoints, providing a second-layer brake. */
+    /** Per-hour hard-cap on auth endpoints — secondary brake against slow brute force. */
     public static final int AUTH_REQUESTS_PER_HOUR    = 20;
-
-    /** Requests allowed per minute for all other authenticated API calls. */
+    /** Requests allowed per minute for general API calls. */
     public static final int API_REQUESTS_PER_MINUTE   = 100;
 
-    // ── Response headers ─────────────────────────────────────────────────────
+    // ── Rate-limit tier names (used as Redis key segments) ────────────────────
+
+    public static final String TIER_AUTH_MINUTE  = "auth:minute";
+    public static final String TIER_AUTH_HOUR    = "auth:hour";
+    public static final String TIER_API_MINUTE   = "api:minute";
+
+    // ── Response headers (RFC 6585 / draft-ietf-httpapi-ratelimit-headers) ────
 
     public static final String HEADER_REMAINING    = "X-RateLimit-Remaining";
     public static final String HEADER_LIMIT        = "X-RateLimit-Limit";
     public static final String HEADER_RESET        = "X-RateLimit-Reset";
     public static final String HEADER_RETRY_AFTER  = "Retry-After";
 
-    // ── Bucket caches ─────────────────────────────────────────────────────────
+    // ── Bound properties ──────────────────────────────────────────────────────
 
-    private static final int MAX_BUCKETS = 50_000;
-
-    private static final Map<String, BucketEntry> AUTH_CACHE    = buildCache();
-    private static final Map<String, BucketEntry> GENERAL_CACHE = buildCache();
-
-    @SuppressWarnings("serial")
-    private static Map<String, BucketEntry> buildCache() {
-        return Collections.synchronizedMap(
-            new LinkedHashMap<>(256, 0.75f, true) {
-                @Override
-                protected boolean removeEldestEntry(Map.Entry<String, BucketEntry> eldest) {
-                    return size() > MAX_BUCKETS
-                        || (System.currentTimeMillis() - eldest.getValue().createdAt()) > TimeUnit.HOURS.toMillis(1);
-                }
-            }
-        );
-    }
-
-    private record BucketEntry(Bucket bucket, long createdAt) {}
-
-    // ── Public resolution API ─────────────────────────────────────────────────
+    /** Whether rate limiting is active (can be disabled in test profiles). */
+    private boolean enabled = true;
 
     /**
-     * Returns the auth-tier bucket for {@code clientKey}.
-     * The bucket enforces both a per-minute and per-hour limit.
+     * CIDR ranges of trusted reverse proxies.
+     *
+     * When a request's {@code remoteAddr} falls within one of these ranges the
+     * interceptor trusts the leftmost IP in {@code X-Forwarded-For} as the real
+     * client address. All other requests use {@code remoteAddr} directly.
+     *
+     * Example (docker-compose / nginx on the same host):
+     *   app.rate-limiting.trusted-proxy-cidrs: ["127.0.0.1/32","172.17.0.0/16"]
+     *
+     * Example (AWS ALB):
+     *   app.rate-limiting.trusted-proxy-cidrs: ["10.0.0.0/8"]
+     *
+     * Default (empty list): never trust X-Forwarded-For — always use remoteAddr.
      */
-    public static Bucket resolveAuthBucket(String clientKey) {
-        return AUTH_CACHE.computeIfAbsent("auth:" + clientKey,
-            k -> new BucketEntry(createAuthBucket(), System.currentTimeMillis())).bucket();
-    }
+    private List<String> trustedProxyCidrs = List.of();
 
-    /**
-     * Returns the general-API bucket for {@code clientKey}.
-     */
-    public static Bucket resolveGeneralBucket(String clientKey) {
-        return GENERAL_CACHE.computeIfAbsent("api:" + clientKey,
-            k -> new BucketEntry(createGeneralBucket(), System.currentTimeMillis())).bucket();
-    }
+    // ── Getters / setters (needed by @ConfigurationProperties binding) ────────
 
-    // ── Bucket factories ──────────────────────────────────────────────────────
+    public boolean isEnabled() { return enabled; }
+    public void setEnabled(boolean enabled) { this.enabled = enabled; }
 
-    private static Bucket createAuthBucket() {
-        // Two-tier: per-minute burst + per-hour hard cap (greedy refill for the minute,
-        // intervally for the hour so it resets cleanly at the boundary).
-        Bandwidth perMinute = Bandwidth.classic(
-            AUTH_REQUESTS_PER_MINUTE,
-            Refill.greedy(AUTH_REQUESTS_PER_MINUTE, Duration.ofMinutes(1)));
-
-        Bandwidth perHour = Bandwidth.classic(
-            AUTH_REQUESTS_PER_HOUR,
-            Refill.intervally(AUTH_REQUESTS_PER_HOUR, Duration.ofHours(1)));
-
-        return Bucket.builder()
-            .addLimit(perMinute)
-            .addLimit(perHour)
-            .build();
-    }
-
-    private static Bucket createGeneralBucket() {
-        Bandwidth perMinute = Bandwidth.classic(
-            API_REQUESTS_PER_MINUTE,
-            Refill.greedy(API_REQUESTS_PER_MINUTE, Duration.ofMinutes(1)));
-
-        return Bucket.builder()
-            .addLimit(perMinute)
-            .build();
+    public List<String> getTrustedProxyCidrs() { return trustedProxyCidrs; }
+    public void setTrustedProxyCidrs(List<String> trustedProxyCidrs) {
+        this.trustedProxyCidrs = trustedProxyCidrs != null ? trustedProxyCidrs : List.of();
     }
 }

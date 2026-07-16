@@ -1,12 +1,15 @@
 package com.assetiq.services.impl;
 
 import com.assetiq.dto.DepreciationPolicyDto;
+import com.assetiq.config.CachingConfig;
 import com.assetiq.models.DepreciationPolicy;
 import com.assetiq.models.Organisation;
 import com.assetiq.repositories.DepreciationPolicyRepository;
 import com.assetiq.repositories.OrganisationRepository;
 import com.assetiq.services.DepreciationPolicyService;
 import com.assetiq.services.TenantAwareService;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,6 +31,7 @@ public class DepreciationPolicyServiceImpl extends TenantAwareService implements
     }
 
     @Override
+    @CacheEvict(value = CachingConfig.CacheNames.DEPRECIATION_POLICIES, allEntries = true)
     public DepreciationPolicyDto createPolicy(DepreciationPolicyDto policyDto, UUID organisationId) {
         // Always use tenant context, ignore param
         Organisation org = requireTenantOrg();
@@ -45,6 +49,7 @@ public class DepreciationPolicyServiceImpl extends TenantAwareService implements
 
     @Override
     @Transactional(readOnly = true)
+    @Cacheable(value = CachingConfig.CacheNames.DEPRECIATION_POLICIES, key = "T(com.assetiq.multitenancy.TenantContext).getOrganisationId().toString() + ':one:' + #id.toString()")
     public DepreciationPolicyDto getPolicyById(UUID id) {
         Organisation org = requireTenantOrg();
         DepreciationPolicy policy = policyRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
@@ -54,6 +59,7 @@ public class DepreciationPolicyServiceImpl extends TenantAwareService implements
 
     @Override
     @Transactional(readOnly = true)
+    @Cacheable(value = CachingConfig.CacheNames.DEPRECIATION_POLICIES, key = "T(com.assetiq.multitenancy.TenantContext).getOrganisationId().toString() + ':list'")
     public Set<DepreciationPolicyDto> getPoliciesByOrganisation(UUID organisationId) {
         // Always scope to tenant context, ignore param
         Organisation org = requireTenantOrg();
@@ -63,6 +69,7 @@ public class DepreciationPolicyServiceImpl extends TenantAwareService implements
     }
 
     @Override
+    @CacheEvict(value = CachingConfig.CacheNames.DEPRECIATION_POLICIES, allEntries = true)
     public DepreciationPolicyDto updatePolicy(UUID id, DepreciationPolicyDto policyDto) {
         Organisation org = requireTenantOrg();
         DepreciationPolicy policy = policyRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
@@ -78,6 +85,7 @@ public class DepreciationPolicyServiceImpl extends TenantAwareService implements
     }
 
     @Override
+    @CacheEvict(value = CachingConfig.CacheNames.DEPRECIATION_POLICIES, allEntries = true)
     public DepreciationPolicyDto patchPolicy(UUID id, DepreciationPolicyDto policyDto) {
         Organisation org = requireTenantOrg();
         DepreciationPolicy policy = policyRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
@@ -103,6 +111,7 @@ public class DepreciationPolicyServiceImpl extends TenantAwareService implements
     }
 
     @Override
+    @CacheEvict(value = CachingConfig.CacheNames.DEPRECIATION_POLICIES, allEntries = true)
     public void deletePolicy(UUID id) {
         Organisation org = requireTenantOrg();
         DepreciationPolicy policy = policyRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)

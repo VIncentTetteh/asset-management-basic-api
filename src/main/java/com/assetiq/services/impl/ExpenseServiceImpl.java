@@ -105,12 +105,16 @@ public class ExpenseServiceImpl extends TenantAwareService implements ExpenseSer
                     saved.getAmount(), saved.getCurrency(), b.getId(), saved.getId());
         }
 
-        notificationService.notifyOrgAdmins(org, NotificationType.EXPENSE,
-                "New Expense Submitted",
-                "Expense '" + saved.getTitle() + "' for " + saved.getAmount() + " " + saved.getCurrency()
-                        + " has been submitted by "
-                        + (currentUser != null ? currentUser.getFirstName() + " " + currentUser.getLastName() : "a user") + ".",
-                saved.getId(), null);
+        try {
+            notificationService.notifyOrgAdmins(org, NotificationType.EXPENSE,
+                    "New Expense Submitted",
+                    "Expense '" + saved.getTitle() + "' for " + saved.getAmount() + " " + saved.getCurrency()
+                            + " has been submitted by "
+                            + (currentUser != null ? currentUser.getFirstName() + " " + currentUser.getLastName() : "a user") + ".",
+                    saved.getId(), null);
+        } catch (Exception e) {
+            log.warn("Expense submission notification suppressed for expense {}: {}", saved.getId(), e.getMessage());
+        }
 
         log.info("Expense {} submitted by {}", saved.getId(), currentUser != null ? currentUser.getEmail() : "unknown");
         return toDto(saved);
@@ -159,12 +163,16 @@ public class ExpenseServiceImpl extends TenantAwareService implements ExpenseSer
                         .divide(b.getTotalAmount(), 4, RoundingMode.HALF_UP)
                         .doubleValue() * 100;
                 if (utilization >= threshold) {
-                    notificationService.notifyOrgAdmins(org, NotificationType.BUDGET_THRESHOLD,
-                            "Budget Threshold Reached",
-                            "Budget '" + b.getName() + "' has reached "
-                                    + String.format("%.1f", utilization) + "% utilization"
-                                    + " (threshold: " + threshold + "%).",
-                            b.getId(), null);
+                    try {
+                        notificationService.notifyOrgAdmins(org, NotificationType.BUDGET_THRESHOLD,
+                                "Budget Threshold Reached",
+                                "Budget '" + b.getName() + "' has reached "
+                                        + String.format("%.1f", utilization) + "% utilization"
+                                        + " (threshold: " + threshold + "%).",
+                                b.getId(), null);
+                    } catch (Exception e) {
+                        log.warn("Budget threshold notification suppressed for budget {}: {}", b.getId(), e.getMessage());
+                    }
                     log.info("Budget {} threshold alert fired at {:.1f}% utilization", b.getId(), utilization);
                 }
             }
@@ -178,10 +186,14 @@ public class ExpenseServiceImpl extends TenantAwareService implements ExpenseSer
 
         // Notify the original submitter
         if (saved.getSubmittedBy() != null) {
-            notificationService.notifyOrgAdmins(org, NotificationType.APPROVAL,
-                    "Expense Approved",
-                    "Your expense '" + saved.getTitle() + "' has been approved.",
-                    saved.getId(), null);
+            try {
+                notificationService.notifyOrgAdmins(org, NotificationType.APPROVAL,
+                        "Expense Approved",
+                        "Your expense '" + saved.getTitle() + "' has been approved.",
+                        saved.getId(), null);
+            } catch (Exception e) {
+                log.warn("Expense approval notification suppressed for expense {}: {}", saved.getId(), e.getMessage());
+            }
         }
 
         log.info("Expense {} approved by {}", id, approver != null ? approver.getEmail() : "unknown");
@@ -215,11 +227,15 @@ public class ExpenseServiceImpl extends TenantAwareService implements ExpenseSer
         Expense saved = expenseRepository.save(expense);
 
         if (saved.getSubmittedBy() != null) {
-            notificationService.notifyOrgAdmins(org, NotificationType.APPROVAL,
-                    "Expense Rejected",
-                    "Your expense '" + saved.getTitle() + "' has been rejected."
-                            + (reason != null ? " Reason: " + reason : ""),
-                    saved.getId(), null);
+            try {
+                notificationService.notifyOrgAdmins(org, NotificationType.APPROVAL,
+                        "Expense Rejected",
+                        "Your expense '" + saved.getTitle() + "' has been rejected."
+                                + (reason != null ? " Reason: " + reason : ""),
+                        saved.getId(), null);
+            } catch (Exception e) {
+                log.warn("Expense rejection notification suppressed for expense {}: {}", saved.getId(), e.getMessage());
+            }
         }
 
         log.info("Expense {} rejected. Reason: {}", id, reason);

@@ -3,11 +3,26 @@
     <property name="LOG_FILE" value="${LOG_FILE:-${LOG_PATH:-${LOG_TEMP:-${java.io.tmpdir:-/tmp}}/spring.log}}"/>
     <property name="LOG_PATTERN" value="%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"/>
 
-    <!-- ── Console appender ────────────────────────────────────────────────── -->
+    <!-- ── Console appender (plain text — dev/test) ─────────────────────── -->
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
         <filter class="com.assetiq.config.SensitiveDataFilter"/>
         <encoder>
             <pattern>${LOG_PATTERN}</pattern>
+            <charset>utf8</charset>
+        </encoder>
+    </appender>
+
+    <!-- ── JSON console appender (production) ──────────────────────────── -->
+    <!--
+         Uses Logback's built-in JsonEncoder available in Logback 1.3.x
+         (bundled with Spring Boot 3.3+). No external logstash-logback-encoder
+         dependency required. Each log line is a valid JSON object parseable
+         by Datadog, Loki, CloudWatch, and most modern aggregators.
+    -->
+    <appender name="CONSOLE_JSON" class="ch.qos.logback.core.ConsoleAppender">
+        <filter class="com.assetiq.config.SensitiveDataFilter"/>
+        <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
+            <pattern>{"timestamp":"%d{yyyy-MM-dd'T'HH:mm:ss.SSSZ}","level":"%-5level","thread":"%thread","logger":"%logger{36}","message":"%replace(%msg){'\"','\\\"'}","exception":"%replace(%xThrowable{short}){'\"','\\\"'}", "service":"assetiq"}%n</pattern>
             <charset>utf8</charset>
         </encoder>
     </appender>
@@ -29,32 +44,40 @@
 
     <!-- ── Sentry appender ─────────────────────────────────────────────────
          Forwards ERROR-level events to Sentry as issues.
-         INFO+ events are attached as breadcrumbs so you get full context.
-         The DSN is picked up automatically from sentry.dsn in application.properties.
+         INFO+ events are attached as breadcrumbs for full context.
     ──────────────────────────────────────────────────────────────────────── -->
     <appender name="SENTRY" class="io.sentry.logback.SentryAppender">
-        <!-- Only create Sentry issues for ERROR and above -->
         <minimumEventLevel>ERROR</minimumEventLevel>
-        <!-- Attach INFO+ log lines as breadcrumbs on every event -->
         <minimumBreadcrumbLevel>INFO</minimumBreadcrumbLevel>
     </appender>
 
-    <!-- ── Application logger ─────────────────────────────────────────────── -->
-    <logger name="com.assetiq" level="DEBUG" additivity="false">
-        <appender-ref ref="CONSOLE"/>
-        <appender-ref ref="FILE"/>
-        <appender-ref ref="SENTRY"/>
-    </logger>
+    <!-- ── Production profile: JSON console only ──────────────────────── -->
+    <springProfile name="prod">
+        <logger name="com.assetiq" level="INFO" additivity="false">
+            <appender-ref ref="CONSOLE_JSON"/>
+            <appender-ref ref="SENTRY"/>
+        </logger>
+        <root level="WARN">
+            <appender-ref ref="CONSOLE_JSON"/>
+            <appender-ref ref="SENTRY"/>
+        </root>
+    </springProfile>
 
-    <!-- ── Framework loggers ──────────────────────────────────────────────── -->
-    <logger name="org.springframework" level="INFO"/>
-    <logger name="org.springframework.security" level="WARN"/>
-    <logger name="org.hibernate" level="INFO"/>
+    <!-- ── Non-production profiles: plain text console + file ─────────── -->
+    <springProfile name="!prod">
+        <logger name="com.assetiq" level="DEBUG" additivity="false">
+            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="FILE"/>
+            <appender-ref ref="SENTRY"/>
+        </logger>
+        <logger name="org.springframework" level="INFO"/>
+        <logger name="org.springframework.security" level="WARN"/>
+        <logger name="org.hibernate" level="INFO"/>
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="FILE"/>
+            <appender-ref ref="SENTRY"/>
+        </root>
+    </springProfile>
 
-    <!-- ── Root logger ────────────────────────────────────────────────────── -->
-    <root level="INFO">
-        <appender-ref ref="CONSOLE"/>
-        <appender-ref ref="FILE"/>
-        <appender-ref ref="SENTRY"/>
-    </root>
 </configuration>

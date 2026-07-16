@@ -26,4 +26,11 @@ public interface CloudAssetRepository extends JpaRepository<CloudAsset, UUID> {
     @Query("SELECT c FROM CloudAsset c WHERE c.organisation = :org AND c.deletedAt IS NULL " +
            "ORDER BY c.monthlyCostEstimate DESC")
     List<CloudAsset> findTopByOrganisationOrderByCost(@Param("org") Organisation organisation, Pageable pageable);
+
+    /**
+     * Look up a cloud asset by its cloud-native resource ID, provider, and tenant.
+     * Used by the AWS sync to implement upsert (insert if not present, update if already known).
+     */
+    Optional<CloudAsset> findByResourceIdAndProviderAndOrganisationAndDeletedAtIsNull(
+            String resourceId, CloudProvider provider, Organisation organisation);
 }

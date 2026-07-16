@@ -19,7 +19,8 @@
     "clsx": "^2.1.1",
     "tailwind-merge": "^2.3.0",
     "resend": "^3.3.0",
-    "crypto": "^1.0.1"
+    "crypto": "^1.0.1",
+    "@sentry/nextjs": "^8.36.0"
   },
   "devDependencies": {
     "@types/node": "^20",

@@ -1,6 +1,7 @@
 package com.assetiq.controllers.v1;
 
 import com.assetiq.dto.*;
+import com.assetiq.security.WebhookReplayProtector;
 import com.assetiq.security.WebhookSignatureValidator;
 import com.assetiq.services.BillingService;
 import jakarta.validation.Valid;
@@ -21,10 +22,14 @@ public class BillingController {
 
     private final BillingService billingService;
     private final WebhookSignatureValidator webhookSignatureValidator;
+    private final WebhookReplayProtector webhookReplayProtector;
 
-    public BillingController(BillingService billingService, WebhookSignatureValidator webhookSignatureValidator) {
-        this.billingService = billingService;
-        this.webhookSignatureValidator = webhookSignatureValidator;
+    public BillingController(BillingService billingService,
+                             WebhookSignatureValidator webhookSignatureValidator,
+                             WebhookReplayProtector webhookReplayProtector) {
+        this.billingService             = billingService;
+        this.webhookSignatureValidator  = webhookSignatureValidator;
+        this.webhookReplayProtector     = webhookReplayProtector;
     }
 
     @GetMapping("/plans")
@@ -72,6 +77,12 @@ public class BillingController {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
         
+        // Step 3: Replay protection — reject already-seen event IDs
+        if (webhookReplayProtector.isReplay(payload)) {
+            log.info("[WEBHOOK] Duplicate event ignored (replay protection)");
+            return ResponseEntity.ok().build();  // 200 so Paystack stops retrying
+        }
+
         // Step 2: Signature is valid, process webhook
         try {
             billingService.handlePaystackWebhook(signature, payload);

@@ -47,8 +47,9 @@ springdoc:
 
 # ── Security ───────────────────────────────────────────────────────────────────
 app:
+  auth:
+    cookie-secure: ${APP_AUTH_COOKIE_SECURE:true}
   startup:
     # Prevent startup if the JWT secret is still the insecure default.
     skip-secret-validation: false
-
 

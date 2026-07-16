@@ -1,18 +1,21 @@
 /**
  * Integration tests — /api/checkout/verify
  *
- * Tests both the new-key and renewal paths, plus error cases.
- * All external dependencies are mocked via top-level vi.mock() (hoisted).
+ * Tests both the new-key and renewal paths, plus error cases. P1-5 adds
+ * the currency-parity check: the plan's currency must match what Paystack
+ * says it charged.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 import { GET } from "@/app/api/checkout/verify/route";
+import { createHmac } from "crypto";
 
 // ── Encode a signed-reference payload (mirrors production logic) ──────────────
 function encodeRef(data: object): string {
   const payload = Buffer.from(JSON.stringify(data)).toString("base64url");
-  return `${payload}.fakesig`;
+  const sig = createHmac("sha256", "dev-secret").update(payload).digest("hex").slice(0, 16);
+  return `${payload}.${sig}`;
 }
 
 function makeGetRequest(ref: string): NextRequest {
@@ -48,22 +51,24 @@ vi.mock("@/lib/email", () => ({
 
 // ── Shared fixture data ───────────────────────────────────────────────────────
 
-const FUTURE_EXPIRY = new Date(Date.now() + 365 * 86_400_000).toISOString();
+const FUTURE_EXPIRY = new Date(Date.now() + 30 * 86_400_000).toISOString();
 
 const SUCCESSFUL_TX = {
-  reference: "test-ref",
-  status:    "success",
-  amountKobo: 36_000_000,
-  email:     "cfo@acme.com",
-  metadata:  { orgName: "Acme Ltd", planId: "PROFESSIONAL" },
-  paidAt:    new Date().toISOString(),
+  reference:   "test-ref",
+  status:      "success",
+  amountMinor: 79_900,
+  currency:    "GHS",
+  email:       "cfo@kwabenya.com.gh",
+  metadata:    { orgName: "Kwabenya Depot Ltd", planId: "BUSINESS" },
+  channel:     "mobile_money",
+  paidAt:      new Date().toISOString(),
 };
 
 const ISSUED_KEY = {
   id:        "key-uuid-001",
   keyToken:  "eyJhbGciOiJSUzI1NiJ9.issued-token",
-  plan:      "PROFESSIONAL",
-  orgId:     "acme-ltd",
+  plan:      "BUSINESS",
+  orgId:     "kwabenya-depot",
   issuedAt:  new Date().toISOString(),
   expiresAt: FUTURE_EXPIRY,
 };
@@ -99,10 +104,13 @@ describe("GET /api/checkout/verify", () => {
     mockVerifyTransaction.mockResolvedValue({
       ...SUCCESSFUL_TX,
       status: "abandoned",
-      amountKobo: 0,
+      amountMinor: 0,
     });
     const ref = encodeRef({
-      email: "user@example.com", orgName: "Org", planId: "STARTER",
+      email: "user@example.com",
+      orgName: "Org",
+      planId: "BASIC",
+      currency: "GHS",
     });
     const res = await GET(makeGetRequest(ref));
     expect(res.status).toBe(402);
@@ -112,7 +120,9 @@ describe("GET /api/checkout/verify", () => {
 
   it("returns 400 for a ref that decodes to an unknown plan", async () => {
     const ref = encodeRef({
-      email: "x@y.com", orgName: "Org", planId: "NONEXISTENT",
+      email: "x@y.com",
+      orgName: "Org",
+      planId: "NONEXISTENT",
     });
     const res = await GET(makeGetRequest(ref));
     expect(res.status).toBe(400);
@@ -120,11 +130,28 @@ describe("GET /api/checkout/verify", () => {
     expect(body.error).toMatch(/unknown plan/i);
   });
 
+  it("returns 400 when the Paystack currency disagrees with the plan", async () => {
+    mockVerifyTransaction.mockResolvedValue({ ...SUCCESSFUL_TX, currency: "NGN" });
+    const ref = encodeRef({
+      email: "cfo@kwabenya.com.gh",
+      orgName: "Kwabenya Depot Ltd",
+      planId: "BUSINESS",
+      currency: "GHS",
+    });
+    const res = await GET(makeGetRequest(ref));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/currency/i);
+  });
+
   // ── New-key path ─────────────────────────────────────────────────────────
 
-  it("issues a key and returns success payload for a new PROFESSIONAL purchase", async () => {
+  it("issues a key and returns success payload for a new BUSINESS purchase", async () => {
     const ref = encodeRef({
-      email: "cfo@acme.com", orgName: "Acme Ltd", planId: "PROFESSIONAL",
+      email: "cfo@kwabenya.com.gh",
+      orgName: "Kwabenya Depot Ltd",
+      planId: "BUSINESS",
+      currency: "GHS",
     });
     const res = await GET(makeGetRequest(ref));
     expect(res.status).toBe(200);
@@ -133,9 +160,9 @@ describe("GET /api/checkout/verify", () => {
     expect(body.success).toBe(true);
     expect(body.renewed).toBe(false);
     expect(body.key.token).toBe(ISSUED_KEY.keyToken);
-    expect(body.key.plan).toBe("Professional");
-    expect(body.email).toBe("cfo@acme.com");
-    expect(body.orgName).toBe("Acme Ltd");
+    expect(body.key.plan).toBe("Business");
+    expect(body.email).toBe("cfo@kwabenya.com.gh");
+    expect(body.orgName).toBe("Kwabenya Depot Ltd");
 
     expect(mockIssueKey).toHaveBeenCalledOnce();
     expect(mockRenewKey).not.toHaveBeenCalled();
@@ -143,16 +170,19 @@ describe("GET /api/checkout/verify", () => {
 
   it("calls issueKey with the correct plan and orgId derived from email", async () => {
     const ref = encodeRef({
-      email: "admin@startup.io", orgName: "Startup Inc", planId: "STARTER",
+      email: "admin@startup.gh",
+      orgName: "Accra Startup Inc",
+      planId: "BASIC",
+      currency: "GHS",
     });
     await GET(makeGetRequest(ref));
 
     expect(mockIssueKey).toHaveBeenCalledWith(
       expect.objectContaining({
-        plan:     "STARTER",
-        orgEmail: "admin@startup.io",
-        orgName:  "Startup Inc",
-        orgId:    "admin-startup-io",
+        plan:     "BASIC",
+        orgEmail: "admin@startup.gh",
+        orgName:  "Accra Startup Inc",
+        orgId:    "admin-startup-gh",
       }),
     );
   });
@@ -161,11 +191,12 @@ describe("GET /api/checkout/verify", () => {
 
   it("calls renewKey (not issueKey) when intent=renew is in the reference", async () => {
     const ref = encodeRef({
-      email:   "cfo@acme.com",
-      orgName: "Acme Ltd",
-      planId:  "PROFESSIONAL",
-      intent:  "renew",
-      keyId:   "key-uuid-001",
+      email:    "cfo@kwabenya.com.gh",
+      orgName:  "Kwabenya Depot Ltd",
+      planId:   "BUSINESS",
+      intent:   "renew",
+      keyId:    "key-uuid-001",
+      currency: "GHS",
     });
     const res = await GET(makeGetRequest(ref));
     expect(res.status).toBe(200);
@@ -176,17 +207,18 @@ describe("GET /api/checkout/verify", () => {
     expect(body.key.token).toBe(RENEWED_KEY.keyToken);
 
     expect(mockRenewKey).toHaveBeenCalledOnce();
-    expect(mockRenewKey).toHaveBeenCalledWith("key-uuid-001", 365);
+    expect(mockRenewKey).toHaveBeenCalledWith("key-uuid-001", 30);
     expect(mockIssueKey).not.toHaveBeenCalled();
   });
 
   it("falls back to issueKey when intent=renew but keyId is missing", async () => {
     // intent=renew without keyId → treated as new key (defensive)
     const ref = encodeRef({
-      email:   "cfo@acme.com",
-      orgName: "Acme Ltd",
-      planId:  "PROFESSIONAL",
-      intent:  "renew",
+      email:    "cfo@kwabenya.com.gh",
+      orgName:  "Kwabenya Depot Ltd",
+      planId:   "BUSINESS",
+      intent:   "renew",
+      currency: "GHS",
       // keyId intentionally omitted
     });
     const res = await GET(makeGetRequest(ref));

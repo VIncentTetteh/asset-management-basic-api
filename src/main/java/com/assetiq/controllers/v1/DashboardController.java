@@ -1,7 +1,11 @@
 package com.assetiq.controllers.v1;
 
+import com.assetiq.models.Organisation;
+import com.assetiq.multitenancy.TenantContext;
+import com.assetiq.repositories.OrganisationRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
@@ -18,9 +22,12 @@ import java.util.*;
 public class DashboardController {
 
     private final com.assetiq.services.DashboardService dashboardService;
+    private final OrganisationRepository organisationRepository;
 
-    public DashboardController(com.assetiq.services.DashboardService dashboardService) {
+    public DashboardController(com.assetiq.services.DashboardService dashboardService,
+                                OrganisationRepository organisationRepository) {
         this.dashboardService = dashboardService;
+        this.organisationRepository = organisationRepository;
     }
 
     /**
@@ -29,8 +36,8 @@ public class DashboardController {
      */
     @GetMapping("/summary")
     @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','VIEW_REPORTS','VIEW_ASSETS','GENERATE_REPORTS')")
-    public ResponseEntity<?> getDashboardSummary(com.assetiq.models.Organisation org) {
-        return ResponseEntity.ok(dashboardService.getSummary(org));
+    public ResponseEntity<?> getDashboardSummary() {
+        return ResponseEntity.ok(dashboardService.getSummary(requireOrg()));
     }
 
     /**
@@ -39,8 +46,8 @@ public class DashboardController {
      */
     @GetMapping("/assets-by-status")
     @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_USER','ROLE_ADMIN')")
-    public ResponseEntity<?> getAssetsByStatus(com.assetiq.models.Organisation org) {
-        return ResponseEntity.ok(dashboardService.getAssetsByStatus(org));
+    public ResponseEntity<?> getAssetsByStatus() {
+        return ResponseEntity.ok(dashboardService.getAssetsByStatus(requireOrg()));
     }
 
     /**
@@ -49,8 +56,8 @@ public class DashboardController {
      */
     @GetMapping("/assets-by-department")
     @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_USER','ROLE_ADMIN')")
-    public ResponseEntity<?> getAssetsByDepartment(com.assetiq.models.Organisation org) {
-        return ResponseEntity.ok(dashboardService.getAssetsByDepartment(org));
+    public ResponseEntity<?> getAssetsByDepartment() {
+        return ResponseEntity.ok(dashboardService.getAssetsByDepartment(requireOrg()));
     }
 
     /**
@@ -59,8 +66,8 @@ public class DashboardController {
      */
     @GetMapping("/maintenance-alerts")
     @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','VIEW_MAINTENANCE','SCHEDULE_MAINTENANCE','VIEW_REPORTS')")
-    public ResponseEntity<?> getMaintenanceAlerts(com.assetiq.models.Organisation org) {
-        return ResponseEntity.ok(dashboardService.getMaintenanceAlerts(org));
+    public ResponseEntity<?> getMaintenanceAlerts() {
+        return ResponseEntity.ok(dashboardService.getMaintenanceAlerts(requireOrg()));
     }
 
     /**
@@ -69,8 +76,16 @@ public class DashboardController {
      */
     @GetMapping("/depreciation-summary")
     @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','VIEW_REPORTS','VIEW_BUDGETS','VIEW_TCO')")
-    public ResponseEntity<?> getDepreciationSummary(com.assetiq.models.Organisation org) {
-        return ResponseEntity.ok(dashboardService.getDepreciationSummary(org));
+    public ResponseEntity<?> getDepreciationSummary() {
+        return ResponseEntity.ok(dashboardService.getDepreciationSummary(requireOrg()));
+    }
+
+    private Organisation requireOrg() {
+        if (!TenantContext.hasOrganisationId()) {
+            throw new AccessDeniedException("Tenant context is required.");
+        }
+        return organisationRepository.findByIdAndDeletedAtIsNull(TenantContext.getOrganisationId())
+                .orElseThrow(() -> new AccessDeniedException("Organisation not found."));
     }
 
     private Map<String, Object> createChartData(String name, int count, double value, double percentage) {

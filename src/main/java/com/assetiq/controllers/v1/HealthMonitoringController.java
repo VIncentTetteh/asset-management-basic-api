@@ -33,7 +33,6 @@ public class HealthMonitoringController {
     @GetMapping("/health")
     public ResponseEntity<?> getHealth() {
         Map<String, Object> db = dbHealth(false);
-        Map<String, Object> jvm = jvmSummary();
 
         String overallStatus = "UP".equals(db.get("status")) ? "UP" : "DEGRADED";
 
@@ -43,8 +42,7 @@ public class HealthMonitoringController {
         response.put("uptime", uptimeString());
 
         Map<String, Object> components = new LinkedHashMap<>();
-        components.put("database", db);
-        components.put("jvm", jvm);
+        components.put("database", Map.of("status", db.get("status")));
         response.put("components", components);
 
         return ResponseEntity.ok(response);
@@ -167,18 +165,19 @@ public class HealthMonitoringController {
             boolean valid = conn.isValid(3);
             long elapsed = System.currentTimeMillis() - start;
             db.put("status", valid ? "UP" : "DOWN");
-            db.put("responseTimeMs", elapsed);
             if (detailed) {
+                db.put("responseTimeMs", elapsed);
                 db.put("driverName", conn.getMetaData().getDriverName());
                 db.put("driverVersion", conn.getMetaData().getDriverVersion());
                 db.put("databaseProductName", conn.getMetaData().getDatabaseProductName());
                 db.put("databaseProductVersion", conn.getMetaData().getDatabaseProductVersion());
-                db.put("url", conn.getMetaData().getURL());
             }
         } catch (Exception e) {
             log.warn("DB health check failed: {}", e.getMessage());
             db.put("status", "DOWN");
-            db.put("error", e.getMessage());
+            if (detailed) {
+                db.put("error", e.getMessage());
+            }
         }
         return db;
     }

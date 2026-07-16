@@ -23,7 +23,7 @@ public class PurchaseOrder extends BaseEntity {
     @Column(precision = 15, scale = 2, nullable = false)
     private BigDecimal totalAmount;
 
-    private String currency = "USD";
+    private String currency = "GHS";
 
     @Enumerated(EnumType.STRING)
     @Column(length = 20)

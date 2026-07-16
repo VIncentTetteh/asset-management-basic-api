@@ -35,6 +35,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.security.InvalidKeyException;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 import java.util.Base64;
@@ -44,6 +45,11 @@ import java.util.Base64;
 public class AuthController {
 
     private static final Logger log = LoggerFactory.getLogger(AuthController.class);
+
+    /** Lock account after this many consecutive failed password attempts. */
+    private static final int MAX_FAILED_LOGIN_ATTEMPTS = 10;
+    /** How long to lock the account once the threshold is reached. */
+    private static final Duration LOCKOUT_DURATION = Duration.ofMinutes(15);
 
     private final UserRepository userRepository;
     private final OrganisationRepository organisationRepository;
@@ -62,6 +68,11 @@ public class AuthController {
 
     @Value("${app.email.base-url:http://localhost:3000}")
     private String emailBaseUrl;
+
+    // Secure-by-default: only ever relaxed via an explicit profile override
+    // (application-dev.yml sets this to false for plain-HTTP localhost dev).
+    @Value("${app.auth.cookie-secure:true}")
+    private boolean authCookieSecure;
 
     public AuthController(UserRepository userRepository, OrganisationRepository organisationRepository,
             RoleRepository roleRepository, PasswordEncoder passwordEncoder, JwtUtil jwtUtil,
@@ -170,8 +181,25 @@ public class AuthController {
             user = matches.get(0);
         }
 
+        // ── Account lockout check ─────────────────────────────────────────────
+        if (user.isLockedOut()) {
+            log.warn("[AUTH] Login rejected — account locked until {} for user {}", user.getLockedUntil(), user.getId());
+            return ResponseEntity.status(HttpStatus.LOCKED)
+                    .body(Map.of("error",
+                            "Account temporarily locked due to too many failed attempts. " +
+                            "Try again after " + user.getLockedUntil()));
+        }
+
         // Verify password
         if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
+            // Increment failure counter and lock if threshold reached
+            int attempts = user.getFailedLoginAttempts() + 1;
+            user.setFailedLoginAttempts(attempts);
+            if (attempts >= MAX_FAILED_LOGIN_ATTEMPTS) {
+                user.setLockedUntil(Instant.now().plus(LOCKOUT_DURATION));
+                log.warn("[AUTH] Account locked for user {} after {} failed attempts", user.getId(), attempts);
+            }
+            userRepository.save(user);
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("error", "Invalid email or password"));
         }
@@ -200,6 +228,10 @@ public class AuthController {
                             "mfaRequired", true,
                             "mfaChallengeToken", challengeToken));
         }
+
+        // Reset brute-force counters on successful login
+        user.setFailedLoginAttempts(0);
+        user.setLockedUntil(null);
 
         // Update last login timestamp
         user.setLastLoginAt(Instant.now());
@@ -253,9 +285,10 @@ public class AuthController {
     @PostMapping("/refresh")
     public ResponseEntity<?> refreshToken(
             @RequestHeader(value = "Authorization", required = false) String authHeader,
+            @CookieValue(value = AUTH_COOKIE_NAME, required = false) String authCookie,
             HttpServletResponse servletResponse) {
         // Accept token from Bearer header OR from the HttpOnly cookie (F-1)
-        String token = resolveToken(authHeader);
+        String token = resolveToken(authHeader, authCookie);
         if (token == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("error", "Missing or invalid authorization"));
@@ -394,9 +427,10 @@ public class AuthController {
      */
     @GetMapping("/profile")
     public ResponseEntity<?> getProfile(
-            @RequestHeader(value = "Authorization", required = false) String authHeader) {
+            @RequestHeader(value = "Authorization", required = false) String authHeader,
+            @CookieValue(value = AUTH_COOKIE_NAME, required = false) String authCookie) {
         // F-1: accept token from Bearer header OR HttpOnly cookie
-        String token = resolveToken(authHeader);
+        String token = resolveToken(authHeader, authCookie);
         if (token == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("error", "Missing or invalid authorization"));
@@ -438,9 +472,10 @@ public class AuthController {
      */
     @GetMapping("/me/permissions")
     public ResponseEntity<?> getMyPermissions(
-            @RequestHeader(value = "Authorization", required = false) String authHeader) {
+            @RequestHeader(value = "Authorization", required = false) String authHeader,
+            @CookieValue(value = AUTH_COOKIE_NAME, required = false) String authCookie) {
         // F-1: accept token from Bearer header OR HttpOnly cookie
-        String token = resolveToken(authHeader);
+        String token = resolveToken(authHeader, authCookie);
         if (token == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("error", "Missing or invalid authorization"));
@@ -464,9 +499,10 @@ public class AuthController {
     @PostMapping("/logout")
     public ResponseEntity<?> logout(
             @RequestHeader(value = "Authorization", required = false) String authHeader,
+            @CookieValue(value = AUTH_COOKIE_NAME, required = false) String authCookie,
             HttpServletResponse servletResponse) {
         // F-1: resolve token from Bearer header OR cookie, then blacklist it
-        String token = resolveToken(authHeader);
+        String token = resolveToken(authHeader, authCookie);
         if (token != null) {
             try {
                 java.util.Date expiry = jwtUtil.getExpiration(token);
@@ -645,10 +681,10 @@ public class AuthController {
      * Browser clients use this cookie automatically; API/desktop clients continue
      * to use the Authorization: Bearer header.
      */
-    private static void setAuthCookie(HttpServletResponse response, String token, long maxAgeSeconds) {
+    private void setAuthCookie(HttpServletResponse response, String token, long maxAgeSeconds) {
         ResponseCookie cookie = ResponseCookie.from(AUTH_COOKIE_NAME, token)
                 .httpOnly(true)
-                .secure(true)          // HTTPS only — relaxed in dev via application.yml if needed
+                .secure(authCookieSecure)
                 .sameSite("Strict")    // CSRF protection
                 .path("/api")          // Only sent to API paths
                 .maxAge(maxAgeSeconds)
@@ -657,10 +693,10 @@ public class AuthController {
     }
 
     /** Clears the auth cookie on logout. */
-    private static void clearAuthCookie(HttpServletResponse response) {
+    private void clearAuthCookie(HttpServletResponse response) {
         ResponseCookie clear = ResponseCookie.from(AUTH_COOKIE_NAME, "")
                 .httpOnly(true)
-                .secure(true)
+                .secure(authCookieSecure)
                 .sameSite("Strict")
                 .path("/api")
                 .maxAge(0)
@@ -669,13 +705,16 @@ public class AuthController {
     }
 
     /**
-     * Resolves the JWT from the Authorization: Bearer header.
-     * Cookie extraction is handled in {@link com.assetiq.security.JwtAuthenticationFilter};
-     * this method only handles header-based resolution used by profile/refresh/logout.
+     * Resolves the JWT from either the Authorization: Bearer header or the
+     * HttpOnly browser cookie. Header wins so API clients and the Electron main
+     * process can override a stale browser cookie during development.
      */
-    private static String resolveToken(String authHeader) {
+    private static String resolveToken(String authHeader, String authCookie) {
         if (authHeader != null && authHeader.startsWith("Bearer ")) {
             return authHeader.substring(7).trim();
+        }
+        if (authCookie != null && !authCookie.isBlank()) {
+            return authCookie.trim();
         }
         return null;
     }

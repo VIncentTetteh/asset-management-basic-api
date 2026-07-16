@@ -1,0 +1,68 @@
+# P0-4: Continuous integration for the AssetIQ customer portal (Next.js).
+#
+# Runs lint, TypeScript typecheck, unit tests (Vitest), and a production build
+# on every PR. Red pipelines block merges.
+name: Customer Portal CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "assetiq-customer-portal/**"
+      - ".github/workflows/customer-portal-ci.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "assetiq-customer-portal/**"
+  workflow_dispatch:
+
+concurrency:
+  group: portal-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: assetiq-customer-portal
+
+jobs:
+  verify:
+    name: Lint, typecheck, test, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # Marketing site talks to the license server — stub the URL for CI.
+      LICENSE_SERVER_URL: http://localhost:8090
+      NEXT_TELEMETRY_DISABLED: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: assetiq-customer-portal/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint -- --max-warnings=0
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests (Vitest)
+        run: npm test -- --reporter=default --coverage
+
+      - name: Build (next build)
+        run: npm run build
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: portal-coverage
+          path: assetiq-customer-portal/coverage/**
+          if-no-files-found: ignore

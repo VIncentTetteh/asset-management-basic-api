@@ -11,6 +11,9 @@ Generated from backend source code plus the live Spring-generated OpenAPI surfac
 - [GET /api/v1/auth/sso/oauth2/callback](#get-api-v1-auth-sso-oauth2-callback)
 - [POST /api/v1/auth/sso/saml/acs](#post-api-v1-auth-sso-saml-acs)
 - [GET /api/v1/auth/sso/saml/initiate](#get-api-v1-auth-sso-saml-initiate)
+- [GET /api/v1/auth/sso/config/{orgId}](#get-api-v1-auth-sso-config-orgid)
+- [GET /api/v1/auth/sso/initiate](#get-api-v1-auth-sso-initiate)
+- [GET /api/v1/auth/sso/callback](#get-api-v1-auth-sso-callback)
 - [Authentication Service](#authentication-service)
 - [POST /api/v1/auth/forgot-password](#post-api-v1-auth-forgot-password)
 - [POST /api/v1/auth/login](#post-api-v1-auth-login)
@@ -159,6 +162,8 @@ Generated from backend source code plus the live Spring-generated OpenAPI surfac
 - [GET /api/v1/cloud-assets/{id}](#get-api-v1-cloud-assets-id)
 - [PUT /api/v1/cloud-assets/{id}](#put-api-v1-cloud-assets-id)
 - [POST /api/v1/cloud-assets/{id}/cost](#post-api-v1-cloud-assets-id-cost)
+- [POST /api/v1/cloud-assets/sync](#post-api-v1-cloud-assets-sync)
+- [POST /api/v1/cloud-assets/sync/all](#post-api-v1-cloud-assets-sync-all)
 - [Software License Service](#software-license-service)
 - [GET /api/v1/licenses](#get-api-v1-licenses)
 - [POST /api/v1/licenses](#post-api-v1-licenses)
@@ -209,6 +214,12 @@ Generated from backend source code plus the live Spring-generated OpenAPI surfac
 - [PATCH /api/v1/disposals/{id}](#patch-api-v1-disposals-id)
 - [PUT /api/v1/disposals/{id}](#put-api-v1-disposals-id)
 - **Governance**
+- **Compliance**
+- [BOG Compliance Service](#bog-compliance-service)
+- [GET /api/v1/compliance/bog/report](#get-api-v1-compliance-bog-report)
+- [GET /api/v1/compliance/bog/report/pdf](#get-api-v1-compliance-bog-report-pdf)
+- [POST /api/v1/compliance/bog/controls](#post-api-v1-compliance-bog-controls)
+- [PATCH /api/v1/compliance/bog/controls/{id}/status](#patch-api-v1-compliance-bog-controls-id-status)
 - [Compliance Service](#compliance-service)
 - [GET /api/v1/compliance/bog-controls](#get-api-v1-compliance-bog-controls)
 - [POST /api/v1/compliance/bog-controls](#post-api-v1-compliance-bog-controls)
@@ -783,6 +794,13 @@ Enum values:
 
 Error responses:
 
+- **423 Locked** — account is temporarily locked after too many failed attempts
+
+```json
+{
+  "error": "Account temporarily locked due to too many failed attempts. Try again after 2025-01-01T00:15:00Z"
+}
+```
 - **429** (Servlet error; body is not stable JSON)
 - **500** (Shared internal envelope)
 
@@ -801,6 +819,116 @@ Call dependencies:
 - An admin must configure and enable SSO first with `/api/v1/organisations/{orgId}/sso/*`.
 
 Source reference: `src/main/java/com/example/demo/controllers/v1/SsoAuthController.java`
+
+
+---
+
+### GET /api/v1/auth/sso/config/{orgId}
+
+User type: **Guest**
+
+Description: Returns the SSO configuration for an organisation. The login page calls this to decide whether to show an SSO button and which provider label to display.
+
+Authentication & headers:
+
+- Auth mechanism: No JWT required.
+- `Accept` (recommended): application/json
+- `X-Request-ID` (optional): Request correlation id echoed back by the API.
+
+Path parameters:
+
+| Parameter | Type | Notes |
+| --- | --- | --- |
+| orgId | string (uuid) | Organisation ID |
+
+Response payload: success returns **HTTP 200**.
+
+```json
+{
+  "provider": "GOOGLE",
+  "enabled": true,
+  "loginUrl": "https://app.assetiq.io/api/v1/auth/sso/initiate?orgId=...&provider=GOOGLE"
+}
+```
+
+Error responses:
+
+- **404** — organisation not found or SSO not configured
+
+Source reference: `src/main/java/com/assetiq/controllers/v1/SsoController.java`
+
+---
+
+### GET /api/v1/auth/sso/initiate
+
+User type: **Guest**
+
+Description: Redirects the user's browser to the IdP authorization endpoint. The frontend should navigate (not fetch) to this URL.
+
+Authentication & headers:
+
+- Auth mechanism: No JWT required.
+
+Query parameters:
+
+| Parameter | Type | Required | Notes |
+| --- | --- | --- | --- |
+| orgId | string (uuid) | yes | Organisation whose IdP to use |
+| provider | string | yes | `GOOGLE`, `MICROSOFT`, `OKTA`, `GENERIC_OIDC` |
+
+Response: **HTTP 302 Redirect** to the IdP authorization URL. No JSON body.
+
+Error responses:
+
+- **400** — missing `orgId` or `provider`
+- **404** — organisation or SSO config not found
+- **501** — OIDC discovery document could not be fetched
+
+Source reference: `src/main/java/com/assetiq/controllers/v1/SsoController.java`
+
+---
+
+### GET /api/v1/auth/sso/callback
+
+User type: **Guest** (IdP-facing redirect target)
+
+Description: OIDC authorization code callback. The IdP redirects the user here after successful authentication. The server exchanges the code for tokens, provisions the user if needed, and returns a JWT.
+
+Authentication & headers:
+
+- Auth mechanism: No JWT required — validated via `state` nonce stored in Redis.
+
+Query parameters:
+
+| Parameter | Type | Required | Notes |
+| --- | --- | --- | --- |
+| code | string | yes | Authorization code from IdP |
+| state | string | yes | CSRF nonce issued by `/initiate`, valid for 10 minutes |
+
+Response payload: success returns **HTTP 200** — same shape as `POST /auth/login`.
+
+```json
+{
+  "token": "eyJhbGci...",
+  "user": {
+    "id": "11111111-1111-1111-1111-111111111111",
+    "email": "jane@example.com",
+    "firstName": "Jane",
+    "lastName": "Mensah",
+    "role": "USER"
+  },
+  "expiresIn": 86400000
+}
+```
+
+Error responses:
+
+- **400** — missing or expired `state` nonce
+- **401** — code exchange failed or IdP returned an error
+- **500** — token exchange or user provisioning error
+
+Source reference: `src/main/java/com/assetiq/controllers/v1/SsoController.java`
+
 
 ## Authentication Service
 
@@ -15417,6 +15545,113 @@ Call dependencies:
 
 Source reference: `src/main/java/com/example/demo/controllers/v1/CloudAssetController.java`
 
+
+---
+
+### POST /api/v1/cloud-assets/sync
+
+User type: **Org admin or system admin**
+
+Description: Triggers an immediate cloud asset discovery scan for a single provider. Discovered assets are upserted into the database. Runs **synchronously** — the response is returned only after the scan completes. Allow up to 30 seconds for large accounts.
+
+Authentication & headers:
+
+- Auth mechanism: JWT bearer auth. Required authority: `ROLE_ADMIN`, `ROLE_ORG_ADMIN`, or `MANAGE_CLOUD_ASSETS`.
+- `Authorization` (required): Bearer <jwt>
+- `X-Organisation-Id` (recommended): Tenant context header.
+- `Content-Type` (required): application/json
+
+Request payload:
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| provider | string | yes | `AWS`, `AZURE`, or `GCP` |
+| regions | array of strings | no | Provider-specific region codes. Omit to use the configured default region. |
+
+```json
+{
+  "provider": "AWS",
+  "regions": ["us-east-1", "eu-west-1"]
+}
+```
+
+Response payload: success returns **HTTP 200**.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| status | string | Always `completed` on success |
+| provider | string | The provider that was scanned |
+| assetsUpserted | integer | Number of assets created or updated |
+| message | string | Human-readable summary |
+
+```json
+{
+  "status": "completed",
+  "provider": "AWS",
+  "assetsUpserted": 42,
+  "message": "AWS asset sync completed. 42 asset(s) upserted."
+}
+```
+
+Error responses:
+
+- **400** — missing or invalid `provider` field
+
+```json
+{
+  "status": "error",
+  "message": "Unknown provider 'XYZ'. Valid values: AWS, AZURE, GCP."
+}
+```
+- **401** — not authenticated
+- **403** — insufficient authority
+
+Source reference: `src/main/java/com/assetiq/controllers/v1/CloudAssetController.java`
+
+---
+
+### POST /api/v1/cloud-assets/sync/all
+
+User type: **Org admin or system admin**
+
+Description: Triggers asset discovery across **all configured cloud providers** simultaneously. Only providers with credentials present in the environment are scanned. Returns the total count of upserted assets across all providers.
+
+Authentication & headers:
+
+- Auth mechanism: JWT bearer auth. Required authority: `ROLE_ADMIN`, `ROLE_ORG_ADMIN`, or `MANAGE_CLOUD_ASSETS`.
+- `Authorization` (required): Bearer <jwt>
+- `X-Organisation-Id` (recommended): Tenant context header.
+- `Content-Type` (required): application/json
+
+Request payload (optional):
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| regions | array of strings | no | Region codes forwarded to all providers. Each provider interprets them per its own API. Omit to use provider defaults. |
+
+```json
+{
+  "regions": ["us-east-1", "europe-west1"]
+}
+```
+
+Response payload: success returns **HTTP 200**.
+
+```json
+{
+  "status": "completed",
+  "assetsUpserted": 130,
+  "message": "Multi-cloud sync completed. 130 total asset(s) upserted."
+}
+```
+
+Error responses:
+
+- **401** — not authenticated
+- **403** — insufficient authority
+
+Source reference: `src/main/java/com/assetiq/controllers/v1/CloudAssetController.java`
+
 ## Software License Service
 
 Stage: **Asset Lifecycle**
@@ -20273,6 +20508,220 @@ Call dependencies:
 - Resolve `organisationId` before submitting the payload.
 
 Source reference: `src/main/java/com/example/demo/controllers/v1/DisposalController.java`
+
+## BOG Compliance Service
+
+Stage: **Governance / Regulatory**
+
+Manages Bank of Ghana (BOG) ICT Security Directive compliance controls and generates structured reports with per-domain RAG status breakdowns.
+
+Base path: `/api/v1/compliance/bog`
+
+**Control status values:** `NOT_IMPLEMENTED` · `PARTIAL` · `IMPLEMENTED` · `NOT_APPLICABLE`
+
+**RAG thresholds:** ≥ 80% → `COMPLIANT` · ≥ 50% → `PARTIALLY_COMPLIANT` · < 50% → `NON_COMPLIANT`
+
+---
+
+### GET /api/v1/compliance/bog/report
+
+User type: **Org admin or system admin**
+
+Description: Returns the full BOG ICT Directive compliance report for the current tenant as JSON. Includes overall summary stats, per-domain breakdowns, and a sorted list of open gaps with remediation details.
+
+Authentication & headers:
+
+- Auth mechanism: JWT bearer auth. Required authority: `ROLE_ADMIN`, `ROLE_ORG_ADMIN`, `VIEW_REPORTS`, or `MANAGE_COMPLIANCE`.
+- `Authorization` (required): Bearer <jwt>
+- `X-Organisation-Id` (recommended): Tenant context header.
+
+Response payload: success returns **HTTP 200**.
+
+```json
+{
+  "reportType": "BOG_ICT_DIRECTIVE",
+  "organisationId": "11111111-1111-1111-1111-111111111111",
+  "organisationName": "First Bank GH",
+  "generatedAt": "2025-04-25T10:00:00Z",
+  "summary": {
+    "totalControls": 48,
+    "implemented": 30,
+    "partial": 8,
+    "notImplemented": 7,
+    "notApplicable": 3,
+    "compliancePercent": 75.0,
+    "overallStatus": "PARTIALLY_COMPLIANT"
+  },
+  "domains": [
+    {
+      "domain": "ICT",
+      "totalControls": 12,
+      "implemented": 10,
+      "partial": 1,
+      "notImplemented": 1,
+      "notApplicable": 0,
+      "compliancePercent": 87.5,
+      "status": "COMPLIANT"
+    }
+  ],
+  "openGaps": [
+    {
+      "directiveRef": "ICT.4.2",
+      "requirement": "Implement endpoint detection and response on all devices",
+      "status": "PARTIAL",
+      "gapDescription": "EDR deployed on 60% of endpoints",
+      "remediationPlan": "Complete rollout by Q3 2025",
+      "targetDate": "2025-09-30T00:00:00Z",
+      "evidenceUrl": "https://docs.internal/edr-rollout",
+      "owner": "Kwame Asante"
+    }
+  ]
+}
+```
+
+Error responses:
+
+- **401** — not authenticated
+- **403** — insufficient authority
+
+Source reference: `src/main/java/com/assetiq/controllers/v1/compliance/BogComplianceController.java`
+
+---
+
+### GET /api/v1/compliance/bog/report/pdf
+
+User type: **Org admin or system admin**
+
+Description: Returns the BOG ICT Directive compliance report as a downloadable PDF file. Set `responseType: 'blob'` in your HTTP client.
+
+Authentication & headers:
+
+- Auth mechanism: JWT bearer auth. Required authority: `ROLE_ADMIN`, `ROLE_ORG_ADMIN`, `VIEW_REPORTS`, or `MANAGE_COMPLIANCE`.
+- `Authorization` (required): Bearer <jwt>
+- `X-Organisation-Id` (recommended): Tenant context header.
+- `Accept` (recommended): `application/pdf`
+
+Response: **HTTP 200** — binary PDF stream.
+
+| Header | Value |
+| --- | --- |
+| `Content-Type` | `application/pdf` |
+| `Content-Disposition` | `attachment; filename="bog-compliance-report.pdf"` |
+
+Error responses:
+
+- **401** — not authenticated
+- **403** — insufficient authority
+- **500** — PDF generation failure
+
+Source reference: `src/main/java/com/assetiq/controllers/v1/compliance/BogComplianceController.java`
+
+---
+
+### POST /api/v1/compliance/bog/controls
+
+User type: **Org admin or system admin**
+
+Description: Creates or updates (upserts) a BOG control by `directiveRef`. If a control with the same `directiveRef` already exists for the organisation it is updated; otherwise a new record is created.
+
+Authentication & headers:
+
+- Auth mechanism: JWT bearer auth. Required authority: `ROLE_ADMIN`, `ROLE_ORG_ADMIN`, or `MANAGE_COMPLIANCE`.
+- `Authorization` (required): Bearer <jwt>
+- `X-Organisation-Id` (recommended): Tenant context header.
+- `Content-Type` (required): application/json
+
+Request payload:
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| directiveRef | string | yes | BOG directive reference, e.g. `ICT.4.2`. Used as upsert key. |
+| requirement | string | no | Text description of the requirement |
+| status | string | no | One of `NOT_IMPLEMENTED`, `PARTIAL`, `IMPLEMENTED`, `NOT_APPLICABLE` |
+| gapDescription | string | no | Description of the current compliance gap |
+| remediationPlan | string | no | Planned steps to close the gap |
+| targetDate | string (ISO 8601) | no | Target remediation date, e.g. `2025-09-30T00:00:00Z` |
+| evidenceUrl | string | no | URL to supporting evidence or documentation |
+
+```json
+{
+  "directiveRef": "ICT.4.2",
+  "requirement": "Implement endpoint detection and response on all devices",
+  "status": "PARTIAL",
+  "gapDescription": "EDR deployed on 60% of endpoints",
+  "remediationPlan": "Complete rollout by Q3 2025",
+  "targetDate": "2025-09-30T00:00:00Z",
+  "evidenceUrl": "https://docs.internal/edr-rollout"
+}
+```
+
+Response payload: success returns **HTTP 200**.
+
+```json
+{
+  "id": "11111111-1111-1111-1111-111111111111",
+  "directiveRef": "ICT.4.2",
+  "status": "PARTIAL"
+}
+```
+
+Error responses:
+
+- **400** — `directiveRef` is missing or blank
+- **400** — invalid `status` value
+- **401** — not authenticated
+- **403** — insufficient authority
+
+Source reference: `src/main/java/com/assetiq/controllers/v1/compliance/BogComplianceController.java`
+
+---
+
+### PATCH /api/v1/compliance/bog/controls/{id}/status
+
+User type: **Org admin or system admin**
+
+Description: Updates only the status of an existing BOG control. Lighter-weight alternative to the full upsert when only the status needs to change.
+
+Authentication & headers:
+
+- Auth mechanism: JWT bearer auth. Required authority: `ROLE_ADMIN`, `ROLE_ORG_ADMIN`, or `MANAGE_COMPLIANCE`.
+- `Authorization` (required): Bearer <jwt>
+- `X-Organisation-Id` (recommended): Tenant context header.
+- `Content-Type` (required): application/json
+
+Path parameters:
+
+| Parameter | Type | Notes |
+| --- | --- | --- |
+| id | string (uuid) | Control ID from the report or upsert response |
+
+Request payload:
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| status | string | yes | One of `NOT_IMPLEMENTED`, `PARTIAL`, `IMPLEMENTED`, `NOT_APPLICABLE` |
+
+```json
+{ "status": "IMPLEMENTED" }
+```
+
+Response payload: success returns **HTTP 200**.
+
+```json
+{
+  "id": "11111111-1111-1111-1111-111111111111",
+  "status": "IMPLEMENTED"
+}
+```
+
+Error responses:
+
+- **400** — `status` field missing or invalid value
+- **401** — not authenticated
+- **403** — insufficient authority
+- **404** — control not found for this organisation
+
+Source reference: `src/main/java/com/assetiq/controllers/v1/compliance/BogComplianceController.java`
 
 ## Compliance Service
 
@@ -31242,7 +31691,7 @@ Response payload: success returns **HTTP 200**.
 
 Enum values:
 
-- response `plan.tier`: `FREEMIUM` = Freemium., `BASIC` = Basic., `PREMIUM` = Premium.
+- response `plan.tier`: `FREEMIUM` = Freemium., `BASIC` = Basic., `BUSINESS` = Business., `ENTERPRISE` = Enterprise.
 - response `plan.interval`: `MONTHLY` = Monthly., `ANNUALLY` = Annually.
 - response `status`: `ACTIVE` = Active., `PAST_DUE` = Past due., `CANCELED` = Canceled., `EXPIRED` = Expired.
 
@@ -31334,7 +31783,7 @@ Response payload: success returns **HTTP 200**.
 
 Enum values:
 
-- response `[].tier`: `FREEMIUM` = Freemium., `BASIC` = Basic., `PREMIUM` = Premium.
+- response `[].tier`: `FREEMIUM` = Freemium., `BASIC` = Basic., `BUSINESS` = Business., `ENTERPRISE` = Enterprise.
 - response `[].interval`: `MONTHLY` = Monthly., `ANNUALLY` = Annually.
 
 Error responses:
@@ -31453,7 +31902,7 @@ Response payload: success returns **HTTP 200**.
 
 Enum values:
 
-- response `plan.tier`: `FREEMIUM` = Freemium., `BASIC` = Basic., `PREMIUM` = Premium.
+- response `plan.tier`: `FREEMIUM` = Freemium., `BASIC` = Basic., `BUSINESS` = Business., `ENTERPRISE` = Enterprise.
 - response `plan.interval`: `MONTHLY` = Monthly., `ANNUALLY` = Annually.
 - response `status`: `ACTIVE` = Active., `PAST_DUE` = Past due., `CANCELED` = Canceled., `EXPIRED` = Expired.
 
@@ -31578,7 +32027,7 @@ Response payload: success returns **HTTP 200**.
 
 Enum values:
 
-- response `plan.tier`: `FREEMIUM` = Freemium., `BASIC` = Basic., `PREMIUM` = Premium.
+- response `plan.tier`: `FREEMIUM` = Freemium., `BASIC` = Basic., `BUSINESS` = Business., `ENTERPRISE` = Enterprise.
 - response `plan.interval`: `MONTHLY` = Monthly., `ANNUALLY` = Annually.
 - response `status`: `ACTIVE` = Active., `PAST_DUE` = Past due., `CANCELED` = Canceled., `EXPIRED` = Expired.
 

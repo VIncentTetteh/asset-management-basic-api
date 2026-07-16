@@ -46,3 +46,8 @@ app:
   startup:
     # Allow dev startup without enforcing production secret constraints.
     skip-secret-validation: true
+  auth:
+    # The AuthController field default is secure (true) as of this change;
+    # dev runs over plain http://localhost, so the Secure cookie flag must be
+    # relaxed explicitly here rather than via an implicit code-level default.
+    cookie-secure: false

@@ -6,11 +6,17 @@
  *
  * Stores plan + org details in a signed reference so /api/checkout/verify
  * can reconstruct them after payment without a DB.
+ *
+ * P1-4 / P1-5 / P1-7:
+ *   - Reads `priceMinor` (formerly `priceKobo`) off the plan.
+ *   - Forwards `currency` to Paystack so charges settle in GHS.
+ *   - Passes the resolved payment channel list so MTN MoMo / Telecel / AT
+ *     Money appear on the hosted checkout.
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { initTransaction } from "@/lib/paystack";
-import { PLANS, type PlanId } from "@/lib/plans";
+import { initTransaction, resolveChannels } from "@/lib/paystack";
+import { PLANS, isContactSalesPlan, type PlanId } from "@/lib/plans";
 import { randomBytes, createHmac } from "crypto";
 import { checkoutLimiter } from "@/lib/rate-limit";
 
@@ -26,10 +32,16 @@ function buildSignedReference(data: object): string {
 
 export async function POST(req: NextRequest) {
   // Rate limiting — 5 checkout initiations per IP per minute
-  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? req.headers.get("x-real-ip") ?? "unknown";
+  const ip =
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+    req.headers.get("x-real-ip") ??
+    "unknown";
   const rl = checkoutLimiter.check(ip);
   if (!rl.success) {
-    return NextResponse.json({ error: "Too many requests. Please wait before trying again." }, { status: 429 });
+    return NextResponse.json(
+      { error: "Too many requests. Please wait before trying again." },
+      { status: 429 },
+    );
   }
 
   try {
@@ -41,7 +53,10 @@ export async function POST(req: NextRequest) {
     };
 
     if (!email || !orgName || !planId) {
-      return NextResponse.json({ error: "email, orgName and planId are required" }, { status: 400 });
+      return NextResponse.json(
+        { error: "email, orgName and planId are required" },
+        { status: 400 },
+      );
     }
 
     const plan = PLANS[planId];
@@ -49,16 +64,43 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid plan" }, { status: 400 });
     }
 
+    // Enterprise / custom-quote plans cannot self-serve checkout — route
+    // callers to sales instead of initialising a zero-amount charge.
+    if (isContactSalesPlan(plan)) {
+      return NextResponse.json(
+        { error: "This plan requires a sales conversation. Email sales@assetiq.app." },
+        { status: 400 },
+      );
+    }
+    if (plan.priceMinor <= 0) {
+      return NextResponse.json(
+        { error: "Freemium is included by default and does not require checkout." },
+        { status: 400 },
+      );
+    }
+
     // Encode org data into the Paystack reference so /verify can issue the key
     // without hitting a separate session store.
-    const reference = buildSignedReference({ email, orgName, planId });
+    const reference = buildSignedReference({
+      email,
+      orgName,
+      planId,
+      currency: plan.currency,
+    });
 
     const result = await initTransaction({
       email,
-      amountKobo: plan.priceKobo,
+      amountMinor: plan.priceMinor,
+      currency: plan.currency,
       reference,
       callbackUrl: `${APP_URL}/checkout/verify?ref=${encodeURIComponent(reference)}`,
-      metadata: { orgName, planId, plan: plan.name },
+      metadata: {
+        orgName,
+        planId,
+        plan: plan.name,
+        currency: plan.currency,
+      },
+      channels: resolveChannels(),
     });
 
     return NextResponse.json({ authorizationUrl: result.authorizationUrl });

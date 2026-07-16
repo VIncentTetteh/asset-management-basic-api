@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Check, Shield, Server, Zap, ArrowRight } from "lucide-react";
-import { PLAN_LIST, type PlanId } from "@/lib/plans";
+import { isContactSalesPlan, PLAN_LIST, type PlanId } from "@/lib/plans";
 
 export default function PricingPage() {
   const router = useRouter();
@@ -59,12 +59,14 @@ export default function PricingPage() {
             Annual plans
           </h2>
           <p className="text-center text-slate-500 text-sm mb-10">
-            All plans include a 7-day free trial period. Renew any time before expiry.
+            Choose Freemium, Basic, Business, or contact sales for Enterprise.
           </p>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {PLAN_LIST.map((plan) => (
-              <div
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+            {PLAN_LIST.map((plan) => {
+              const disabled = plan.priceMinor <= 0 && !isContactSalesPlan(plan);
+              return (
+                <div
                 key={plan.id}
                 className={`relative rounded-2xl border bg-white p-6 flex flex-col ${
                   plan.highlighted
@@ -117,7 +119,7 @@ export default function PricingPage() {
 
                 <button
                   onClick={() => handleSelect(plan.id)}
-                  disabled={loading === plan.id}
+                  disabled={loading === plan.id || disabled}
                   className={`w-full rounded-xl py-2.5 text-sm font-semibold transition-all flex items-center justify-center gap-1.5 ${
                     plan.highlighted
                       ? "bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-60"
@@ -125,11 +127,12 @@ export default function PricingPage() {
                   }`}
                 >
                   {loading === plan.id ? "Redirecting…" : (
-                    <>Get started <ArrowRight className="h-4 w-4" /></>
+                    <>{plan.ctaLabel} {!disabled && <ArrowRight className="h-4 w-4" />}</>
                   )}
                 </button>
-              </div>
-            ))}
+                </div>
+              );
+            })}
           </div>
         </div>
       </section>

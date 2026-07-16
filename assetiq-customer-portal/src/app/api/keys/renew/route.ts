@@ -10,8 +10,8 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { initTransaction } from "@/lib/paystack";
-import { PLANS, type PlanId } from "@/lib/plans";
+import { initTransaction, resolveChannels } from "@/lib/paystack";
+import { PLANS, isContactSalesPlan, type PlanId } from "@/lib/plans";
 import { randomBytes, createHmac } from "crypto";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3001";
@@ -39,15 +39,37 @@ export async function POST(req: NextRequest) {
 
     const plan = PLANS[planId];
     if (!plan) return NextResponse.json({ error: "Invalid plan" }, { status: 400 });
+    if (isContactSalesPlan(plan)) {
+      return NextResponse.json(
+        { error: "Enterprise renewals are handled by the sales team." },
+        { status: 400 },
+      );
+    }
 
-    const reference = buildSignedReference({ email, orgName, planId, keyId, intent: "renew" });
+    const reference = buildSignedReference({
+      email,
+      orgName,
+      planId,
+      keyId,
+      intent: "renew",
+      currency: plan.currency,
+    });
 
     const result = await initTransaction({
       email,
-      amountKobo: plan.priceKobo,
+      amountMinor: plan.priceMinor,
+      currency: plan.currency,
       reference,
       callbackUrl: `${APP_URL}/checkout/verify?ref=${encodeURIComponent(reference)}`,
-      metadata: { orgName, planId, plan: plan.name, keyId, intent: "renew" },
+      metadata: {
+        orgName,
+        planId,
+        plan: plan.name,
+        keyId,
+        intent: "renew",
+        currency: plan.currency,
+      },
+      channels: resolveChannels(),
     });
 
     return NextResponse.json({ authorizationUrl: result.authorizationUrl });

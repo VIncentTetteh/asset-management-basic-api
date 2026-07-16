@@ -24,6 +24,7 @@ import { issueKey, renewKey, type Plan } from "@/lib/license-server";
 import { sendLicenseKeyEmail, sendRenewalEmail } from "@/lib/email";
 import { PLANS, type PlanId } from "@/lib/plans";
 import { verifyLimiter } from "@/lib/rate-limit";
+import { createHmac, timingSafeEqual } from "crypto";
 
 // ── Reference decoder ─────────────────────────────────────────────────────────
 
@@ -33,11 +34,26 @@ interface DecodedRef {
   planId:  PlanId;
   intent?: "renew";
   keyId?:  string;
+  /** P1-5: currency stamped at checkout init so we can cross-check the charge. */
+  currency?: string;
 }
+
+const SESSION_SECRET = process.env.CHECKOUT_SESSION_SECRET ?? "dev-secret";
 
 function decodeReference(reference: string): DecodedRef | null {
   try {
-    const [payload] = reference.split(".");
+    const [payload, sig] = reference.split(".");
+    if (!payload || !sig) {
+      return null;
+    }
+
+    const expectedSig = createHmac("sha256", SESSION_SECRET).update(payload).digest("hex").slice(0, 16);
+    const actual = Buffer.from(sig, "utf-8");
+    const expected = Buffer.from(expectedSig, "utf-8");
+    if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) {
+      return null;
+    }
+
     const json = Buffer.from(payload, "base64url").toString("utf-8");
     return JSON.parse(json) as DecodedRef;
   } catch {
@@ -75,17 +91,35 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Invalid checkout reference" }, { status: 400 });
     }
 
-    const { email, orgName, planId, intent, keyId } = decoded;
+    const { email, orgName, planId, intent, keyId, currency } = decoded;
     const plan = PLANS[planId];
     if (!plan) {
       return NextResponse.json({ error: "Unknown plan in reference" }, { status: 400 });
     }
 
+    // P1-5: cross-check the currency Paystack settled against the plan
+    // the customer clicked on. Prevents a stale-reference replay paying in
+    // a different currency than we'd expected.
+    const expectedCurrency = (currency ?? plan.currency).toUpperCase();
+    if (tx.currency && tx.currency.toUpperCase() !== expectedCurrency) {
+      console.warn(
+        `[verify] currency mismatch ref=${ref} expected=${expectedCurrency} actual=${tx.currency}`,
+      );
+      return NextResponse.json(
+        { error: "Payment currency did not match the selected plan." },
+        { status: 400 },
+      );
+    }
+
     const orgId = email.toLowerCase().replace(/[^a-z0-9]/g, "-");
+
+    // Guard: ENTERPRISE plans don't self-serve, but if something slipped
+    // through we fall back to a 30-day window rather than crash on null.
+    const durationDays = plan.durationDays ?? 30;
 
     // ── Renewal path ───────────────────────────────────────────────────────────
     if (intent === "renew" && keyId) {
-      const renewed = await renewKey(keyId, plan.durationDays);
+      const renewed = await renewKey(keyId, durationDays);
 
       sendRenewalEmail({
         to: email,
@@ -115,7 +149,7 @@ export async function GET(req: NextRequest) {
       orgName,
       orgEmail: email,
       plan: planId as Plan,
-      durationDays: plan.durationDays,
+      durationDays,
     });
 
     sendLicenseKeyEmail({

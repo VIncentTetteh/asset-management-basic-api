@@ -97,7 +97,9 @@ services:
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
       SPRING_DATASOURCE_DRIVER_CLASS_NAME: org.postgresql.Driver
       SPRING_JPA_DATABASE_PLATFORM: org.hibernate.dialect.PostgreSQLDialect
-      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+      # Flyway owns all schema changes. Hibernate must only validate in production.
+      # Override only for ephemeral dev environments.
+      SPRING_JPA_HIBERNATE_DDL_AUTO: ${HIBERNATE_DDL_AUTO:-validate}
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRATION_MS: ${JWT_EXPIRATION_MS:-86400000}
       PAYSTACK_SECRET_KEY: ${PAYSTACK_SECRET_KEY:-}

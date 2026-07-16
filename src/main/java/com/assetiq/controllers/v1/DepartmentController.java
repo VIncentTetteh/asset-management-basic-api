@@ -40,6 +40,16 @@ public class DepartmentController {
         return ResponseEntity.ok(departmentService.list());
     }
 
+    @GetMapping("/{parentId}/sub-departments")
+    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_USER','ROLE_ADMIN')")
+    public ResponseEntity<List<DepartmentDto>> listSubDepartments(@PathVariable UUID parentId) {
+        try {
+            return ResponseEntity.ok(departmentService.listSubDepartments(parentId));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
     @PutMapping("/{id}")
     @PreAuthorize("hasAuthority('ROLE_ORG_ADMIN') or hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_DEPARTMENTS')")
     public ResponseEntity<DepartmentDto> update(@PathVariable UUID id, @Valid @RequestBody DepartmentDto dto) {

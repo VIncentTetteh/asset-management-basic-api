@@ -78,5 +78,9 @@ public class CachingConfig {
         // Policy caches
         public static final String DEPRECIATION_POLICIES = "depreciation_policies";
         public static final String DEPRECIATION_POLICY_BY_ID = "depreciation_policy_by_id";
+
+        // Billing / configuration caches
+        public static final String BILLING_PLANS = "billing_plans";
+        public static final String SSO_CONFIG_BY_ORG = "sso_config_by_org";
     }
 }

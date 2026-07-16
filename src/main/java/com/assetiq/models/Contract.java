@@ -52,7 +52,7 @@ public class Contract extends BaseEntity {
     @Column(precision = 15, scale = 2)
     private BigDecimal value;
 
-    private String currency = "USD";
+    private String currency = "GHS";
 
     private boolean autoRenew = false;
 

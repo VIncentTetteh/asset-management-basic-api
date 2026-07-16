@@ -1,12 +1,14 @@
 package com.assetiq.services.impl;
 
 import com.assetiq.dto.UserDto;
+import com.assetiq.config.CachingConfig;
 import com.assetiq.enums.UserStatus;
 import com.assetiq.models.Department;
 import com.assetiq.models.Organisation;
 import com.assetiq.models.Role;
 import com.assetiq.models.User;
 import com.assetiq.repositories.*;
+import com.assetiq.security.PermissionCacheService;
 import com.assetiq.services.EmailService;
 import com.assetiq.services.TenantAwareService;
 import com.assetiq.services.UsageLimitService;
@@ -14,6 +16,8 @@ import com.assetiq.services.UserService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -35,6 +39,7 @@ public class UserServiceImpl extends TenantAwareService implements UserService {
     private final PasswordEncoder passwordEncoder;
     private final UsageLimitService usageLimitService;
     private final EmailService emailService;
+    private final PermissionCacheService permissionCacheService;
 
     @Value("${app.email.base-url:http://localhost:3000}")
     private String baseUrl;
@@ -45,7 +50,8 @@ public class UserServiceImpl extends TenantAwareService implements UserService {
             OrganisationRepository organisationRepository,
             PasswordEncoder passwordEncoder,
             UsageLimitService usageLimitService,
-            EmailService emailService) {
+            EmailService emailService,
+            PermissionCacheService permissionCacheService) {
         super(organisationRepository);
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
@@ -53,9 +59,11 @@ public class UserServiceImpl extends TenantAwareService implements UserService {
         this.passwordEncoder = passwordEncoder;
         this.usageLimitService = usageLimitService;
         this.emailService = emailService;
+        this.permissionCacheService = permissionCacheService;
     }
 
     @Override
+    @CacheEvict(value = CachingConfig.CacheNames.USERS, allEntries = true)
     public UserDto createUser(UserDto dto) {
         Organisation org = requireTenantOrg();
         usageLimitService.assertCanCreateEmployee(org);
@@ -116,6 +124,7 @@ public class UserServiceImpl extends TenantAwareService implements UserService {
 
     @Override
     @Transactional(readOnly = true)
+    @Cacheable(value = CachingConfig.CacheNames.USERS, key = "T(com.assetiq.multitenancy.TenantContext).getOrganisationId().toString() + ':one:' + #id.toString()")
     public UserDto getUserById(UUID id) {
         Organisation org = requireTenantOrg();
         User user = userRepository.findByIdAndOrganisation(id, org)
@@ -125,6 +134,7 @@ public class UserServiceImpl extends TenantAwareService implements UserService {
 
     @Override
     @Transactional(readOnly = true)
+    @Cacheable(value = CachingConfig.CacheNames.USERS, key = "T(com.assetiq.multitenancy.TenantContext).getOrganisationId().toString() + ':list'")
     public Set<UserDto> listUsers() {
         Organisation org = requireTenantOrg();
         return userRepository.findByOrganisationAndDeletedAtIsNull(org).stream()
@@ -134,6 +144,7 @@ public class UserServiceImpl extends TenantAwareService implements UserService {
 
     @Override
     @Transactional(readOnly = true)
+    @Cacheable(value = CachingConfig.CacheNames.USERS, key = "T(com.assetiq.multitenancy.TenantContext).getOrganisationId().toString() + ':department:' + #departmentId.toString()")
     public Set<UserDto> listUsersByDepartment(UUID departmentId) {
         Organisation org = requireTenantOrg();
         departmentRepository.findByIdAndOrganisationAndDeletedAtIsNull(departmentId, org)
@@ -145,6 +156,7 @@ public class UserServiceImpl extends TenantAwareService implements UserService {
     }
 
     @Override
+    @CacheEvict(value = CachingConfig.CacheNames.USERS, allEntries = true)
     public UserDto updateUser(UUID id, UserDto dto) {
         Organisation org = requireTenantOrg();
         User user = userRepository.findByIdAndOrganisation(id, org)
@@ -166,6 +178,7 @@ public class UserServiceImpl extends TenantAwareService implements UserService {
     }
 
     @Override
+    @CacheEvict(value = CachingConfig.CacheNames.USERS, allEntries = true)
     public UserDto patchUser(UUID id, UserDto dto) {
         Organisation org = requireTenantOrg();
         User user = userRepository.findByIdAndOrganisation(id, org)
@@ -208,6 +221,7 @@ public class UserServiceImpl extends TenantAwareService implements UserService {
     }
 
     @Override
+    @CacheEvict(value = CachingConfig.CacheNames.USERS, allEntries = true)
     public UserDto patchMe(String email, UserDto dto) {
         Organisation org = requireTenantOrg();
         User user = userRepository.findByEmailAndOrganisationId(email, org.getId())
@@ -231,6 +245,7 @@ public class UserServiceImpl extends TenantAwareService implements UserService {
     }
 
     @Override
+    @CacheEvict(value = CachingConfig.CacheNames.USERS, allEntries = true)
     public UserDto deactivateUser(UUID id) {
         Organisation org = requireTenantOrg();
         User user = userRepository.findByIdAndOrganisation(id, org)
@@ -240,6 +255,7 @@ public class UserServiceImpl extends TenantAwareService implements UserService {
     }
 
     @Override
+    @CacheEvict(value = CachingConfig.CacheNames.USERS, allEntries = true)
     public UserDto assignRole(UUID userId, UUID roleId) {
         Organisation org = requireTenantOrg();
         User user = userRepository.findByIdAndOrganisation(userId, org)
@@ -247,7 +263,9 @@ public class UserServiceImpl extends TenantAwareService implements UserService {
         Role role = roleRepository.findByIdAndOrganisationAndDeletedAtIsNull(roleId, org)
                 .orElseThrow(() -> new IllegalArgumentException("Role not found in your organisation"));
         user.setRole(role);
-        return toDto(userRepository.save(user));
+        UserDto saved = toDto(userRepository.save(user));
+        permissionCacheService.evictForUser(user.getEmail(), org.getId().toString());
+        return saved;
     }
 
     private UserDto toDto(User user) {

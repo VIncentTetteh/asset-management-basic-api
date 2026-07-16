@@ -1,0 +1,59 @@
+# P0-7: AssetIQ public status page.
+#
+# Runs Uptime Kuma — a self-hosted uptime & status-page service — behind nginx
+# with TLS terminated by certbot on the host. Deploy this stack on a tiny VM
+# (1 vCPU / 1 GB RAM is enough for <50 monitors) that is COMPLETELY SEPARATE
+# from the production backend, so the page stays up when the product is down.
+#
+# Domain suggestion: status.assetiq.io
+#
+# First-time setup:
+#
+#   ssh status-vm
+#   git clone <this-repo> && cd Enterprise-Asset-Manager/ops/status-page
+#   cp .env.example .env             # then edit
+#   docker compose up -d
+#   # Open http://<vm-ip>:3001 once to create the admin user, then:
+#   # Settings → Status Pages → New Status Page
+#   #   slug: assetiq
+#   #   monitors: Web app, Backend API, Customer portal, License server
+#   # Front-door URL becomes https://status.assetiq.io/status/assetiq
+#
+# Operational monitors to configure (in the admin UI, not via compose):
+#
+#   | Monitor                  | Type   | URL / target                                   | Interval |
+#   |--------------------------|--------|------------------------------------------------|----------|
+#   | Web app (marketing)      | HTTPS  | https://assetiq.io                             | 60 s     |
+#   | Customer portal          | HTTPS  | https://portal.assetiq.io/api/health           | 60 s     |
+#   | Backend API              | HTTPS  | https://api.assetiq.io/actuator/health         | 60 s     |
+#   | License server           | HTTPS  | https://license.assetiq.io/actuator/health     | 120 s    |
+#   | Paystack upstream        | HTTPS  | https://api.paystack.co                        | 300 s    |
+#
+# Backup Kuma's sqlite DB nightly: `tar czf kuma-$(date +%F).tgz kuma-data/`
+
+services:
+  uptime-kuma:
+    image: louislam/uptime-kuma:1.23.13
+    container_name: assetiq-status
+    restart: unless-stopped
+    volumes:
+      - ./kuma-data:/app/data
+    ports:
+      # Bind to 127.0.0.1 so only nginx can reach it directly.
+      - "127.0.0.1:3001:3001"
+    environment:
+      # Send alert notifications through a dedicated webhook; set in .env.
+      - UPTIME_KUMA_PORT=3001
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: assetiq-status-proxy
+    restart: unless-stopped
+    depends_on:
+      - uptime-kuma
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro

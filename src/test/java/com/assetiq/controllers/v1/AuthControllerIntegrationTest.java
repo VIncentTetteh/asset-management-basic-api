@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.http.HttpHeaders.SET_COOKIE;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -69,5 +70,43 @@ class AuthControllerIntegrationTest {
 
         JsonNode body = objectMapper.readTree(responseBody);
         assertThat(jwtUtil.parseToken(body.get("token").asText()).getSubject()).isEqualTo(email);
+    }
+
+    @Test
+    void loginSetsHttpOnlyCookieThatIsUsableOverLocalHttpInTestProfile() throws Exception {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String email = "cookie+" + suffix + "@example.com";
+        String password = "Password123";
+
+        TenantRegisterRequest request = new TenantRegisterRequest();
+        request.setOrganisationName("Cookie Test Org " + suffix);
+        request.setOrganisationContactEmail("ops-cookie+" + suffix + "@example.com");
+        request.setAdminFirstName("Debbie");
+        request.setAdminLastName("Fiator");
+        request.setAdminEmail(email);
+        request.setPassword(password);
+        request.setCountry("GH");
+        request.setTimezone("UTC");
+        request.setIndustry("IT");
+
+        mockMvc.perform(post("/api/v1/tenant/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isCreated());
+
+        String setCookie = mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "email", email,
+                                "password", password))))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getHeader(SET_COOKIE);
+
+        assertThat(setCookie).contains("access_token=");
+        assertThat(setCookie).contains("HttpOnly");
+        assertThat(setCookie).contains("Path=/api");
+        assertThat(setCookie).doesNotContain("Secure");
     }
 }

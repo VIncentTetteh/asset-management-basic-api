@@ -7,6 +7,8 @@ import com.assetiq.multitenancy.TenantContext;
 import com.assetiq.repositories.AuditEventRepository;
 import com.assetiq.repositories.OrganisationRepository;
 import com.assetiq.repositories.UserRepository;
+import io.sentry.Sentry;
+import io.sentry.SentryLevel;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
@@ -83,7 +85,15 @@ public class ApiAuditInterceptor implements HandlerInterceptor {
 
             auditEventRepository.save(event);
         } catch (Exception saveEx) {
+            // Audit trail gaps are a compliance concern — surface to Sentry so
+            // the security team is alerted even when log volume is high.
             log.warn("Failed to persist audit event for path {}: {}", path, saveEx.getMessage());
+            Sentry.withScope(scope -> {
+                scope.setLevel(SentryLevel.ERROR);
+                scope.setTag("component", "audit-interceptor");
+                scope.setTag("path", path != null ? path : "unknown");
+                Sentry.captureException(saveEx);
+            });
         }
     }
 

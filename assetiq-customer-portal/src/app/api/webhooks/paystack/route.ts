@@ -61,7 +61,7 @@ export async function POST(req: NextRequest) {
           orgName,
           orgEmail: tx.email,
           plan: planId as Plan,
-          durationDays: plan.durationDays,
+          durationDays: plan.durationDays ?? undefined,
         }).catch((err) => {
           // Key may already exist from /verify — log and continue
           console.warn("[webhook] issueKey skipped:", err.message);

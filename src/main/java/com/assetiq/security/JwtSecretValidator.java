@@ -73,26 +73,40 @@ public class JwtSecretValidator {
     }
 
     /**
-     * Main method for CLI usage.
-     * Run: java -cp target/demo-0.0.1-SNAPSHOT.jar com.assetiq.security.JwtSecretValidator
+     * CLI utility — generates a cryptographically secure JWT secret and prints it
+     * <em>only to stderr</em> so that container log aggregators (which typically
+     * capture stdout) do not inadvertently record the secret.
+     *
+     * Usage:
+     *   java -cp target/assetIQ-0.0.1-SNAPSHOT.jar com.assetiq.security.JwtSecretValidator [count]
+     *
+     * IMPORTANT: Run this interactively in a trusted terminal. Never pipe the
+     * output into a log file or CI artifact.  Treat the generated value as a
+     * secret credential and store it in your secrets manager (AWS Secrets Manager,
+     * HashiCorp Vault, etc.) immediately.
      */
     public static void main(String[] args) {
-        System.out.println("=== JWT Secret Generator ===\n");
+        // Use stderr intentionally — stdout is frequently captured by container
+        // runtimes (docker logs, kubectl logs) and CI pipelines.
+        java.io.PrintStream out = System.err;
+
+        out.println("=== JWT Secret Generator ===");
+        out.println("NOTE: Output goes to stderr to avoid capture by log aggregators.\n");
 
         int numSecrets = args.length > 0 ? Integer.parseInt(args[0]) : 1;
 
         for (int i = 0; i < numSecrets; i++) {
             String secret = generateSecureSecret(32);
-            System.out.println("Secret #" + (i + 1) + ":");
-            System.out.println("  Value: " + secret);
-            System.out.println("  Length: " + secret.length() + " characters (32 bytes)");
-            System.out.println();
+            out.println("Secret #" + (i + 1) + ":");
+            out.println("  Value:  " + secret);
+            out.println("  Length: " + secret.length() + " chars (" + (secret.length() * 6 / 8) + " bytes entropy)");
+            out.println();
         }
 
-        System.out.println("To use in environment:");
-        System.out.println("  export APP_JWT_SECRET=" + generateSecureSecret(32));
-        System.out.println("\nOr in Docker:");
-        System.out.println("  docker run -e APP_JWT_SECRET=" + generateSecureSecret(32) + " ...");
+        out.println("Store in your secrets manager, then set:");
+        out.println("  export APP_JWT_SECRET=<generated value above>");
+        out.println();
+        out.println("NEVER commit the value to source control or paste it into CI logs.");
     }
 }
 

@@ -1,6 +1,7 @@
 package com.assetiq.services.impl;
 
 import com.assetiq.dto.RoleDto;
+import com.assetiq.config.CachingConfig;
 import com.assetiq.models.Role;
 import com.assetiq.models.RolePermission;
 import com.assetiq.models.Organisation;
@@ -11,6 +12,8 @@ import com.assetiq.security.RbacAuditService;
 import com.assetiq.security.RolePermissionDefaults;
 import com.assetiq.services.RoleService;
 import com.assetiq.services.TenantAwareService;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -41,6 +44,7 @@ public class RoleServiceImpl extends TenantAwareService implements RoleService {
     }
 
     @Override
+    @CacheEvict(value = CachingConfig.CacheNames.ROLES, allEntries = true)
     public RoleDto createRole(RoleDto roleDto, UUID organisationId) {
         Organisation org = requireTenantOrg();
 
@@ -66,6 +70,7 @@ public class RoleServiceImpl extends TenantAwareService implements RoleService {
 
     @Override
     @Transactional(readOnly = true)
+    @Cacheable(value = CachingConfig.CacheNames.ROLES, key = "T(com.assetiq.multitenancy.TenantContext).getOrganisationId().toString() + ':one:' + #id.toString()")
     public RoleDto getRoleById(UUID id) {
         Organisation org = requireTenantOrg();
         Role role = roleRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
@@ -75,6 +80,7 @@ public class RoleServiceImpl extends TenantAwareService implements RoleService {
 
     @Override
     @Transactional(readOnly = true)
+    @Cacheable(value = CachingConfig.CacheNames.ROLES, key = "T(com.assetiq.multitenancy.TenantContext).getOrganisationId().toString() + ':list'")
     public Set<RoleDto> getRolesByOrganisation(UUID organisationId) {
         Organisation org = requireTenantOrg();
         return roleRepository.findByOrganisationAndDeletedAtIsNull(org).stream()
@@ -83,6 +89,7 @@ public class RoleServiceImpl extends TenantAwareService implements RoleService {
     }
 
     @Override
+    @CacheEvict(value = CachingConfig.CacheNames.ROLES, allEntries = true)
     public RoleDto updateRole(UUID id, RoleDto roleDto) {
         Organisation org = requireTenantOrg();
         Role role = roleRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
@@ -120,6 +127,7 @@ public class RoleServiceImpl extends TenantAwareService implements RoleService {
     }
 
     @Override
+    @CacheEvict(value = CachingConfig.CacheNames.ROLES, allEntries = true)
     public RoleDto patchRole(UUID id, RoleDto roleDto) {
         Organisation org = requireTenantOrg();
         Role role = roleRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
@@ -165,6 +173,7 @@ public class RoleServiceImpl extends TenantAwareService implements RoleService {
     }
 
     @Override
+    @CacheEvict(value = CachingConfig.CacheNames.ROLES, allEntries = true)
     public void deleteRole(UUID id) {
         Organisation org = requireTenantOrg();
         Role role = roleRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
@@ -185,6 +194,7 @@ public class RoleServiceImpl extends TenantAwareService implements RoleService {
 
     @Override
     @Transactional(readOnly = true)
+    @Cacheable(value = CachingConfig.CacheNames.ROLES, key = "T(com.assetiq.multitenancy.TenantContext).getOrganisationId().toString() + ':name:' + #name")
     public RoleDto getRoleByNameAndOrganisation(String name, UUID organisationId) {
         Organisation org = requireTenantOrg();
         Role role = roleRepository.findByNameAndOrganisationAndDeletedAtIsNull(name, org)

@@ -74,9 +74,6 @@ class RbacAuditServiceTest {
         when(userRepository.findByEmailAndOrganisationId(actorEmail, orgId))
                 .thenReturn(Optional.of(actor));
 
-        // Default save behaviour — return the entity unchanged
-        when(auditEventRepository.save(any(AuditEvent.class)))
-                .thenAnswer(inv -> inv.getArgument(0));
     }
 
     @AfterEach

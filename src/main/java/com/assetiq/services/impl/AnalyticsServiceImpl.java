@@ -22,6 +22,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.time.YearMonth;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
@@ -53,7 +54,11 @@ public class AnalyticsServiceImpl implements AnalyticsService {
 
     @Override
     public Map<String, Object> getAssetAnalytics(String period, String groupBy, Organisation org) {
-        List<Asset> assets = assetRepository.findAllByOrganisationAndDeletedAtIsNull(org);
+        LocalDate start = getPeriodStart(period);
+        LocalDate end = LocalDate.now();
+        List<Asset> assets = assetRepository.findAllByOrganisationAndDeletedAtIsNull(org).stream()
+                .filter(asset -> isWithinPeriod(assetDate(asset), start, end))
+                .toList();
         long total = assets.size();
         BigDecimal totalValue = sumPurchaseCost(assets);
 
@@ -94,8 +99,14 @@ public class AnalyticsServiceImpl implements AnalyticsService {
 
     @Override
     public Map<String, Object> getFinancialAnalytics(String period, Organisation org) {
-        List<Asset> assets = assetRepository.findAllByOrganisationAndDeletedAtIsNull(org);
-        Set<MaintenanceRecord> records = maintenanceRecordRepository.findByOrganisationAndDeletedAtIsNull(org);
+        LocalDate start = getPeriodStart(period);
+        LocalDate end = LocalDate.now();
+        List<Asset> assets = assetRepository.findAllByOrganisationAndDeletedAtIsNull(org).stream()
+                .filter(asset -> isWithinPeriod(assetDate(asset), start, end))
+                .toList();
+        Set<MaintenanceRecord> records = maintenanceRecordRepository.findByOrganisationAndDeletedAtIsNull(org).stream()
+                .filter(record -> isWithinPeriod(maintenanceDate(record), start, end))
+                .collect(Collectors.toCollection(LinkedHashSet::new));
 
         BigDecimal totalAssetValue = sumPurchaseCost(assets);
 
@@ -163,10 +174,6 @@ public class AnalyticsServiceImpl implements AnalyticsService {
             categoryBreakdown.put(catName, m);
         });
 
-        // Period-specific Acquisition/Disposal
-        LocalDate start = getPeriodStart(period);
-        LocalDate end = LocalDate.now();
-
         BigDecimal totalAcquisition = assets.stream()
                 .filter(a -> a.getPurchaseDate() != null && !a.getPurchaseDate().isBefore(start) && !a.getPurchaseDate().isAfter(end))
                 .map(a -> a.getPurchaseCost() != null ? a.getPurchaseCost() : BigDecimal.ZERO)
@@ -214,7 +221,11 @@ public class AnalyticsServiceImpl implements AnalyticsService {
 
     @Override
     public Map<String, Object> getPurchaseOrderAnalytics(String period, Organisation org) {
-        Set<PurchaseOrder> pos = purchaseOrderRepository.findByOrganisationAndDeletedAtIsNull(org);
+        LocalDate start = getPeriodStart(period);
+        LocalDate end = LocalDate.now();
+        Set<PurchaseOrder> pos = purchaseOrderRepository.findByOrganisationAndDeletedAtIsNull(org).stream()
+                .filter(po -> isWithinPeriod(toLocalDate(po.getCreatedAt()), start, end))
+                .collect(Collectors.toCollection(LinkedHashSet::new));
         long total = pos.size();
 
         long draft = pos.stream().filter(p -> p.getStatus() == POStatus.DRAFT).count();
@@ -278,8 +289,12 @@ public class AnalyticsServiceImpl implements AnalyticsService {
     // ── Maintenance Analytics ─────────────────────────────────────────────────
 
     @Override
-    public Map<String, Object> getMaintenanceAnalytics(Organisation org) {
-        Set<MaintenanceRecord> records = maintenanceRecordRepository.findByOrganisationAndDeletedAtIsNull(org);
+    public Map<String, Object> getMaintenanceAnalytics(String period, Organisation org) {
+        LocalDate start = getPeriodStart(period);
+        LocalDate end = LocalDate.now();
+        Set<MaintenanceRecord> records = maintenanceRecordRepository.findByOrganisationAndDeletedAtIsNull(org).stream()
+                .filter(record -> isWithinPeriod(maintenanceDate(record), start, end))
+                .collect(Collectors.toCollection(LinkedHashSet::new));
         long total = records.size();
 
         long assetsMaintained = records.stream()
@@ -329,6 +344,7 @@ public class AnalyticsServiceImpl implements AnalyticsService {
         }
 
         Map<String, Object> response = new LinkedHashMap<>();
+        response.put("period", period);
         response.put("totalMaintenanceRecords", total);
         response.put("assetsMaintained", assetsMaintained);
         response.put("totalMaintenanceCost", totalCost.setScale(2, RoundingMode.HALF_UP));
@@ -441,12 +457,33 @@ public class AnalyticsServiceImpl implements AnalyticsService {
 
     private LocalDate getPeriodStart(String period) {
         LocalDate today = LocalDate.now();
-        return switch (period.toLowerCase()) {
+        String normalized = period == null ? "month" : period.toLowerCase();
+        return switch (normalized) {
             case "week" -> today.minusWeeks(1);
             case "quarter" -> today.minusMonths(3);
             case "year" -> today.minusYears(1);
             default -> today.withDayOfMonth(1); // month
         };
+    }
+
+    private boolean isWithinPeriod(LocalDate date, LocalDate start, LocalDate end) {
+        if (date == null) return true;
+        return !date.isBefore(start) && !date.isAfter(end);
+    }
+
+    private LocalDate assetDate(Asset asset) {
+        if (asset.getPurchaseDate() != null) return asset.getPurchaseDate();
+        return toLocalDate(asset.getCreatedAt());
+    }
+
+    private LocalDate maintenanceDate(MaintenanceRecord record) {
+        if (record.getPerformedDate() != null) return record.getPerformedDate();
+        if (record.getScheduledDate() != null) return record.getScheduledDate();
+        return toLocalDate(record.getCreatedAt());
+    }
+
+    private LocalDate toLocalDate(Instant instant) {
+        return instant == null ? null : instant.atZone(ZoneId.systemDefault()).toLocalDate();
     }
 
     private BigDecimal calculateDynamicNBV(Asset asset) {

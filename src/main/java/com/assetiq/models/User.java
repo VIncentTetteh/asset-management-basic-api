@@ -5,8 +5,6 @@ import jakarta.persistence.*;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
-
-
 import java.time.Instant;
 import java.util.HashSet;
 import java.util.Set;
@@ -98,4 +96,27 @@ public class User extends BaseEntity {
     @Column(name = "mfa_secret", length = 100)
     private String mfaSecret;
 
+    // ── Account lockout (brute-force protection) ──────────────────────────────
+
+    /**
+     * Number of consecutive failed login attempts since the last successful
+     * login or manual admin reset.  Incremented on every failed password check;
+     * reset to 0 on a successful login.
+     */
+    @Column(name = "failed_login_attempts", nullable = false, columnDefinition = "integer default 0")
+    private int failedLoginAttempts = 0;
+
+    /**
+     * When non-null the account is temporarily locked.  Login attempts before
+     * this instant are rejected with HTTP 423.  Set automatically when
+     * {@link #failedLoginAttempts} reaches the threshold; cleared on successful
+     * login or by an admin reset.
+     */
+    @Column(name = "locked_until")
+    private Instant lockedUntil;
+
+    /** Returns true if the account is currently within a lockout window. */
+    public boolean isLockedOut() {
+        return lockedUntil != null && Instant.now().isBefore(lockedUntil);
+    }
 }
