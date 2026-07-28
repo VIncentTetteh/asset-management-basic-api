@@ -9,7 +9,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Currency;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -23,7 +25,8 @@ import java.util.UUID;
  *       reach the resolver).</li>
  *   <li>{@link Organisation#getBillingCurrency()} for the current tenant.</li>
  *   <li>Configured platform fallback {@code app.billing.default-currency}
- *       (defaults to "GHS").</li>
+ *       (defaults to "USD" — the global default; GHS and other currencies
+ *       remain fully supported as per-tenant attributes).</li>
  * </ol>
  * <p>
  * Lookups are cheap (one indexed PK hit, typically cached by Hibernate) and
@@ -34,14 +37,48 @@ public class CurrencyResolver {
 
     private static final Logger log = LoggerFactory.getLogger(CurrencyResolver.class);
 
+    /** Global fallback when a country can't be resolved to a currency. */
+    private static final String DEFAULT_CURRENCY = "USD";
+
+    /**
+     * Backward-compatibility aliases: common long-form / colloquial country
+     * names → ISO-3166 alpha-2, for legacy free-text {@code country} values.
+     * New writes come from the ISO country pickers as alpha-2, so this map only
+     * needs to cover names that already exist in the data or that users type.
+     */
+    private static final Map<String, String> LONG_NAME_TO_ALPHA2 = Map.ofEntries(
+            Map.entry("GHANA", "GH"),
+            Map.entry("NIGERIA", "NG"),
+            Map.entry("KENYA", "KE"),
+            Map.entry("SOUTH AFRICA", "ZA"),
+            Map.entry("USA", "US"),
+            Map.entry("UNITED STATES", "US"),
+            Map.entry("UNITED STATES OF AMERICA", "US"),
+            Map.entry("UK", "GB"),
+            Map.entry("UNITED KINGDOM", "GB"),
+            Map.entry("CANADA", "CA"),
+            Map.entry("GERMANY", "DE"),
+            Map.entry("FRANCE", "FR"),
+            Map.entry("ITALY", "IT"),
+            Map.entry("SPAIN", "ES"),
+            Map.entry("NETHERLANDS", "NL"),
+            Map.entry("BELGIUM", "BE"),
+            Map.entry("IRELAND", "IE"),
+            Map.entry("PORTUGAL", "PT"),
+            Map.entry("AUSTRIA", "AT"),
+            Map.entry("FINLAND", "FI"),
+            Map.entry("AUSTRALIA", "AU"),
+            Map.entry("JAPAN", "JP"),
+            Map.entry("INDIA", "IN"));
+
     private final OrganisationRepository organisationRepository;
     private final String platformDefault;
 
     public CurrencyResolver(
             OrganisationRepository organisationRepository,
-            @Value("${app.billing.default-currency:GHS}") String platformDefault) {
+            @Value("${app.billing.default-currency:USD}") String platformDefault) {
         this.organisationRepository = organisationRepository;
-        this.platformDefault = normalise(platformDefault, "GHS");
+        this.platformDefault = normalise(platformDefault, "USD");
     }
 
     /** Resolve the tenant's default currency from the thread-local tenant context. */
@@ -84,23 +121,24 @@ public class CurrencyResolver {
      * {@code TenantRegistrationService} when the customer signs up.
      */
     public static String currencyForCountry(String country) {
-        if (country == null) return "GHS";
+        // Global default is USD; a recognised country maps to its local currency
+        // via the JDK's built-in ISO-3166 → ISO-4217 table (e.g. GH → GHS,
+        // AU → AUD, JP → JPY), so *every* country resolves correctly — not just a
+        // hand-maintained short list. Callers should send an ISO-3166 alpha-2
+        // code (the web/portal country pickers do); common long-form names are
+        // still accepted for backward-compatibility with legacy free-text data.
+        if (country == null || country.isBlank()) return DEFAULT_CURRENCY;
         String norm = country.trim().toUpperCase(Locale.ROOT);
-        return switch (norm) {
-            case "NG", "NIGERIA" -> "NGN";
-            case "KE", "KENYA" -> "KES";
-            case "ZA", "SOUTH AFRICA" -> "ZAR";
-            case "US", "USA", "UNITED STATES", "UNITED STATES OF AMERICA" -> "USD";
-            case "GB", "UK", "UNITED KINGDOM" -> "GBP";
-            // P1-12: CA added to keep the country picker on the portal/desktop
-            // (which advertises CAD) in sync with what the backend actually
-            // sets on the Organisation at registration time.
-            case "CA", "CANADA" -> "CAD";
-            case "DE", "FR", "IT", "ES", "NL", "BE", "IE", "PT", "AT", "FI",
-                 "GERMANY", "FRANCE", "ITALY", "SPAIN", "NETHERLANDS",
-                 "BELGIUM", "IRELAND", "PORTUGAL", "AUSTRIA", "FINLAND" -> "EUR";
-            default -> "GHS"; // Ghana-first fallback.
-        };
+        String alpha2 = LONG_NAME_TO_ALPHA2.getOrDefault(norm, norm);
+        if (alpha2.length() != 2) return DEFAULT_CURRENCY;
+        try {
+            Currency currency = Currency.getInstance(Locale.of("", alpha2));
+            return currency != null ? currency.getCurrencyCode() : DEFAULT_CURRENCY;
+        } catch (IllegalArgumentException e) {
+            // Not a supported ISO-3166 country code, or a territory with no
+            // currency of its own — fall back to the global default.
+            return DEFAULT_CURRENCY;
+        }
     }
 
     private static String normalise(String value, String fallback) {

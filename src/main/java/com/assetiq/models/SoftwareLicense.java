@@ -60,7 +60,7 @@ public class SoftwareLicense extends BaseEntity {
     @Column(precision = 15, scale = 2)
     private BigDecimal annualRenewalCost;
 
-    private String currency = "GHS";
+    private String currency = "USD";
 
     private LocalDate purchaseDate;
 

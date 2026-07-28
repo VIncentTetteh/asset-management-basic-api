@@ -4,6 +4,9 @@ target/
 !**/src/main/**/target/
 !**/src/test/**/target/
 
+### Local dev backend (make backend-start / backend-logs / backend-stop) ###
+.run/
+
 ### Environment Variables ###
 .env
 .env.local

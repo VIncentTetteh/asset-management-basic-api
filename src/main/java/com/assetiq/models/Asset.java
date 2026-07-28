@@ -54,7 +54,7 @@ public class Asset extends BaseEntity {
     @Column(precision = 15, scale = 2)
     private BigDecimal purchaseCost;
 
-    private String currency = "GHS";
+    private String currency = "USD";
 
     @Enumerated(EnumType.STRING)
     private DepreciationMethod depreciationMethod = DepreciationMethod.STRAIGHT_LINE;

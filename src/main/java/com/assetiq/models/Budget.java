@@ -48,7 +48,7 @@ public class Budget extends BaseEntity {
     @Column(name = "last_adjustment_note", columnDefinition = "TEXT")
     private String lastAdjustmentNote;
 
-    private String currency = "GHS";
+    private String currency = "USD";
 
     @Column(nullable = false)
     private LocalDate periodStart;

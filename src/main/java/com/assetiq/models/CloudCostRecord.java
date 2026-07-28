@@ -26,7 +26,7 @@ public class CloudCostRecord extends BaseEntity {
     private BigDecimal amount;
 
     @Column(name = "currency", length = 10)
-    private String currency = "GHS";
+    private String currency = "USD";
 
     /** Sub-service name (e.g. "EC2 Compute", "S3 Storage") */
     @Column(name = "service_name", length = 200)

@@ -35,7 +35,7 @@ public class SubscriptionPlan extends BaseEntity {
     private Long amountMinor;
 
     @Column(nullable = false, length = 10)
-    private String currency = "GHS";
+    private String currency = "USD";
 
     @Column(nullable = false)
     private Integer maxAssets;

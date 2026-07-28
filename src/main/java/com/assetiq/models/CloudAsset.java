@@ -48,7 +48,7 @@ public class CloudAsset extends BaseEntity {
     private BigDecimal monthlyCostEstimate;
 
     @Column(name = "currency", length = 10)
-    private String currency = "GHS";
+    private String currency = "USD";
 
     /** DEV, STAGING, PROD, etc. */
     @Column(name = "environment", length = 50)

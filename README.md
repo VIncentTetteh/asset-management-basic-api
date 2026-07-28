@@ -24,7 +24,7 @@ Part of the AssetIQ platform:
 ```bash
 cp .env.example .env       # fill in values — see docs/SECRETS.md; never commit .env
 docker compose up -d       # postgres + redis
-./mvnw spring-boot:run     # API at http://localhost:8085/api/v1
+./mvnw spring-boot:run     # API at http://localhost:8080/api/v1
 ```
 
 Run tests (Testcontainers requires Docker):

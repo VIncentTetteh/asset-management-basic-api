@@ -204,28 +204,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Ensure no hardcoded USD in backend production source
+      - name: Forbid hardcoded currency literals in business logic
         run: |
-          # Flag any Java file under src/main that contains the string "USD"
-          # unless it is legitimately part of exchange-rate or converter logic.
-          VIOLATIONS=$(grep -rn --include="*.java" \
-            '"USD"' src/main/java/ | \
-            grep -v "ExchangeRate\|CurrencyConverter\|// allowed" || true)
+          # Multi-currency: service/controller code must derive the currency
+          # from the tenant (CurrencyResolver), never a hardcoded ISO literal.
+          # Allow-listed by design:
+          #   - models/         → JPA entities legitimately set a non-null column
+          #                       default; the create path overrides it via
+          #                       CurrencyResolver.
+          #   - CurrencyResolver / ExchangeRate / CurrencyConverter → the
+          #                       currency machinery itself.
+          #   - *Seeder / *Test → config seeders map application.yml; tests.
+          #   - lines marked "// allowed".
+          VIOLATIONS=$(grep -rnE --include="*.java" \
+            '"(USD|GHS|NGN|EUR|GBP|KES|ZAR|CAD)"' \
+            src/main/java/com/assetiq/services/ \
+            src/main/java/com/assetiq/controllers/ | \
+            grep -v "CurrencyResolver\|ExchangeRate\|CurrencyConverter\|Seeder\|// allowed" || true)
           if [ -n "$VIOLATIONS" ]; then
-            echo "ERROR: Hardcoded 'USD' found in production source:"
+            echo "ERROR: Hardcoded currency literal in business logic — resolve via CurrencyResolver instead:"
             echo "$VIOLATIONS"
             exit 1
           fi
-          echo "OK — no hardcoded USD in production source."
+          echo "OK — no hardcoded currency literals in service/controller code."
 
-      - name: Verify Organisation defaults to GHS
+      - name: Verify platform default currency is USD
         run: |
-          grep -q '"GHS"' src/main/java/com/assetiq/models/Organisation.java && \
-            echo "OK: Organisation.billingCurrency defaults to GHS" || \
-            (echo "ERROR: Organisation does not default to GHS" && exit 1)
-
-      - name: Verify frontend portal uses GHS
-        run: |
-          grep -qE 'GHS|currency.*GH' assetiq-customer-portal/src/lib/plans.ts && \
-            echo "OK: Portal plans use GHS" || \
-            (echo "ERROR: Portal plans do not reference GHS" && exit 1)
+          grep -q 'APP_BILLING_DEFAULT_CURRENCY:USD' src/main/resources/application.yml && \
+            echo "OK: app.billing.default-currency defaults to USD" || \
+            (echo "ERROR: app.billing.default-currency is not USD" && exit 1)

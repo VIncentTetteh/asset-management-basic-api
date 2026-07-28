@@ -27,7 +27,7 @@ public class Expense extends BaseEntity {
     private BigDecimal amount;
 
     @Column(length = 3)
-    private String currency = "GHS";
+    private String currency = "USD";
 
     /** The date the cost was actually incurred. Maps to the existing expense_date column (V7). */
     @Column(name = "expense_date")

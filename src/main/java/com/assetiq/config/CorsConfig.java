@@ -42,6 +42,19 @@ public class CorsConfig {
 
         configuration.setAllowedOrigins(allowedOrigins);
 
+        // Dev convenience: local frontend tooling (Next.js, Vite, Expo) picks
+        // whatever port is free, so a fixed allow-list constantly falls behind
+        // as new dev servers land on 3001, 3002, 3003, ... Origin PATTERNS
+        // (unlike the literal "*" rejected above) remain compatible with
+        // allowCredentials(true) — each request is still matched against a
+        // concrete Origin header, this just widens what "concrete" can be.
+        // Production/non-dev profiles never get this — only the explicit
+        // app.cors.allowed-origins list applies there.
+        if (isDevProfile()) {
+            configuration.addAllowedOriginPattern("http://localhost:*");
+            configuration.addAllowedOriginPattern("http://127.0.0.1:*");
+        }
+
         // Strict HTTP method allowlist
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));
 

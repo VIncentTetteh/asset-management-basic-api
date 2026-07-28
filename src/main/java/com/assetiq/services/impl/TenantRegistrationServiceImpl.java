@@ -94,7 +94,7 @@ public class TenantRegistrationServiceImpl implements TenantRegistrationService 
         // P1-12: Infer the billing currency from the registered country so every
         // downstream flow (billing, checkout, asset pricing) uses the right
         // currency from day one. Blank / unknown countries fall back to the
-        // platform default (GHS) — see CurrencyResolver#currencyForCountry.
+        // global platform default (USD) — see CurrencyResolver#currencyForCountry.
         String inferredCurrency = CurrencyResolver.currencyForCountry(request.getCountry());
         org.setBillingCurrency(inferredCurrency);
 

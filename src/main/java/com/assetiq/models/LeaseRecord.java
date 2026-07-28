@@ -34,7 +34,7 @@ public class LeaseRecord extends BaseEntity {
     private BigDecimal monthlyPayment;
 
     @Column(length = 3)
-    private String currency = "GHS";
+    private String currency = "USD";
 
     @Column(name = "auto_renew")
     private Boolean autoRenew = false;
