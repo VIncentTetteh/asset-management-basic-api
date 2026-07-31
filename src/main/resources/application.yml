@@ -303,6 +303,13 @@ app:
   billing:
     default-currency: ${APP_BILLING_DEFAULT_CURRENCY:USD}
     callback-url: ${APP_BILLING_CALLBACK_URL:http://localhost:3000/billing/verify}
+    # What happens after Paystack reports a failed payment. SubscriptionDunningJob
+    # runs daily at 09:00 UTC and counts from OrganisationSubscription.pastDueSince.
+    # Reminders go out on each listed day; at grace-days the tenant is moved to
+    # Freemium — never locked out, and nothing is deleted.
+    dunning:
+      reminder-days: ${APP_BILLING_DUNNING_REMINDER_DAYS:1,3,7}
+      grace-days: ${APP_BILLING_DUNNING_GRACE_DAYS:14}
     # Paystack supports card + mobile money (MTN, Telecel, AirtelTigo)
     # + bank + USSD on Ghana accounts. Enumerated here so the channel list is
     # forwarded to initializeTransaction.

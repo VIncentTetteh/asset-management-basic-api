@@ -42,6 +42,15 @@ public class OrganisationSubscription extends BaseEntity {
 
     private Instant canceledAt;
 
+    /**
+     * When this subscription first entered {@link SubscriptionStatus#PAST_DUE}.
+     *
+     * <p>The dunning clock. Set alongside the PAST_DUE transition, cleared when the
+     * account recovers or is downgraded. Deliberately separate from {@code updatedAt},
+     * which any unrelated write would bump — silently restarting the grace period.
+     */
+    private Instant pastDueSince;
+
     @Column(length = 120)
     private String paystackCustomerCode;
 
