@@ -15,16 +15,22 @@ import org.springframework.stereotype.Component;
  * Seed the public subscription plan ladder.
  *
  * <p>AssetIQ's public pricing surface lists four packages: Freemium, Basic,
- * Business, and Enterprise. Amounts are expressed in <em>pesewa</em>
- * (GHS × 100) so they map cleanly to Paystack's minor-unit convention.
+ * Business, and Enterprise. Amounts are expressed in the platform's minor unit
+ * (currency × 100), matching Paystack's minor-unit convention. The currency is
+ * whatever {@code app.billing.default-currency} resolves to — USD since the
+ * multi-currency migration, not the GHS this once assumed.
  *
  * <ul>
- *   <li><b>FREEMIUM</b> — free plan for small teams.</li>
- *   <li><b>BASIC</b> — GHS 99/month. 250 assets, 10 users, core modules.</li>
- *   <li><b>BUSINESS</b> — GHS 799/month. 10,000 assets, 250 users,
+ *   <li><b>FREEMIUM</b> — free. 50 assets, 5 employees.</li>
+ *   <li><b>BASIC</b> — 99/month. 250 assets, 10 employees, core modules.</li>
+ *   <li><b>BUSINESS</b> — 799/month. 10,000 assets, 250 employees,
  *       full observability + audit retention.</li>
  *   <li><b>ENTERPRISE</b> — quote-based, unlimited, SSO, dedicated support.</li>
  * </ul>
+ *
+ * <p>Keep these figures and the {@code @Value} defaults below in agreement. They
+ * silently diverged once already: the defaults were re-denominated to USD while
+ * this list still said GHS, leaving Business at $100 against Basic's $99.
  *
  * <p>Every numeric is overridable via {@code application.yml} / env vars so
  * promotional pricing and regional experiments don't require a code change.
@@ -48,15 +54,20 @@ public class BillingPlanSeeder implements ApplicationRunner {
     @Value("${app.billing.plans.basic.paystack-plan-code:}")
     private String basicPaystackPlanCode;
 
-    // ── Business ($100/mo = 10000 cents) ────────────────────────────────────
-    @Value("${app.billing.plans.business.amount-minor:10000}")
+    // ── Business ($799/mo = 79900 cents) ────────────────────────────────────
+    // Was 10000 ($100) — a dollar above Basic's $99, which is not a ladder. The
+    // amount drifted from the documented 799 during the GHS→USD migration while
+    // the tier boundaries (10,000 assets / 250 users) stayed put.
+    @Value("${app.billing.plans.business.amount-minor:79900}")
     private Long businessAmount;
 
     @Value("${app.billing.plans.business.paystack-plan-code:}")
     private String businessPaystackPlanCode;
 
-    // ── Business Annual ($1,080/yr = 108000 cents, 10% off $1,200) ──────────
-    @Value("${app.billing.plans.business-annual.amount-minor:108000}")
+    // ── Business Annual ($8,629.20/yr = 862920 cents, 10% off $9,588) ───────
+    // Re-derived from the corrected monthly: 799 × 12 = 9,588, less the same 10%
+    // annual discount the previous figure used.
+    @Value("${app.billing.plans.business-annual.amount-minor:862920}")
     private Long businessAnnualAmount;
 
     @Value("${app.billing.plans.business-annual.paystack-plan-code:}")
