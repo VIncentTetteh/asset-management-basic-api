@@ -79,6 +79,23 @@ public class User extends BaseEntity {
     @Column(name = "reset_password_token_used", columnDefinition = "boolean default false")
     private Boolean resetPasswordTokenUsed = false;
 
+    /**
+     * When this address was proven to belong to the account holder. NULL means unverified.
+     *
+     * <p>Deliberately a timestamp rather than a boolean: "when did they verify" is the
+     * question compliance and support actually ask, and it answers "is verified" too.
+     * V26 backfills every pre-existing user so enabling enforcement cannot lock them out.
+     */
+    @Column(name = "email_verified_at")
+    private Instant emailVerifiedAt;
+
+    /** SHA-256 hash of the emailed verification token — never the token itself. */
+    @Column(name = "email_verification_token", length = 100)
+    private String emailVerificationToken;
+
+    @Column(name = "email_verification_token_expiry")
+    private Instant emailVerificationTokenExpiry;
+
     @ManyToOne(fetch = FetchType.LAZY)
     private Organisation organisation;
 
@@ -118,5 +135,10 @@ public class User extends BaseEntity {
     /** Returns true if the account is currently within a lockout window. */
     public boolean isLockedOut() {
         return lockedUntil != null && Instant.now().isBefore(lockedUntil);
+    }
+
+    /** Returns true once the address has been proven to belong to the account holder. */
+    public boolean isEmailVerified() {
+        return emailVerifiedAt != null;
     }
 }

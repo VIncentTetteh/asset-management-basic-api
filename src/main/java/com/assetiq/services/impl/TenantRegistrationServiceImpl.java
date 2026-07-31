@@ -18,6 +18,7 @@ import com.assetiq.repositories.UserRepository;
 import com.assetiq.security.JwtUtil;
 import com.assetiq.services.CurrencyResolver;
 import com.assetiq.services.EmailService;
+import com.assetiq.services.EmailVerificationService;
 import com.assetiq.services.TenantRegistrationService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
@@ -39,6 +40,7 @@ public class TenantRegistrationServiceImpl implements TenantRegistrationService 
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
     private final EmailService emailService;
+    private final EmailVerificationService emailVerificationService;
 
     @Value("${app.email.base-url:http://localhost:3000}")
     private String emailBaseUrl;
@@ -50,7 +52,8 @@ public class TenantRegistrationServiceImpl implements TenantRegistrationService 
             OrganisationSubscriptionRepository organisationSubscriptionRepository,
             PasswordEncoder passwordEncoder,
             JwtUtil jwtUtil,
-            EmailService emailService) {
+            EmailService emailService,
+            EmailVerificationService emailVerificationService) {
         this.organisationRepository = organisationRepository;
         this.roleRepository = roleRepository;
         this.userRepository = userRepository;
@@ -59,6 +62,7 @@ public class TenantRegistrationServiceImpl implements TenantRegistrationService 
         this.passwordEncoder = passwordEncoder;
         this.jwtUtil = jwtUtil;
         this.emailService = emailService;
+        this.emailVerificationService = emailVerificationService;
     }
 
     @Override
@@ -202,6 +206,13 @@ public class TenantRegistrationServiceImpl implements TenantRegistrationService 
         model.put("email", savedUser.getEmail());
         model.put("loginUrl", emailBaseUrl.replaceAll("/+$", "") + "/login");
         emailService.sendTemplate(savedUser.getEmail(), "Welcome to AssetIQ", "email/tenant-welcome", model);
+
+        // New signups start unverified (the V26 backfill only grandfathers accounts that
+        // predate verification). The response still carries a working token so the
+        // just-registered admin lands straight in the app; once it expires they must
+        // have verified to sign in again. That trade keeps signup frictionless while
+        // still making an unconfirmed address a dead end.
+        emailVerificationService.sendVerificationEmail(savedUser);
 
         return response;
     }

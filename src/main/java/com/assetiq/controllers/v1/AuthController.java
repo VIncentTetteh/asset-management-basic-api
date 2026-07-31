@@ -10,6 +10,7 @@ import com.assetiq.security.JwtBlacklist;
 import com.assetiq.security.JwtUtil;
 import com.assetiq.security.PermissionCacheService;
 import com.assetiq.services.EmailService;
+import com.assetiq.services.EmailVerificationService;
 import com.assetiq.enums.UserStatus;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -59,6 +60,7 @@ public class AuthController {
     private final JwtBlacklist jwtBlacklist;
     private final EmailService emailService;
     private final PermissionCacheService permissionCacheService;
+    private final EmailVerificationService emailVerificationService;
 
     @Value("${app.jwt.expiration:86400000}")
     private long jwtExpirationMillis;
@@ -74,10 +76,16 @@ public class AuthController {
     @Value("${app.auth.cookie-secure:true}")
     private boolean authCookieSecure;
 
+    // Secure-by-default, same convention as cookie-secure above: production enforces,
+    // dev and test relax it so local work and the test suite don't need a mail server.
+    @Value("${app.auth.require-email-verification:true}")
+    private boolean requireEmailVerification;
+
     public AuthController(UserRepository userRepository, OrganisationRepository organisationRepository,
             RoleRepository roleRepository, PasswordEncoder passwordEncoder, JwtUtil jwtUtil,
             JwtBlacklist jwtBlacklist, EmailService emailService,
-            PermissionCacheService permissionCacheService) {
+            PermissionCacheService permissionCacheService,
+            EmailVerificationService emailVerificationService) {
         this.userRepository = userRepository;
         this.organisationRepository = organisationRepository;
         this.roleRepository = roleRepository;
@@ -86,6 +94,7 @@ public class AuthController {
         this.jwtBlacklist = jwtBlacklist;
         this.emailService = emailService;
         this.permissionCacheService = permissionCacheService;
+        this.emailVerificationService = emailVerificationService;
     }
 
     /**
@@ -208,6 +217,23 @@ public class AuthController {
         if (user.getStatus() != UserStatus.ACTIVE) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN)
                     .body(Map.of("error", "User account is " + user.getStatus().toString().toLowerCase()));
+        }
+
+        // ── Email verification gate ──────────────────────────────────────────
+        // Placed after the password check on purpose: an attacker must already know
+        // the password before this response tells them anything, so it leaks no
+        // information about which addresses are registered.
+        //
+        // Users created before V26 were backfilled as verified, so enabling this
+        // cannot lock out an existing account.
+        if (requireEmailVerification && !user.isEmailVerified()) {
+            log.info("[AUTH] Login blocked pending email verification for user {}", user.getId());
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of(
+                            "error", "Please verify your email address before signing in.",
+                            // Machine-readable so the client can offer "resend" rather than
+                            // having to string-match the message.
+                            "emailVerificationRequired", true));
         }
 
         // ── MFA check ────────────────────────────────────────────────────────
@@ -346,6 +372,50 @@ public class AuthController {
         return ResponseEntity.ok(Map.of(
                 "token", newToken,
                 "expiresIn", jwtExpirationMillis / 1000));
+    }
+
+    /**
+     * Redeem a signup verification link.
+     *
+     * <p>Public by necessity — the whole point is that the user cannot sign in yet.
+     * Safe because the token is 32 random bytes plus an HMAC signature and is
+     * single-use; guessing one is not a realistic attack.
+     */
+    @PostMapping("/verify-email")
+    public ResponseEntity<?> verifyEmail(@RequestBody Map<String, String> body) {
+        String token = body == null ? null : body.get("token");
+
+        return emailVerificationService.verify(token)
+                .<ResponseEntity<?>>map(user -> ResponseEntity.ok(Map.of(
+                        "message", "Email verified. You can now sign in.",
+                        "email", user.getEmail())))
+                .orElseGet(() -> ResponseEntity.badRequest().body(Map.of(
+                        "error", "This verification link is invalid or has expired. "
+                                + "Request a new one and try again.")));
+    }
+
+    /**
+     * Send a fresh verification link.
+     *
+     * <p>Always responds identically whether or not the address exists or is already
+     * verified — same user-enumeration defence as {@code /forgot-password}.
+     */
+    @PostMapping("/resend-verification")
+    public ResponseEntity<?> resendVerification(@RequestBody Map<String, String> body) {
+        String email = body == null ? null : body.get("email");
+
+        if (email != null && !email.isBlank()) {
+            // The same address can exist in several organisations; each account
+            // verifies independently, so every unverified match gets a link.
+            for (User user : userRepository.findAllByEmail(email)) {
+                if (!user.isEmailVerified()) {
+                    emailVerificationService.sendVerificationEmail(user);
+                }
+            }
+        }
+
+        return ResponseEntity.ok(Map.of(
+                "message", "If that address needs verification, a new link is on its way."));
     }
 
     /**

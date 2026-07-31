@@ -64,6 +64,13 @@ public interface UserRepository extends JpaRepository<User, UUID> {
 
     Optional<User> findByResetPasswordToken(String resetPasswordToken);
 
+    /**
+     * Look up a pending signup verification by the SHA-256 hash of the emailed token.
+     * Unscoped by organisation on purpose — the caller is not yet authenticated and
+     * therefore has no tenant context.
+     */
+    Optional<User> findByEmailVerificationToken(String emailVerificationToken);
+
     long countByOrganisationAndDeletedAtIsNull(Organisation organisation);
 
     Optional<User> findByEmployeeId(String userEmployeeId);
