@@ -59,7 +59,7 @@ public class TenantFilter extends OncePerRequestFilter {
             UUID orgIdFromToken = extractOrgIdFromToken(auth);
 
             if (orgIdFromToken != null) {
-                if (organisationRepository.existsById(orgIdFromToken)) {
+                if (organisationRepository.existsByIdAndDeletedAtIsNull(orgIdFromToken)) {
                     TenantContext.setOrganisationId(orgIdFromToken);
                 } else {
                     response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Organisation not found or inactive");
@@ -76,7 +76,7 @@ public class TenantFilter extends OncePerRequestFilter {
                 }
                 if (user.getOrganisation() != null && user.getOrganisation().getId() != null) {
                     UUID orgId = user.getOrganisation().getId();
-                    if (organisationRepository.existsById(orgId)) {
+                    if (organisationRepository.existsByIdAndDeletedAtIsNull(orgId)) {
                         TenantContext.setOrganisationId(orgId);
                     }
                 }
@@ -87,7 +87,7 @@ public class TenantFilter extends OncePerRequestFilter {
             if (header != null && !header.isBlank()) {
                 try {
                     UUID orgId = UUID.fromString(header.trim());
-                    if (organisationRepository.existsById(orgId)) {
+                    if (organisationRepository.existsByIdAndDeletedAtIsNull(orgId)) {
                         TenantContext.setOrganisationId(orgId);
                     }
                 } catch (IllegalArgumentException e) {

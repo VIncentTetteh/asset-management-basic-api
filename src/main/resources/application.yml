@@ -287,6 +287,15 @@ app:
       # (e.g. mounted as a Kubernetes secret). Ignored when service-account-key is set.
       credentials-file: ${GOOGLE_APPLICATION_CREDENTIALS:}
 
+  # ── Account closure ──────────────────────────────────────────────────────────
+  # How long a closed tenant stays recoverable before AccountPurgeJob destroys it.
+  # Closure revokes access immediately; this only governs when the rows go.
+  # Shortening this weakens recovery from accidental deletion; lengthening it means
+  # holding personal data longer than the customer asked. 30 days is the usual
+  # compromise and is what the closure email promises.
+  account:
+    purge-retention-days: ${APP_ACCOUNT_PURGE_RETENTION_DAYS:30}
+
   storage:
     s3:
       enabled: ${APP_STORAGE_S3_ENABLED:false}
@@ -321,10 +330,10 @@ app:
         amount-minor: ${APP_BILLING_BASIC_AMOUNT:9900}
         paystack-plan-code: ${APP_BILLING_BASIC_PAYSTACK_PLAN_CODE:}
       business:
-        amount-minor: ${APP_BILLING_BUSINESS_AMOUNT:10000}  # $100.00
+        amount-minor: ${APP_BILLING_BUSINESS_AMOUNT:79900}  # $799.00
         paystack-plan-code: ${APP_BILLING_BUSINESS_PAYSTACK_PLAN_CODE:}
       business-annual:
-        amount-minor: ${APP_BILLING_BUSINESS_ANNUAL_AMOUNT:108000}  # $1,080.00 (10% off $1,200)
+        amount-minor: ${APP_BILLING_BUSINESS_ANNUAL_AMOUNT:862920}  # $8,629.20 (10% off $9,588)
         paystack-plan-code: ${APP_BILLING_BUSINESS_ANNUAL_PAYSTACK_PLAN_CODE:}
 
 # ── AI / LLM ─────────────────────────────────────────────────────────────────

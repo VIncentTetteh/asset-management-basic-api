@@ -10,12 +10,16 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 public interface EmployeeRepository extends JpaRepository<Employee, UUID> {
 
     Optional<Employee> findByIdAndOrganisationAndDeletedAtIsNull(UUID id, Organisation organisation);
+
+    /** Full roster for a tenant — used by the account data export. */
+    List<Employee> findByOrganisationAndDeletedAtIsNull(Organisation organisation);
 
     Optional<Employee> findByUserAndOrganisationAndDeletedAtIsNull(User user, Organisation organisation);
 

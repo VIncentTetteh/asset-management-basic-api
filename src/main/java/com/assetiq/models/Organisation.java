@@ -63,4 +63,14 @@ public class Organisation extends BaseEntity {
     @Column(name = "email_domain", unique = true, nullable = true)
     private String emailDomain;
 
+    /**
+     * When a closed account becomes eligible for permanent deletion.
+     *
+     * <p>Set alongside {@code deletedAt} when a tenant confirms closure; access stops
+     * immediately but the rows survive until this passes, so an accidental or malicious
+     * closure can still be undone. NULL for live accounts.
+     */
+    @Column(name = "purge_after")
+    private java.time.Instant purgeAfter;
+
 }
