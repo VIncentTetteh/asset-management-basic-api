@@ -37,10 +37,16 @@
 		     instead of failing every build. Launch target: 50/30 (raise here as
 		     the suite grows). Overridable per-build with `-Djacoco.line.min=0.4`.
 		     The gate runs at the `verify` phase so `mvn test` alone stays fast
-		     during TDD; CI runs `mvn verify` to enforce it. -->
+		     during TDD; CI runs `mvn verify` to enforce it.
+
+		     Ratcheted 2026-07-29 to 28/14: the cross-tenant isolation suite took
+		     the measured figure to 29% line / 15% branch, and the floor tracks
+		     just under it so the gain cannot silently regress. Keep raising this
+		     toward 50/30 as coverage lands — never set it above measured reality,
+		     which is what made the original 30/20 gate a no-op. -->
 		<jacoco.version>0.8.12</jacoco.version>
-		<jacoco.line.min>0.25</jacoco.line.min>
-		<jacoco.branch.min>0.12</jacoco.branch.min>
+		<jacoco.line.min>0.28</jacoco.line.min>
+		<jacoco.branch.min>0.14</jacoco.branch.min>
 	</properties>
 	<dependencies>
 		<dependency>
