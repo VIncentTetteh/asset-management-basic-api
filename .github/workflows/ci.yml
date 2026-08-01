@@ -32,38 +32,25 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
 
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: assetiq_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd="pg_isready -U postgres"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=10
-
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd="redis-cli ping"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=10
+    # No postgres/redis service containers here, deliberately.
+    #
+    # This job used to run one of each and point SPRING_DATASOURCE_* at them, which is
+    # why CI had never once been green: env vars override application.properties, so the
+    # URL became jdbc:postgresql://... while the test profile's
+    # spring.datasource.driver-class-name stayed org.h2.Driver. The H2 driver cannot open
+    # a postgres URL, so Hibernate could not read JDBC metadata, could not determine a
+    # dialect, and every plain @SpringBootTest context failed to load
+    # ("ApplicationContext failure threshold (1) exceeded"). It reproduced nowhere else,
+    # because locally nothing sets those variables.
+    #
+    # The suite does not need them. Unit and slice tests run on in-memory H2 configured
+    # by src/test/resources/application.properties, and the tests that genuinely require
+    # real PostgreSQL (BaseIntegrationTest subclasses, FlywayMigrationTest,
+    # AccountPurgeCascadeTest) start their own container via Testcontainers, which is
+    # available on the runner through the Docker daemon. Redis is excluded outright by
+    # spring.autoconfigure.exclude in the same file.
 
     env:
-      # Non-secret test fixtures. Real secrets live only in prod environments.
-      SPRING_DATASOURCE_URL: jdbc:postgresql://localhost:5432/assetiq_test
-      SPRING_DATASOURCE_USERNAME: postgres
-      SPRING_DATASOURCE_PASSWORD: postgres
-      SPRING_REDIS_HOST: localhost
-      SPRING_REDIS_PORT: 6379
       # The StartupSecurityValidator insists on high-entropy dev secrets; give it some.
       APP_JWT_SECRET: ci-only-jwt-secret-do-not-use-in-production-xxxxxxxxxxxxxxxxxxxx
       PAYSTACK_SECRET_KEY: sk_test_ci_placeholder
