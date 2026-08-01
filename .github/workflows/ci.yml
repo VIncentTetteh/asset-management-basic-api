@@ -51,9 +51,18 @@ jobs:
     # spring.autoconfigure.exclude in the same file.
 
     env:
-      # The StartupSecurityValidator insists on high-entropy dev secrets; give it some.
-      APP_JWT_SECRET: ci-only-jwt-secret-do-not-use-in-production-xxxxxxxxxxxxxxxxxxxx
-      PAYSTACK_SECRET_KEY: sk_test_ci_placeholder
+      # Only what src/test/resources/application.properties cannot express itself.
+      #
+      # Nothing here may duplicate a value the test profile already sets. Environment
+      # variables outrank application.properties, so a well-meaning override silently
+      # desynchronises CI from every developer machine — which is precisely how this
+      # workflow stayed red. Two separate failures came from exactly that:
+      # SPRING_DATASOURCE_URL against the profile's H2 driver, and PAYSTACK_SECRET_KEY
+      # against the fixed key EamIntegrationHarnessTest signs its webhook payloads with
+      # (the app verified the HMAC with the CI placeholder and returned 401).
+      #
+      # StartupSecurityValidator is satisfied by the skip flag below, so it needs no
+      # high-entropy secrets injected here.
       APP_STARTUP_SKIP_SECRET_VALIDATION: "true"
       SPRING_PROFILES_ACTIVE: test
 
