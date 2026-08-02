@@ -8,6 +8,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -16,9 +19,11 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
@@ -240,6 +245,100 @@ class CrossTenantIsolationTest {
                 .andExpect(status().is4xxClientError());
     }
 
+    // ── Everything else with a get-by-id ──────────────────────────────────────
+
+    /**
+     * The rest of the resources that expose {@code GET /{id}}.
+     *
+     * <p>Driven from a table rather than hand-written per resource, because the
+     * interesting property is uniformity: isolation here is enforced service by
+     * service, so the resource nobody thought to check is exactly the one that leaks.
+     * Adding a row is cheap enough that there is no excuse for a new endpoint to go
+     * uncovered.
+     *
+     * <p>Each entry is a path, a create payload, the value that must never appear in
+     * org B's responses, and a query suffix for the handful of endpoints that demand
+     * extra parameters on create. {@code {orgId}} is substituted with the creating
+     * tenant's organisation — depreciation policies require it as a request parameter
+     * even though the tenant is already established by the JWT.
+     */
+    static Stream<Arguments> tenantScopedResources() {
+        String s = UUID.randomUUID().toString().substring(0, 8);
+        return Stream.of(
+                Arguments.of("departments", "/api/v1/departments",
+                        Map.<String, Object>of("name", "Alpha Dept " + s), "Alpha Dept " + s, ""),
+
+                Arguments.of("depreciation policies", "/api/v1/depreciation-policies",
+                        Map.<String, Object>of(
+                                "name", "Alpha Policy " + s,
+                                "method", "STRAIGHT_LINE",
+                                "usefulLifeMonths", 60,
+                                "salvageValuePercent", 10),
+                        "Alpha Policy " + s, "?organisationId={orgId}"),
+
+                // Webhooks hand back an HMAC signing secret on create. A cross-tenant read
+                // would let another tenant forge signed deliveries, so this one matters
+                // well beyond the usual "they can see our data".
+                Arguments.of("webhooks", "/api/v1/webhooks",
+                        Map.<String, Object>of(
+                                "name", "Alpha Hook " + s,
+                                "url", "https://alpha-" + s + ".example.com/hook",
+                                "events", List.of("test.webhook"),
+                                "active", true),
+                        "Alpha Hook " + s, ""),
+
+                // Software licences store licence keys — vendor credentials in all but name.
+                Arguments.of("software licences", "/api/v1/licenses",
+                        Map.<String, Object>of(
+                                "name", "Alpha Licence " + s,
+                                "vendor", "Alpha Vendor",
+                                "licenseKey", "ALPHA-KEY-" + s,
+                                "licenseType", "SUBSCRIPTION",
+                                "status", "ACTIVE"),
+                        "ALPHA-KEY-" + s, ""),
+
+                Arguments.of("budgets", "/api/v1/budgets",
+                        Map.<String, Object>of(
+                                "name", "Alpha Budget " + s,
+                                "totalAmount", 50000,
+                                "periodStart", "2026-01-01",
+                                "periodEnd", "2026-12-31",
+                                "status", "DRAFT"),
+                        "Alpha Budget " + s, ""),
+
+                Arguments.of("contracts", "/api/v1/contracts",
+                        Map.<String, Object>of(
+                                "title", "Alpha Contract " + s,
+                                "contractNumber", "ALPHA-CTR-" + s,
+                                "contractType", "SERVICE_LEVEL_AGREEMENT",
+                                "status", "DRAFT",
+                                "startDate", "2026-01-01",
+                                "endDate", "2026-12-31",
+                                "alertDaysBefore", 30),
+                        "ALPHA-CTR-" + s, ""));
+    }
+
+    @ParameterizedTest(name = "org B cannot read org A''s {0}")
+    @MethodSource("tenantScopedResources")
+    @DisplayName("get-by-id is tenant-scoped across the remaining resources")
+    void getById_deniedAcrossTenants(String label, String path, Map<String, Object> payload,
+                                     String marker, String createQuery) throws Exception {
+        UUID id = createJson(path + resolve(createQuery), orgA, payload);
+
+        assertReadable(path + "/" + id, orgA, marker);
+        assertNotReadable(path + "/" + id, orgB, marker);
+    }
+
+    @ParameterizedTest(name = "the {0} list never leaks across tenants")
+    @MethodSource("tenantScopedResources")
+    @DisplayName("list endpoints are tenant-scoped across the remaining resources")
+    void list_doesNotLeakAcrossTenants(String label, String path, Map<String, Object> payload,
+                                       String marker, String createQuery) throws Exception {
+        createJson(path + resolve(createQuery), orgA, payload);
+
+        assertListExcludes(path, orgB, marker);
+    }
+
     // ── Generated artefacts ───────────────────────────────────────────────────
 
     @Test
@@ -318,6 +417,11 @@ class CrossTenantIsolationTest {
                 result.getResponse().getContentAsString(), TenantRegisterResponse.class);
 
         return new Tenant(resp.getOrganisationId(), resp.getToken(), suffix);
+    }
+
+    /** Fills the {orgId} placeholder used by create endpoints that demand it as a parameter. */
+    private String resolve(String queryTemplate) {
+        return queryTemplate.replace("{orgId}", orgA.organisationId().toString());
     }
 
     private String nextClient() {

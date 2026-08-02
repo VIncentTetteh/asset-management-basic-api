@@ -43,10 +43,13 @@
 		     the measured figure to 29% line / 15% branch, and the floor tracks
 		     just under it so the gain cannot silently regress. Keep raising this
 		     toward 50/30 as coverage lands — never set it above measured reality,
-		     which is what made the original 30/20 gate a no-op. -->
+		     which is what made the original 30/20 gate a no-op.
+
+		     Ratcheted again 2026-08-02 to 30/16, measured 31% / 17% after the
+		     account-lifecycle and extended-isolation suites landed. -->
 		<jacoco.version>0.8.12</jacoco.version>
-		<jacoco.line.min>0.28</jacoco.line.min>
-		<jacoco.branch.min>0.14</jacoco.branch.min>
+		<jacoco.line.min>0.30</jacoco.line.min>
+		<jacoco.branch.min>0.16</jacoco.branch.min>
 	</properties>
 	<dependencies>
 		<dependency>
