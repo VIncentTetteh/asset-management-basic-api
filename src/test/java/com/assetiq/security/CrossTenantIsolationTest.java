@@ -69,7 +69,7 @@ class CrossTenantIsolationTest {
     private Tenant orgB;
 
     /** A registered organisation plus the admin token that speaks for it. */
-    private record Tenant(UUID organisationId, String token, String suffix) {}
+    private record Tenant(UUID organisationId, UUID userId, String token, String suffix) {}
 
     @BeforeEach
     void registerBothTenants() throws Exception {
@@ -363,6 +363,35 @@ class CrossTenantIsolationTest {
 
     // ── Tenant context plumbing ───────────────────────────────────────────────
 
+    // ── MFA ───────────────────────────────────────────────────────────────────
+    // The admin MFA reset is a security control that takes a user id straight from
+    // the path, so it is the textbook shape for a cross-tenant defect — and it was
+    // one: findById reached across organisations, letting an admin in org A strip a
+    // second factor off an account in org B. @PreAuthorize proves the caller is *an*
+    // admin, never that they administer *this* user.
+
+    @Test
+    @DisplayName("an admin can reset MFA for a user in their own organisation")
+    void adminMfaReset_allowedWithinOwnTenant() throws Exception {
+        // Positive control: without this, the denial test below would also pass if the
+        // endpoint were simply broken for everyone.
+        mockMvc.perform(auth(delete("/api/v1/mfa/admin/reset/" + orgB.userId()), orgB))
+                .andExpect(status().is2xxSuccessful());
+    }
+
+    @Test
+    @DisplayName("an admin cannot reset MFA for a user in another organisation")
+    void adminMfaReset_deniedAcrossTenants() throws Exception {
+        MvcResult result = mockMvc.perform(
+                        auth(delete("/api/v1/mfa/admin/reset/" + orgB.userId()), orgA))
+                .andExpect(status().is4xxClientError())
+                .andReturn();
+
+        // Org B's admin address must not appear in the response: a 4xx that still echoes
+        // the target's email would confirm the account exists and leak it.
+        assertThat(result.getResponse().getContentAsString()).doesNotContain(orgB.suffix());
+    }
+
     @Test
     @DisplayName("a spoofed X-Organisation-Id header cannot override the JWT's tenant claim")
     void spoofedOrganisationHeader_isIgnored() throws Exception {
@@ -416,7 +445,7 @@ class CrossTenantIsolationTest {
         TenantRegisterResponse resp = objectMapper.readValue(
                 result.getResponse().getContentAsString(), TenantRegisterResponse.class);
 
-        return new Tenant(resp.getOrganisationId(), resp.getToken(), suffix);
+        return new Tenant(resp.getOrganisationId(), resp.getUserId(), resp.getToken(), suffix);
     }
 
     /** Fills the {orgId} placeholder used by create endpoints that demand it as a parameter. */

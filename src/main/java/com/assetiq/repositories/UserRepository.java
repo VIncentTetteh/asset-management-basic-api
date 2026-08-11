@@ -25,6 +25,16 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     @EntityGraph(attributePaths = {"role", "organisation", "department"})
     Optional<User> findByEmailAndOrganisationId(String email, UUID organisationId);
 
+    /**
+     * Tenant-scoped lookup by primary key. Prefer this over {@link #findById(UUID)}
+     * in any request-scoped path: a bare findById on a client-supplied UUID reaches
+     * across organisations, which is how the MFA admin-reset cross-tenant defect
+     * arose. Takes the organisation id directly so callers can pass
+     * {@code TenantContext.getOrganisationId()} without loading the entity.
+     */
+    @EntityGraph(attributePaths = {"role", "organisation", "department"})
+    Optional<User> findByIdAndOrganisationId(UUID id, UUID organisationId);
+
     @Override
     @EntityGraph(attributePaths = {"role", "organisation", "department"})
     Optional<User> findById(UUID id);
