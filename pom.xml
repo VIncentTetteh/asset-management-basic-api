@@ -261,6 +261,17 @@
 			<scope>runtime</scope>
 		</dependency>
 
+		<!-- Micrometer Prometheus registry.
+		     application.yml has exposed the `prometheus` actuator endpoint and set
+		     management.prometheus.metrics.export.enabled=true since the beginning, but
+		     without this dependency Spring Boot registers no Prometheus registry and
+		     /actuator/prometheus simply 404s — the application had no metrics at all
+		     while appearing, in config and in the README, to have them. -->
+		<dependency>
+			<groupId>io.micrometer</groupId>
+			<artifactId>micrometer-registry-prometheus</artifactId>
+		</dependency>
+
 		<!-- ShedLock — ensures each @Scheduled job runs on exactly one instance.
 		     Spring's scheduler is per-JVM, so every replica fires every cron
 		     independently: monthly depreciation double-posts, dunning double-emails

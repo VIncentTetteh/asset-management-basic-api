@@ -390,6 +390,29 @@ management:
       show-components: when-authorized
       probes:
         enabled: true
+      # Readiness decides whether the load balancer sends this instance traffic.
+      # Spring's default readiness group contains only `readinessState`, which
+      # reports UP as soon as the context has started — so an instance whose
+      # database or Redis connection is dead still advertises itself as ready and
+      # serves 500s. Naming the dependencies this instance cannot usefully serve
+      # without makes readiness mean what the platform assumes it means.
+      #
+      # Liveness deliberately stays as `livenessState` alone: a database outage
+      # must not cause the orchestrator to kill and restart every replica, which
+      # turns a recoverable dependency failure into a crash loop.
+      #
+      # validate-group-membership must stay false because `redis` is genuinely
+      # optional here — RedisRateLimiter degrades to NoOpRateLimiter and SsoController
+      # falls back to in-memory state when it is absent, and the test profile excludes
+      # Redis autoconfiguration outright. With validation on, naming a contributor that
+      # does not exist in the current profile aborts startup. Off, readiness covers
+      # Redis wherever it is configured and quietly ignores it where it is not.
+      validate-group-membership: false
+      group:
+        readiness:
+          include: readinessState,db,redis
+        liveness:
+          include: livenessState
   health:
     probes:
       enabled: true
@@ -420,9 +443,14 @@ logging:
     # Spring Data Redis emits for every JPA repository interface on startup.
     # They are harmless — Redis correctly finds 0 Redis repositories — but noisy.
     org.springframework.data.repository.config.RepositoryConfigurationExtensionSupport: WARN
+  # NOTE: logback-spring.xml owns the appenders and their patterns (logging.config
+  # above points at it), so these two keys are inert for the app's own appenders.
+  # They are kept in sync anyway so that anything reading them — or any appender
+  # later defined through Boot's defaults — carries the correlation id too.
+  # %X{requestId} is the id set by RequestCorrelationIdInterceptor; "-" when absent.
   pattern:
-    console: "%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
-    file: "%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+    console: "%d{HH:mm:ss.SSS} [%thread] [%X{requestId:--}] %-5level %logger{36} - %msg%n"
+    file: "%d{HH:mm:ss.SSS} [%thread] [%X{requestId:--}] %-5level %logger{36} - %msg%n"
 
 # ── Sentry ────────────────────────────────────────────────────────────────────
 sentry:

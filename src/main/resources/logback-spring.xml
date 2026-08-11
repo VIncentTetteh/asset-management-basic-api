@@ -1,37 +1,40 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
     <property name="LOG_FILE" value="${LOG_FILE:-${LOG_PATH:-${LOG_TEMP:-${java.io.tmpdir:-/tmp}}/spring.log}}"/>
-    <property name="LOG_PATTERN" value="%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"/>
+
+    <!--
+         %X{requestId} is the correlation id put into MDC by RequestCorrelationIdInterceptor
+         and stored on audit_event.request_id. It was previously absent from every pattern,
+         so the id existed in memory and in the database but never appeared in a single log
+         line — which is precisely where you need it when tracing one request through an
+         incident. "-" renders for work outside a request (startup, scheduled jobs).
+    -->
+    <property name="LOG_PATTERN"
+              value="%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] [%X{requestId:--}] %-5level %logger{36} - %msg%n"/>
 
     <!-- ── Console appender (plain text — dev/test) ─────────────────────── -->
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
-        <filter class="com.assetiq.config.SensitiveDataFilter"/>
-        <encoder>
+        <encoder class="com.assetiq.logging.RedactingPatternLayoutEncoder">
             <pattern>${LOG_PATTERN}</pattern>
             <charset>utf8</charset>
         </encoder>
     </appender>
 
-    <!-- ── JSON console appender (production) ──────────────────────────── -->
-    <!--
-         Uses Logback's built-in JsonEncoder available in Logback 1.3.x
-         (bundled with Spring Boot 3.3+). No external logstash-logback-encoder
-         dependency required. Each log line is a valid JSON object parseable
-         by Datadog, Loki, CloudWatch, and most modern aggregators.
-    -->
+    <!-- ── JSON console appender (production) ──────────────────────────────
+         Logback's own JsonEncoder, wrapped with secret redaction. This replaced a
+         hand-written PatternLayoutEncoder that escaped only double quotes and so
+         emitted invalid JSON for any message containing a newline or backslash —
+         stack traces above all. JsonEncoder also serialises MDC as real fields, so
+         requestId arrives structured and queryable rather than baked into a string.
+    ──────────────────────────────────────────────────────────────────────── -->
     <appender name="CONSOLE_JSON" class="ch.qos.logback.core.ConsoleAppender">
-        <filter class="com.assetiq.config.SensitiveDataFilter"/>
-        <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
-            <pattern>{"timestamp":"%d{yyyy-MM-dd'T'HH:mm:ss.SSSZ}","level":"%-5level","thread":"%thread","logger":"%logger{36}","message":"%replace(%msg){'\"','\\\"'}","exception":"%replace(%xThrowable{short}){'\"','\\\"'}", "service":"assetiq"}%n</pattern>
-            <charset>utf8</charset>
-        </encoder>
+        <encoder class="com.assetiq.logging.RedactingJsonEncoder"/>
     </appender>
 
     <!-- ── Rolling file appender ──────────────────────────────────────────── -->
     <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
-        <filter class="com.assetiq.config.SensitiveDataFilter"/>
         <file>${LOG_FILE}</file>
-        <encoder>
+        <encoder class="com.assetiq.logging.RedactingPatternLayoutEncoder">
             <pattern>${LOG_PATTERN}</pattern>
         </encoder>
         <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
