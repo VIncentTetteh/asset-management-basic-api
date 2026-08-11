@@ -58,7 +58,7 @@ public class DpaController {
     }
 
     @GetMapping("/consent")
-    @PreAuthorize("hasAuthority('DPA_VIEW') or hasAuthority('ORG_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','VIEW_COMPLIANCE','MANAGE_COMPLIANCE')")
     public ResponseEntity<Page<ConsentRecordDto>> listConsents(
             @RequestAttribute("currentOrg")  Organisation org,
             @PageableDefault(size = 20) Pageable pageable) {
@@ -87,7 +87,7 @@ public class DpaController {
     }
 
     @GetMapping("/dsar")
-    @PreAuthorize("hasAuthority('DPA_VIEW') or hasAuthority('ORG_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','VIEW_COMPLIANCE','MANAGE_COMPLIANCE')")
     public ResponseEntity<Page<DsarRequestDto>> listDsar(
             @RequestAttribute("currentOrg")  Organisation org,
             @RequestParam(required = false) DsarRequest.Status status,
@@ -96,7 +96,7 @@ public class DpaController {
     }
 
     @GetMapping("/dsar/{id}")
-    @PreAuthorize("hasAuthority('DPA_VIEW') or hasAuthority('ORG_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','VIEW_COMPLIANCE','MANAGE_COMPLIANCE')")
     public ResponseEntity<DsarRequestDto> getDsar(
             @RequestAttribute("currentOrg") Organisation org,
             @PathVariable UUID id) {
@@ -104,7 +104,7 @@ public class DpaController {
     }
 
     @PatchMapping("/dsar/{id}/status")
-    @PreAuthorize("hasAuthority('DPA_MANAGE') or hasAuthority('ORG_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_COMPLIANCE')")
     public ResponseEntity<DsarRequestDto> updateDsarStatus(
             @RequestAttribute("currentOrg") Organisation org,
             @PathVariable UUID id,
