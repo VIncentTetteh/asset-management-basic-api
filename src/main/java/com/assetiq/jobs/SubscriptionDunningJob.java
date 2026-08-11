@@ -22,6 +22,7 @@ import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 
 /**
  * Acts on subscriptions that have fallen behind on payment.
@@ -72,6 +73,7 @@ public class SubscriptionDunningJob {
     private String emailBaseUrl;
 
     @Scheduled(cron = "0 0 9 * * *", zone = "UTC")
+    @SchedulerLock(name = "subscriptionDunning", lockAtMostFor = "PT30M", lockAtLeastFor = "PT10M")
     public void run() {
         List<OrganisationSubscription> pastDue =
                 subscriptionRepository.findByStatusAndDeletedAtIsNull(SubscriptionStatus.PAST_DUE);

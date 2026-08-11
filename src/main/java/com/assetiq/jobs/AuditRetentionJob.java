@@ -17,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 
 /**
  * Scheduled job that enforces per-plan audit retention by soft-deleting old API audit events.
@@ -44,6 +45,7 @@ public class AuditRetentionJob {
 
     // Runs daily at 02:00 UTC.
     @Scheduled(cron = "0 0 2 * * *", zone = "UTC")
+    @SchedulerLock(name = "auditRetention", lockAtMostFor = "PT30M", lockAtLeastFor = "PT10M")
     @Transactional
     public void run() {
         Instant now = Instant.now();

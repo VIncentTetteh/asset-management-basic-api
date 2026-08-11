@@ -5,6 +5,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 
 /**
  * Destroys closed accounts once their retention window has elapsed.
@@ -25,6 +26,7 @@ public class AccountPurgeJob {
     private final AccountLifecycleService accountLifecycleService;
 
     @Scheduled(cron = "0 0 3 * * *", zone = "UTC")
+    @SchedulerLock(name = "accountPurge", lockAtMostFor = "PT1H", lockAtLeastFor = "PT10M")
     public void run() {
         int purged = accountLifecycleService.purgeExpiredAccounts();
         if (purged > 0) {

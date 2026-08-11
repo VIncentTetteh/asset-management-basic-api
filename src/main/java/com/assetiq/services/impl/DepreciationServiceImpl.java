@@ -16,6 +16,7 @@ import java.time.LocalDate;
 import java.time.YearMonth;
 import java.util.Set;
 import java.util.UUID;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 
 @Service
 @Transactional
@@ -90,6 +91,7 @@ public class DepreciationServiceImpl extends TenantAwareService implements Depre
     @Override
     @Transactional
     @Scheduled(cron = "0 0 1 1 * ?") // 01:00 on the 1st of every month
+    @SchedulerLock(name = "monthlyDepreciation", lockAtMostFor = "PT2H", lockAtLeastFor = "PT30M")
     public void runMonthlyDepreciationBatch() {
         Set<Asset> assets = assetRepository.findByStatusAndDeletedAtIsNull(
                 com.assetiq.enums.AssetStatus.IN_USE);

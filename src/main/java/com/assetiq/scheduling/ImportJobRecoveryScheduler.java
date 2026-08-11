@@ -14,6 +14,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 
 /**
  * Scheduled recovery guard for bulk-import jobs.
@@ -58,7 +59,8 @@ public class ImportJobRecoveryScheduler {
      * even if a previous recovery cycle is slow.
      */
     @Scheduled(fixedDelayString = "${app.import.recovery.interval-ms:600000}")
-    void recoverStuckJobs() {
+    @SchedulerLock(name = "importJobRecovery", lockAtMostFor = "PT15M", lockAtLeastFor = "PT9M")
+    public void recoverStuckJobs() {
         Instant now = Instant.now();
 
         // Jobs stuck in QUEUED — pick the more conservative timeout

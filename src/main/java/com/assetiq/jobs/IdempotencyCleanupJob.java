@@ -9,6 +9,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 
 /**
  * Nightly job that purges idempotency records older than {@value #TTL_DAYS} days.
@@ -29,6 +30,7 @@ public class IdempotencyCleanupJob {
     private final IdempotencyRecordRepository idempotencyRecordRepository;
 
     @Scheduled(cron = "0 0 2 * * *", zone = "UTC")
+    @SchedulerLock(name = "idempotencyCleanup", lockAtMostFor = "PT15M", lockAtLeastFor = "PT10M")
     @Transactional
     public void run() {
         Instant cutoff = Instant.now().minus(TTL_DAYS, ChronoUnit.DAYS);

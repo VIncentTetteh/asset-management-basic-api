@@ -19,6 +19,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 
 /**
  * Comprehensive lifecycle alert scheduler.
@@ -67,6 +68,7 @@ public class LifecycleAlertScheduler {
     }
 
     @Scheduled(cron = "0 30 7 * * *", zone = "UTC")
+    @SchedulerLock(name = "lifecycleAlerts", lockAtMostFor = "PT30M", lockAtLeastFor = "PT10M")
     public void run() {
         log.info("[LifecycleAlert] Starting lifecycle alert scan");
 
