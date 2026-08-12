@@ -1,6 +1,6 @@
 package com.assetiq.config;
 
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.cache.RedisCacheConfiguration;
@@ -16,8 +16,16 @@ import java.time.Duration;
 @Configuration
 public class CachingConfig {
 
+    // Keyed off the property rather than @ConditionalOnBean(RedisConnectionFactory).
+    // @ConditionalOnBean is only reliable inside auto-configuration, where ordering is
+    // guaranteed; in a user @Configuration it is evaluated in scan order and can run
+    // before the connection factory is registered. When that happened this bean was
+    // silently skipped, Boot's own RedisCacheManager took over with the default JDK
+    // serializer, and the JSON serialization below never applied - which is why
+    // NotSerializableException survived a fix that looked correct. The property is
+    // redis in prod and none in the test profile, so the intent is explicit either way.
     @Bean
-    @ConditionalOnBean(RedisConnectionFactory.class)
+    @ConditionalOnProperty(name = "spring.cache.type", havingValue = "redis")
     public RedisCacheManager cacheManager(RedisConnectionFactory connectionFactory) {
         RedisCacheConfiguration config = RedisCacheConfiguration.defaultCacheConfig()
                 .entryTtl(Duration.ofMinutes(10))

@@ -110,6 +110,8 @@ Resources:
             # port published at all.
             docker network create assetiq || true
 
+            docker rm -f redis assetiq >/dev/null 2>&1 || true
+
             docker run -d --name redis --restart unless-stopped \
               --network assetiq \
               redis:7-alpine redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
@@ -166,6 +168,45 @@ Resources:
               --env-file /etc/assetiq.env \
               -p 8080:8080 \
               ${RegistryHost}/${RepoName}:${ImageTag}
+
+            # Re-provision on every boot.
+            #
+            # CloudFormation applies a UserData change to an EBS-backed instance with a
+            # stop/start rather than a replacement, and cloud-init only executes user
+            # data on an instance's FIRST boot. So a deploy that changes ImageTag updates
+            # the stored user data, restarts the instance, and the new image is never
+            # pulled: the stack reports success while the old container keeps running.
+            # That is a silent no-op deploy, which is worse than a failure.
+            #
+            # This unit re-reads the current user data from the metadata service at every
+            # boot and runs it, so a stop/start converges the instance to whatever the
+            # stack now says. The script above is idempotent, so re-running is safe.
+            cat > /usr/local/bin/assetiq-reprovision <<'REPROV'
+            #!/bin/bash
+            set -euo pipefail
+            TOKEN=$(curl -sX PUT http://169.254.169.254/latest/api/token \
+              -H "X-aws-ec2-metadata-token-ttl-seconds: 300")
+            curl -s -H "X-aws-ec2-metadata-token: $TOKEN" \
+              http://169.254.169.254/latest/user-data > /tmp/user-data.sh
+            exec bash /tmp/user-data.sh
+            REPROV
+            chmod 755 /usr/local/bin/assetiq-reprovision
+
+            cat > /etc/systemd/system/assetiq-reprovision.service <<'UNIT'
+            [Unit]
+            Description=Re-apply AssetIQ instance provisioning from current user data
+            After=docker.service network-online.target
+            Requires=docker.service
+            [Service]
+            Type=oneshot
+            RemainAfterExit=yes
+            ExecStart=/usr/local/bin/assetiq-reprovision
+            [Install]
+            WantedBy=multi-user.target
+            UNIT
+            sed -i 's/^            //' /etc/systemd/system/assetiq-reprovision.service /usr/local/bin/assetiq-reprovision
+            systemctl daemon-reload
+            systemctl enable assetiq-reprovision.service
 
             # Surface readiness to the console log so a failed boot is diagnosable
             # without opening a shell.
