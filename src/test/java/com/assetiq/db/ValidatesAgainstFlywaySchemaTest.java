@@ -55,22 +55,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 @Testcontainers
 @SpringBootTest
 @DisplayName("Entities validate against the Flyway-built schema")
-@org.junit.jupiter.api.Disabled("""
-        Currently FAILS, and the failure is real: see docs/SCHEMA_DRIFT.md.
-
-        The migrations and the entities describe substantially different schemas - 184
-        columns the entities expect are never created, 83 more disagree on type or length,
-        across 49 tables. The application therefore cannot start against a migration-built
-        database at all, which is why the first AWS deployment crash-looped.
-
-        This is disabled rather than deleted, and rather than left red, because it is a
-        pre-existing defect that predates this branch: turning CI red would block unrelated
-        work without fixing anything. Reconciling the two schemas is a data-model exercise
-        (for each difference, one side is a bug and only a human can say which), tracked in
-        SCHEMA_DRIFT.md.
-
-        Re-enabling this test is the acceptance criterion for that work. Do not delete it,
-        and do not "fix" it by relaxing ddl-auto: validate is what makes it meaningful.""")
 class ValidatesAgainstFlywaySchemaTest {
 
     @Container

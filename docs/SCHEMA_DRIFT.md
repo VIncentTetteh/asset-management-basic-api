@@ -1,5 +1,11 @@
 # Schema drift: Flyway migrations vs JPA entities
 
+> **RESOLVED 2026-08-12** by `V30__align_currency_column_types.sql`,
+> `V31__reconcile_schema_with_mappings.sql`, and ten entity annotations changed to
+> `columnDefinition = "TEXT"`. `ValidatesAgainstFlywaySchemaTest` is enabled and green,
+> so the application now starts against a migration-built database. This document is
+> kept as the record of what was wrong and why it went unseen.
+
 Generated 2026-08-12 by diffing two PostgreSQL 16 databases:
 
 - **flyway** - all 30 migrations applied via `flyway:migrate` (all reported success)

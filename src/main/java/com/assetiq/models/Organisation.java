@@ -28,6 +28,10 @@ public class Organisation extends BaseEntity {
 
     private String country;
 
+    // Stored as TEXT: the column is free text with no meaningful upper bound, and
+    // the migrated schema declares it TEXT. Pinning a varchar length here would
+    // both fail ddl-auto=validate and invite a truncating migration.
+    @Column(columnDefinition = "TEXT")
     private String address;
 
     @Column(unique = true)

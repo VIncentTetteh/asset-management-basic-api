@@ -32,10 +32,16 @@ public class AuditEvent extends BaseEntity {
     @Column(nullable = false, length = 10)
     private String method;
 
-    @Column(nullable = false, length = 300)
+    // Stored as TEXT: the column is free text with no meaningful upper bound, and
+    // the migrated schema declares it TEXT. Pinning a varchar length here would
+    // both fail ddl-auto=validate and invite a truncating migration.
+    @Column(nullable = false, columnDefinition = "TEXT")
     private String path;
 
-    @Column(length = 500)
+    // Stored as TEXT: the column is free text with no meaningful upper bound, and
+    // the migrated schema declares it TEXT. Pinning a varchar length here would
+    // both fail ddl-auto=validate and invite a truncating migration.
+    @Column(columnDefinition = "TEXT")
     private String query;
 
     @Column(length = 200)
@@ -47,7 +53,10 @@ public class AuditEvent extends BaseEntity {
     @Column(nullable = false)
     private Boolean success;
 
-    @Column(length = 500)
+    // Stored as TEXT: the column is free text with no meaningful upper bound, and
+    // the migrated schema declares it TEXT. Pinning a varchar length here would
+    // both fail ddl-auto=validate and invite a truncating migration.
+    @Column(columnDefinition = "TEXT")
     private String message;
 
     @Column(name = "request_id", length = 100)
@@ -56,7 +65,10 @@ public class AuditEvent extends BaseEntity {
     @Column(name = "client_ip", length = 100)
     private String clientIp;
 
-    @Column(name = "user_agent", length = 500)
+    // Stored as TEXT: the column is free text with no meaningful upper bound, and
+    // the migrated schema declares it TEXT. Pinning a varchar length here would
+    // both fail ddl-auto=validate and invite a truncating migration.
+    @Column(name = "user_agent", columnDefinition = "TEXT")
     private String userAgent;
 
     @Column(name = "response_time_ms")
