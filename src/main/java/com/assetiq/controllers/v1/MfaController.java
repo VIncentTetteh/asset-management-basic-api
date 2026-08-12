@@ -1,6 +1,7 @@
 package com.assetiq.controllers.v1;
 
 import com.assetiq.models.User;
+import com.assetiq.multitenancy.TenantContext;
 import com.assetiq.repositories.UserRepository;
 import com.assetiq.security.JwtUtil;
 import dev.samstevens.totp.code.CodeVerifier;
@@ -17,6 +18,7 @@ import io.jsonwebtoken.Claims;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
@@ -260,7 +262,11 @@ public class MfaController {
     @DeleteMapping("/admin/reset/{userId}")
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_USERS','MANAGE_SECURITY_SETTINGS')")
     public ResponseEntity<Map<String, String>> adminResetMfa(@PathVariable UUID userId) {
-        User target = userRepository.findById(userId)
+        // Scoped to the caller's tenant. A bare findById here let an admin in one
+        // organisation disable MFA for a user in another by guessing/leaking a UUID —
+        // @PreAuthorize proves the caller is *an* admin, never that they administer
+        // *this* user. Out-of-tenant ids now read as "not found".
+        User target = userRepository.findByIdAndOrganisationId(userId, requireTenant())
                 .orElse(null);
 
         if (target == null) {
@@ -281,8 +287,30 @@ public class MfaController {
         ));
     }
 
+    /**
+     * Resolves the calling user within the current tenant.
+     *
+     * <p>Scoped by organisation because an email is only unique <em>per tenant</em> —
+     * the same address may legitimately exist in two organisations, and an unscoped
+     * {@code findByEmail} would resolve the wrong account (or throw on a non-unique
+     * result). {@code TenantFilter} does not skip {@code /api/v1/mfa}, so every
+     * authenticated request here is guaranteed to carry tenant context.
+     */
     private User resolveUser(Authentication auth) {
-        return userRepository.findByEmail(auth.getName())
+        return userRepository.findByEmailAndOrganisationId(auth.getName(), requireTenant())
                 .orElseThrow(() -> new IllegalStateException("Authenticated user not found"));
+    }
+
+    /**
+     * Fails closed when no tenant is resolved. {@code TenantFilter} already 403s
+     * authenticated requests without an organisation, so reaching this is a bug
+     * rather than a reachable state — it must never silently widen a query.
+     */
+    private UUID requireTenant() {
+        UUID organisationId = TenantContext.getOrganisationId();
+        if (organisationId == null) {
+            throw new AccessDeniedException("No organisation context for this request.");
+        }
+        return organisationId;
     }
 }

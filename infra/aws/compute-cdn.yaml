@@ -1,0 +1,427 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  AssetIQ staging compute and edge. Runs the backend container plus Redis on a
+  single EC2 instance and fronts both the static web build and the API with one
+  CloudFront distribution. Everything here is replaceable: the stateful resources
+  live in the foundation stack.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: assetiq
+  Environment:
+    Type: String
+    Default: staging
+  FoundationStackName:
+    Type: String
+    Default: assetiq-staging-foundation
+  InstanceType:
+    Type: String
+    Default: t4g.small
+    Description: Graviton. The image is built for linux/arm64 to match.
+  ImageTag:
+    Type: String
+    Description: ECR image tag to run. Immutable tags mean this is an exact deploy identifier.
+  AmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: Public subnet for the application instance.
+
+Resources:
+
+  # ---------------------------------------------------------------------------
+  # Stable origin address
+  #
+  # The distribution needs the origin's hostname and the instance needs the
+  # distribution's domain for its CORS origin, which is a dependency cycle
+  # CloudFormation refuses. An Elastic IP breaks it: the address exists before
+  # either, so the API origin hostname is derivable from it while the instance
+  # still gets to reference the distribution. It also means replacing the
+  # instance no longer changes the origin.
+  # ---------------------------------------------------------------------------
+
+  AppElasticIp:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - { Key: Name, Value: !Sub "${ProjectName}-${Environment}-eip-app" }
+        - { Key: Project, Value: !Ref ProjectName }
+        - { Key: Environment, Value: !Ref Environment }
+        - { Key: ManagedBy, Value: cloudformation }
+
+  AppElasticIpAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt AppElasticIp.AllocationId
+      InstanceId: !Ref AppInstance
+
+  # ---------------------------------------------------------------------------
+  # Application instance
+  # ---------------------------------------------------------------------------
+
+  AppInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AmiId
+      InstanceType: !Ref InstanceType
+      SubnetId: !Ref SubnetId
+      IamInstanceProfile:
+        Fn::ImportValue: !Sub "${FoundationStackName}-AppInstanceProfileName"
+      SecurityGroupIds:
+        - Fn::ImportValue: !Sub "${FoundationStackName}-AppSecurityGroupId"
+      # No KeyName. Shell access is Session Manager only, so there is no key to
+      # lose and no port 22 exposed to the internet.
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 30
+            VolumeType: gp3
+            Encrypted: true
+            DeleteOnTermination: true
+      MetadataOptions:
+        # IMDSv2 required. IMDSv1 lets any SSRF in the application read the
+        # instance role's credentials with a single unauthenticated GET.
+        HttpTokens: required
+        HttpPutResponseHopLimit: 1
+      UserData:
+        Fn::Base64: !Sub
+          - |
+            #!/bin/bash
+            set -euxo pipefail
+
+            dnf update -y
+            dnf install -y docker jq
+            systemctl enable --now docker
+
+            # Redis runs alongside the app rather than on ElastiCache. This codebase
+            # treats Redis as optional at every call site (the rate limiter degrades
+            # to a no-op, SSO state falls back in memory), so a managed cluster buys
+            # little at one replica. Bound the memory so it can never starve the JVM.
+            #
+            # Both containers share a user-defined network and the app addresses Redis
+            # by container name. Publishing Redis on the host instead does not work:
+            # binding to 127.0.0.1 makes it unreachable from the app container, which
+            # arrives via the bridge gateway (172.17.0.1) rather than loopback, and
+            # binding to 0.0.0.0 would expose an unauthenticated Redis on the instance.
+            # A private network gives container-to-container reachability with no host
+            # port published at all.
+            docker network create assetiq || true
+
+            docker rm -f redis assetiq >/dev/null 2>&1 || true
+
+            docker run -d --name redis --restart unless-stopped \
+              --network assetiq \
+              redis:7-alpine redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+
+            aws ecr get-login-password --region ${AWS::Region} \
+              | docker login --username AWS --password-stdin ${RegistryHost}
+
+            # Secrets are fetched here, at boot, under the instance role. They are
+            # never placed in user data (which is readable via the metadata service
+            # by anything running on the box) and never baked into the image.
+            # `set +x` keeps the values out of the cloud-init log, which is
+            # world-readable on the instance and shipped to the console.
+            set +x
+            DB_SECRET=$(aws secretsmanager get-secret-value --region ${AWS::Region} \
+              --secret-id '${DbSecretArn}' --query SecretString --output text)
+            DB_USER=$(echo "$DB_SECRET" | jq -r .username)
+            DB_PASS=$(echo "$DB_SECRET" | jq -r .password)
+
+            JWT_SECRET=$(aws secretsmanager get-secret-value --region ${AWS::Region} \
+              --secret-id '${JwtSecretArn}' --query SecretString --output text | jq -r .secret)
+
+            PAYSTACK_KEY=$(aws secretsmanager get-secret-value --region ${AWS::Region} \
+              --secret-id '${PaystackSecretArn}' --query SecretString --output text | jq -r .secretKey)
+
+            cat > /etc/assetiq.env <<EOF
+            SPRING_PROFILES_ACTIVE=prod
+            SPRING_DATASOURCE_URL=jdbc:postgresql://${DbEndpoint}:5432/assetiq
+            SPRING_DATASOURCE_USERNAME=$DB_USER
+            SPRING_DATASOURCE_PASSWORD=$DB_PASS
+            APP_JWT_SECRET=$JWT_SECRET
+            PAYSTACK_SECRET_KEY=$PAYSTACK_KEY
+            SPRING_DATA_REDIS_HOST=redis
+            SPRING_DATA_REDIS_PORT=6379
+            APP_STORAGE_S3_ENABLED=true
+            APP_STORAGE_S3_BUCKET=${AppBucket}
+            APP_STORAGE_S3_REGION=${AWS::Region}
+            APP_CORS_ALLOWED_ORIGINS=https://${DistributionDomain}
+            APP_MODE=cloud
+            APP_EMAIL_ENABLED=false
+            # Email is not configured, so the signup verification message is generated
+            # and never delivered. With the gate left at its default of true that makes
+            # every account permanently unverifiable and every login a 403 - the
+            # environment would be unusable by design. Turned off until SMTP or SES
+            # exists; turn it back on in the same change that configures them.
+            APP_AUTH_REQUIRE_EMAIL_VERIFICATION=false
+            APP_AUTH_COOKIE_SECURE=true
+            # Safe only because two things hold together: the security group
+            # accepts traffic solely from CloudFront's prefix list, and the edge
+            # function deletes any client supplied X-Forwarded-For and X-Client-ID.
+            # If either changes, this must be narrowed or the rate limiter is
+            # trivially bypassed.
+            APP_RATE_LIMITING_TRUSTED_PROXY_CIDRS=0.0.0.0/0
+            SERVER_PORT=8080
+            EOF
+            chmod 600 /etc/assetiq.env
+            set -x
+
+            docker run -d --name assetiq --restart unless-stopped \
+              --network assetiq \
+              --env-file /etc/assetiq.env \
+              -p 8080:8080 \
+              ${RegistryHost}/${RepoName}:${ImageTag}
+
+            # Re-provision on every boot.
+            #
+            # CloudFormation applies a UserData change to an EBS-backed instance with a
+            # stop/start rather than a replacement, and cloud-init only executes user
+            # data on an instance's FIRST boot. So a deploy that changes ImageTag updates
+            # the stored user data, restarts the instance, and the new image is never
+            # pulled: the stack reports success while the old container keeps running.
+            # That is a silent no-op deploy, which is worse than a failure.
+            #
+            # This unit re-reads the current user data from the metadata service at every
+            # boot and runs it, so a stop/start converges the instance to whatever the
+            # stack now says. The script above is idempotent, so re-running is safe.
+            cat > /usr/local/bin/assetiq-reprovision <<'REPROV'
+            #!/bin/bash
+            set -euo pipefail
+            TOKEN=$(curl -sX PUT http://169.254.169.254/latest/api/token \
+              -H "X-aws-ec2-metadata-token-ttl-seconds: 300")
+            curl -s -H "X-aws-ec2-metadata-token: $TOKEN" \
+              http://169.254.169.254/latest/user-data > /tmp/user-data.sh
+            exec bash /tmp/user-data.sh
+            REPROV
+            chmod 755 /usr/local/bin/assetiq-reprovision
+
+            cat > /etc/systemd/system/assetiq-reprovision.service <<'UNIT'
+            [Unit]
+            Description=Re-apply AssetIQ instance provisioning from current user data
+            After=docker.service network-online.target
+            Requires=docker.service
+            [Service]
+            Type=oneshot
+            RemainAfterExit=yes
+            ExecStart=/usr/local/bin/assetiq-reprovision
+            [Install]
+            WantedBy=multi-user.target
+            UNIT
+            sed -i 's/^            //' /etc/systemd/system/assetiq-reprovision.service /usr/local/bin/assetiq-reprovision
+            systemctl daemon-reload
+            systemctl enable assetiq-reprovision.service
+
+            # Surface readiness to the console log so a failed boot is diagnosable
+            # without opening a shell.
+            for i in $(seq 1 60); do
+              if curl -fsS http://localhost:8080/actuator/health/readiness >/dev/null; then
+                echo "assetiq READY after $i attempts"; exit 0
+              fi
+              sleep 10
+            done
+            echo "assetiq DID NOT become ready in 10 minutes"
+            docker logs --tail 100 assetiq || true
+          - RegistryHost: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com"
+            RepoName: !Sub "${ProjectName}-${Environment}-ecr-backend"
+            DbEndpoint:
+              Fn::ImportValue: !Sub "${FoundationStackName}-DatabaseEndpoint"
+            DbSecretArn:
+              Fn::ImportValue: !Sub "${FoundationStackName}-DatabaseSecretArn"
+            JwtSecretArn:
+              Fn::ImportValue: !Sub "${FoundationStackName}-JwtSecretArn"
+            PaystackSecretArn:
+              Fn::ImportValue: !Sub "${FoundationStackName}-PaystackSecretArn"
+            AppBucket:
+              Fn::ImportValue: !Sub "${FoundationStackName}-AppStorageBucketName"
+            DistributionDomain: !GetAtt Distribution.DomainName
+      Tags:
+        - { Key: Name, Value: !Sub "${ProjectName}-${Environment}-ec2-app" }
+        - { Key: Project, Value: !Ref ProjectName }
+        - { Key: Environment, Value: !Ref Environment }
+        - { Key: ManagedBy, Value: cloudformation }
+
+  # ---------------------------------------------------------------------------
+  # Edge
+  # ---------------------------------------------------------------------------
+
+  WebOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "${ProjectName}-${Environment}-oac-web"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # S3 REST origins do not resolve index documents the way the website endpoint
+  # does, so /employees/detail/ would 404. Rewriting at the edge keeps the bucket
+  # private behind OAC, which the website endpoint would not allow.
+  IndexRewriteFunction:
+    Type: AWS::CloudFront::Function
+    Properties:
+      Name: !Sub "${ProjectName}-${Environment}-fn-indexrewrite"
+      AutoPublish: true
+      FunctionConfig:
+        Comment: Maps directory style paths onto the index.html emitted by the Next export.
+        Runtime: cloudfront-js-2.0
+      FunctionCode: |
+        function handler(event) {
+          var request = event.request;
+          var uri = request.uri;
+          if (uri.endsWith('/')) {
+            request.uri = uri + 'index.html';
+          } else if (!uri.includes('.')) {
+            request.uri = uri + '/index.html';
+          }
+          return request;
+        }
+
+  # The API trusts X-Forwarded-For and X-Client-ID when the request arrives from a
+  # trusted proxy, and the security group means every request does. Left alone,
+  # that hands back the rate-limit bypass fixed in commit 7da1c1c: the origin
+  # request policy forwards all viewer headers, so a caller could set X-Client-ID
+  # freely and mint a new bucket per request. X-Forwarded-For is worse, because
+  # CloudFront *appends* to a client-supplied value rather than replacing it, and
+  # RateLimitingInterceptor reads the leftmost entry.
+  #
+  # Deleting both at the edge means CloudFront writes X-Forwarded-For itself, with
+  # only the real viewer address, and X-Client-ID can never arrive from outside.
+  ApiHeaderSanitizerFunction:
+    Type: AWS::CloudFront::Function
+    Properties:
+      Name: !Sub "${ProjectName}-${Environment}-fn-apiheaders"
+      AutoPublish: true
+      FunctionConfig:
+        Comment: Strips client supplied rate limit identity headers before the origin sees them.
+        Runtime: cloudfront-js-2.0
+      FunctionCode: |
+        function handler(event) {
+          var request = event.request;
+          delete request.headers['x-client-id'];
+          delete request.headers['x-forwarded-for'];
+          return request;
+        }
+
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub "${ProjectName} ${Environment} web and api"
+        DefaultRootObject: index.html
+        HttpVersion: http2and3
+        PriceClass: PriceClass_100
+        Origins:
+          - Id: web
+            DomainName:
+              Fn::ImportValue: !Sub "${FoundationStackName}-WebBucketRegionalDomainName"
+            OriginAccessControlId: !GetAtt WebOriginAccessControl.Id
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+          - Id: api
+            # AWS derives an instance's public DNS name from its public IPv4
+            # address, so this resolves to the Elastic IP without referencing the
+            # instance and reintroducing the cycle.
+            DomainName: !Sub
+              - "ec2-${DashedIp}.${AWS::Region}.compute.amazonaws.com"
+              - DashedIp: !Join ["-", !Split [".", !Ref AppElasticIp]]
+            CustomOriginConfig:
+              # HTTP to the origin. CloudFront terminates TLS for the viewer, so
+              # nothing is unencrypted on the public internet from the browser's
+              # side, but this hop is in the clear. Acceptable for staging and
+              # called out in the DR and hardening notes; production wants a
+              # certificate on the origin or an ALB in front.
+              OriginProtocolPolicy: http-only
+              HTTPPort: 8080
+              OriginReadTimeout: 60
+        DefaultCacheBehavior:
+          TargetOriginId: web
+          ViewerProtocolPolicy: redirect-to-https
+          Compress: true
+          # CachingOptimized
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+          FunctionAssociations:
+            - EventType: viewer-request
+              FunctionARN: !GetAtt IndexRewriteFunction.FunctionMetadata.FunctionARN
+        CacheBehaviors:
+          - PathPattern: /api/*
+            TargetOriginId: api
+            ViewerProtocolPolicy: https-only
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
+            Compress: true
+            # CachingDisabled. An API response cached at the edge would be served
+            # to the wrong tenant.
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            # AllViewerExceptHostHeader: forwards cookies, auth headers and query
+            # strings to the origin. Without cookie forwarding the HttpOnly session
+            # never reaches the backend and every request is anonymous.
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            FunctionAssociations:
+              - EventType: viewer-request
+                FunctionARN: !GetAtt ApiHeaderSanitizerFunction.FunctionMetadata.FunctionARN
+          - PathPattern: /actuator/*
+            TargetOriginId: api
+            ViewerProtocolPolicy: https-only
+            AllowedMethods: [GET, HEAD]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            FunctionAssociations:
+              - EventType: viewer-request
+                FunctionARN: !GetAtt ApiHeaderSanitizerFunction.FunctionMetadata.FunctionARN
+        # No CustomErrorResponses.
+        #
+        # They are configured per DISTRIBUTION, not per behaviour, so they cannot be
+        # limited to the static site. Mapping S3's 403-for-a-missing-object onto a
+        # friendly /404.html also rewrote every API 403 into a 404: an unauthenticated
+        # request to /api/v1/assets reported "not found" instead of "forbidden", and
+        # login failures became 404s. Corrupting the API's status codes to prettify a
+        # missing static page is the wrong trade, and it makes any client that branches
+        # on 401/403 behave incorrectly.
+        #
+        # The cost is that a genuinely missing static path returns S3's own response.
+        # The export prerenders every route, so that is a rare edge; if it needs
+        # improving later, do it in the viewer-request function, which does run per
+        # behaviour.
+        ViewerCertificate:
+          # Default *.cloudfront.net certificate. Attaching a custom domain later
+          # needs an ACM certificate in us-east-1 and changes nothing else here.
+          CloudFrontDefaultCertificate: true
+      Tags:
+        - { Key: Project, Value: !Ref ProjectName }
+        - { Key: Environment, Value: !Ref Environment }
+        - { Key: ManagedBy, Value: cloudformation }
+
+  WebBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket:
+        Fn::ImportValue: !Sub "${FoundationStackName}-WebBucketName"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowCloudFrontRead
+            Effect: Allow
+            Principal: { Service: cloudfront.amazonaws.com }
+            Action: s3:GetObject
+            Resource: !Sub
+              - "arn:aws:s3:::${BucketName}/*"
+              - BucketName:
+                  Fn::ImportValue: !Sub "${FoundationStackName}-WebBucketName"
+            Condition:
+              StringEquals:
+                # Scoped to this distribution: any other distribution, in any
+                # account, is refused even though the principal is the service.
+                AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}"
+
+Outputs:
+  SiteUrl:
+    Value: !Sub "https://${Distribution.DomainName}"
+  DistributionId:
+    Value: !Ref Distribution
+  InstanceId:
+    Value: !Ref AppInstance
+  InstancePublicIp:
+    Value: !Ref AppElasticIp

@@ -37,10 +37,21 @@
 		     instead of failing every build. Launch target: 50/30 (raise here as
 		     the suite grows). Overridable per-build with `-Djacoco.line.min=0.4`.
 		     The gate runs at the `verify` phase so `mvn test` alone stays fast
-		     during TDD; CI runs `mvn verify` to enforce it. -->
+		     during TDD; CI runs `mvn verify` to enforce it.
+
+		     Ratcheted 2026-07-29 to 28/14: the cross-tenant isolation suite took
+		     the measured figure to 29% line / 15% branch, and the floor tracks
+		     just under it so the gain cannot silently regress. Keep raising this
+		     toward 50/30 as coverage lands — never set it above measured reality,
+		     which is what made the original 30/20 gate a no-op.
+
+		     Ratcheted again 2026-08-02 to 30/16, measured 31% / 17% after the
+		     account-lifecycle and extended-isolation suites landed. -->
+		<!-- ShedLock 5.x is the line that supports Spring Boot 3 / Spring 6. -->
+		<shedlock.version>5.13.0</shedlock.version>
 		<jacoco.version>0.8.12</jacoco.version>
-		<jacoco.line.min>0.25</jacoco.line.min>
-		<jacoco.branch.min>0.12</jacoco.branch.min>
+		<jacoco.line.min>0.30</jacoco.line.min>
+		<jacoco.branch.min>0.16</jacoco.branch.min>
 	</properties>
 	<dependencies>
 		<dependency>
@@ -248,6 +259,34 @@
 			<groupId>org.postgresql</groupId>
 			<artifactId>postgresql</artifactId>
 			<scope>runtime</scope>
+		</dependency>
+
+		<!-- Micrometer Prometheus registry.
+		     application.yml has exposed the `prometheus` actuator endpoint and set
+		     management.prometheus.metrics.export.enabled=true since the beginning, but
+		     without this dependency Spring Boot registers no Prometheus registry and
+		     /actuator/prometheus simply 404s — the application had no metrics at all
+		     while appearing, in config and in the README, to have them. -->
+		<dependency>
+			<groupId>io.micrometer</groupId>
+			<artifactId>micrometer-registry-prometheus</artifactId>
+		</dependency>
+
+		<!-- ShedLock — ensures each @Scheduled job runs on exactly one instance.
+		     Spring's scheduler is per-JVM, so every replica fires every cron
+		     independently: monthly depreciation double-posts, dunning double-emails
+		     paying customers, and account purges run concurrently. The JDBC provider
+		     is used in preference to the Redis one so that correctness does not
+		     depend on a cache that is allowed to fail open. -->
+		<dependency>
+			<groupId>net.javacrumbs.shedlock</groupId>
+			<artifactId>shedlock-spring</artifactId>
+			<version>${shedlock.version}</version>
+		</dependency>
+		<dependency>
+			<groupId>net.javacrumbs.shedlock</groupId>
+			<artifactId>shedlock-provider-jdbc-template</artifactId>
+			<version>${shedlock.version}</version>
 		</dependency>
 
 		<!-- Flyway — database migration management -->

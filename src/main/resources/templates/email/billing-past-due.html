@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Payment Failed</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f1f5f9;padding:48px 16px;">
+    <tr>
+      <td align="center">
+        <table width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;">
+
+          <tr>
+            <td style="background:#0f172a;border-radius:12px 12px 0 0;padding:28px 40px;text-align:center;">
+              <span style="color:#f8fafc;font-size:20px;font-weight:700;letter-spacing:-0.3px;" th:text="${appName}">AssetIQ</span>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="background:#ffffff;padding:40px;border-left:1px solid #e2e8f0;border-right:1px solid #e2e8f0;">
+              <div style="text-align:center;margin-bottom:24px;">
+                <div style="display:inline-block;background:#fff7ed;border:2px solid #fed7aa;border-radius:50%;width:60px;height:60px;line-height:56px;text-align:center;font-size:26px;">&#9888;</div>
+              </div>
+
+              <h1 style="color:#0f172a;font-size:21px;font-weight:700;margin:0 0 6px 0;text-align:center;">We couldn't process your payment</h1>
+              <p style="color:#64748b;font-size:14px;margin:0 0 32px 0;text-align:center;">Your account is still fully active.</p>
+
+              <p style="color:#1e293b;font-size:15px;margin:0 0 12px 0;">
+                Hi <strong th:text="${firstName}?: 'there'">there</strong>,
+              </p>
+              <p style="color:#475569;font-size:15px;line-height:1.65;margin:0 0 24px 0;">
+                The most recent payment for <strong th:text="${organisationName}">your organisation</strong>'s
+                <strong th:text="${planName}">current</strong> plan didn't go through. This is usually an expired
+                card or a bank decline, and it takes a minute to fix.
+              </p>
+
+              <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:16px 18px;margin-bottom:28px;">
+                <p style="color:#92400e;font-size:14px;margin:0;line-height:1.6;">
+                  You have <strong th:text="${daysRemaining}">14</strong> day(s) to update your billing details.
+                  After that your organisation moves to the Freemium plan.
+                  <strong>Nothing is deleted</strong> — you keep your data and can resubscribe at any time.
+                </p>
+              </div>
+
+              <div style="text-align:center;margin-bottom:28px;">
+                <a th:href="${billingUrl}" href="#"
+                   style="display:inline-block;background:#0f172a;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;padding:14px 36px;border-radius:8px;">
+                  Update Billing Details
+                </a>
+              </div>
+
+              <hr style="border:none;border-top:1px solid #f1f5f9;margin:24px 0;"/>
+
+              <p style="color:#94a3b8;font-size:13px;line-height:1.5;margin:0;">
+                Already fixed this? You can ignore this message — it may have been sent before your
+                payment cleared. Questions? Email
+                <a th:href="'mailto:' + ${supportEmail}" style="color:#3b82f6;text-decoration:none;" th:text="${supportEmail}">support@example.com</a>.
+              </p>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:0 0 12px 12px;padding:18px 40px;text-align:center;">
+              <p style="color:#94a3b8;font-size:12px;margin:0;" th:text="${appName} + ' · Billing notification'">AssetIQ · Billing notification</p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

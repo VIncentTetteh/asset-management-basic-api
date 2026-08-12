@@ -30,7 +30,8 @@ import static com.assetiq.config.RateLimitingConfig.*;
  *
  * <h3>Client key derivation (priority order)</h3>
  * <ol>
- *   <li>{@code X-Client-ID} header — explicit key for SDK / mobile clients.</li>
+ *   <li>{@code X-Client-ID} header — explicit key for SDK / mobile clients,
+ *       <em>honoured only from a trusted proxy CIDR</em>.</li>
  *   <li>SHA-256 prefix of the Bearer token — unique per authenticated session;
  *       not reversible to the raw token.</li>
  *   <li>Leftmost IP in {@code X-Forwarded-For} — <em>only when the request
@@ -38,6 +39,13 @@ import static com.assetiq.config.RateLimitingConfig.*;
  *       This prevents header spoofing by untrusted clients.</li>
  *   <li>{@code remoteAddr} — final fallback.</li>
  * </ol>
+ *
+ * <p><b>Every input above is either proxy-attested or unspoofable.</b> A bucket key
+ * that an arbitrary caller can choose is not a rate limit — they simply pick a new
+ * one per request. {@code X-Client-ID} was previously read from any caller at the
+ * highest priority, which meant the 5/min auth brake could be sidestepped with a
+ * random header value. If you add another derivation input, it must come from the
+ * transport or from a trusted proxy, never from the untrusted client.
  *
  * <h3>Distributed state</h3>
  * Bucket counters are stored through {@link RateLimiter}. Production uses Redis
@@ -153,22 +161,35 @@ public class RateLimitingInterceptor implements HandlerInterceptor {
     // ── Client key derivation ─────────────────────────────────────────────────
 
     /**
-     * Derives a stable, non-guessable client key using a four-level priority:
+     * Derives a client key that the caller cannot freely rotate.
      *
      * <ol>
-     *   <li><b>X-Client-ID</b> — explicit SDK / mobile client identifier.</li>
-     *   <li><b>Hashed Bearer token</b> — unique per session, not reversible.</li>
-     *   <li><b>X-Forwarded-For first IP</b> — <em>only trusted when remoteAddr
-     *       is within a configured trusted-proxy CIDR</em>, preventing header
-     *       injection by arbitrary clients.</li>
-     *   <li><b>remoteAddr</b> — the TCP peer address; always available.</li>
+     *   <li><b>X-Client-ID</b> — <em>only from a trusted proxy</em>. Honouring this
+     *       header from arbitrary callers is a rate-limit bypass: anything the client
+     *       controls, the client can vary per request to mint an unlimited number of
+     *       fresh buckets. It stays supported for an internal gateway that assigns
+     *       per-tenant identifiers, which is the case it was built for.</li>
+     *   <li><b>Hashed Bearer token</b> — unique per authenticated session, not
+     *       reversible. An attacker can only rotate this by obtaining new credentials.</li>
+     *   <li><b>X-Forwarded-For first IP</b> — again only from a trusted proxy.</li>
+     *   <li><b>remoteAddr</b> — the TCP peer address; always available, never spoofable.</li>
      * </ol>
+     *
+     * <p>Ordering matters for the auth tier specifically. Login and MFA requests carry
+     * no Bearer token, so brute-force attempts land on rule 3 or 4 — an address the
+     * attacker cannot change per request. That is the property the 5/min brake depends
+     * on, and taking a client-supplied header ahead of it defeated the brake entirely.
      */
     private String extractClientKey(HttpServletRequest request) {
-        // 1. Explicit client ID
-        String clientId = request.getHeader("X-Client-ID");
-        if (clientId != null && !clientId.isBlank()) {
-            return "cid:" + clientId.trim();
+        String remoteAddr    = request.getRemoteAddr();
+        boolean trustedProxy = isTrustedProxy(remoteAddr);
+
+        // 1. Explicit client ID — trusted proxies only
+        if (trustedProxy) {
+            String clientId = request.getHeader("X-Client-ID");
+            if (clientId != null && !clientId.isBlank()) {
+                return "cid:" + clientId.trim();
+            }
         }
 
         // 2. Hashed Bearer token — unique per authenticated session, not reversible
@@ -178,8 +199,7 @@ public class RateLimitingInterceptor implements HandlerInterceptor {
         }
 
         // 3. X-Forwarded-For — ONLY if remoteAddr is a trusted proxy
-        String remoteAddr = request.getRemoteAddr();
-        if (isTrustedProxy(remoteAddr)) {
+        if (trustedProxy) {
             String forwarded = request.getHeader("X-Forwarded-For");
             if (forwarded != null && !forwarded.isBlank()) {
                 return "ip:" + forwarded.split(",")[0].trim();

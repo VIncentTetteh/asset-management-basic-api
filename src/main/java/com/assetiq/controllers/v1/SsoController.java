@@ -5,6 +5,7 @@ import com.assetiq.enums.SsoProvider;
 import com.assetiq.enums.UserStatus;
 import com.assetiq.models.OrgSsoConfig;
 import com.assetiq.models.Organisation;
+import com.assetiq.models.Role;
 import com.assetiq.models.User;
 import com.assetiq.repositories.OrgSsoConfigRepository;
 import com.assetiq.repositories.RoleRepository;
@@ -673,9 +674,22 @@ public class SsoController {
             user.setPasswordHash(passwordEncoder.encode(UUID.randomUUID().toString())); // unusable random PW
             user.setStatus(UserStatus.ACTIVE);
 
-            // Assign default USER role
-            roleRepository.findByNameAndOrganisationId("USER", orgId)
-                    .ifPresent(user::setRole);
+            // Assign a default role. There are two org-creation paths and they seed
+            // different role sets: TenantRegistrationServiceImpl creates ADMIN + USER,
+            // while OrganisationServiceImpl seeds the DefaultRoleSeederService set
+            // (ADMIN, ASSET_MANAGER, …, VIEWER) which has no USER. The previous
+            // .ifPresent() swallowed the miss on that second path, provisioning SSO
+            // users with a null role — they authenticated successfully and then got
+            // 403 on every endpoint, with nothing in the logs to explain it.
+            Role defaultRole = roleRepository.findByNameAndOrganisationId("USER", orgId)
+                    .or(() -> roleRepository.findByNameAndOrganisationId("VIEWER", orgId))
+                    .orElseThrow(() -> {
+                        log.error("[SSO] Cannot provision {} in org {}: neither a USER nor a VIEWER role exists. " +
+                                "Create a default role for this organisation before enabling SSO.", email, orgId);
+                        return new IllegalStateException(
+                                "No default role is configured for this organisation. Contact your administrator.");
+                    });
+            user.setRole(defaultRole);
         }
 
         // Update profile from OIDC claims (idempotent)

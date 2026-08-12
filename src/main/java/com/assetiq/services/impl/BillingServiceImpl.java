@@ -263,6 +263,14 @@ public class BillingServiceImpl extends TenantAwareService implements BillingSer
                 organisationSubscriptionRepository.findByPaystackSubscriptionCodeAndDeletedAtIsNull(subscriptionCode)
                         .ifPresent(s -> {
                             s.setStatus(SubscriptionStatus.PAST_DUE);
+                            // Start the dunning clock on the first failure only —
+                            // Paystack retries an invoice several times, and each retry
+                            // fires this webhook again. Overwriting the timestamp would
+                            // restart the grace period on every retry and the account
+                            // would never actually reach downgrade.
+                            if (s.getPastDueSince() == null) {
+                                s.setPastDueSince(Instant.now());
+                            }
                             organisationSubscriptionRepository.save(s);
                         });
             }
@@ -315,6 +323,9 @@ public class BillingServiceImpl extends TenantAwareService implements BillingSer
         OrganisationSubscription subscription = getOrProvisionFreemiumSubscription(org);
         subscription.setPlan(payment.getPlan());
         subscription.setStatus(SubscriptionStatus.ACTIVE);
+        // A successful payment ends any dunning sequence in progress: stop the clock so
+        // a later failure starts a fresh grace period rather than resuming the old one.
+        subscription.setPastDueSince(null);
         subscription.setCurrentPeriodStart(Instant.now());
         subscription.setCurrentPeriodEnd(calculatePeriodEnd(Instant.now(), payment.getPlan()));
         subscription.setNextBillingAt(subscription.getCurrentPeriodEnd());

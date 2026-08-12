@@ -11,3 +11,17 @@ daf2d2ed596a70c270cdbce069c2ca8d4d2b5c2c:COMPLETE_API_DOCUMENTATION_FOR_FRONTEND
 95a11d5f79aa6b5e6892a3b6449dd26452a1d485:QUICK_FIX_401_ERROR.md:generic-api-key:60
 b5025bd6d1ce29eccbd1311721ef8ab606295ee2:API_DOCUMENTATION.md:generic-api-key:311
 b5025bd6d1ce29eccbd1311721ef8ab606295ee2:API_DOCUMENTATION.md:generic-api-key:333
+
+# Commit 2e50ec3 added LogRedactorTest with synthetic, credential-shaped fixtures —
+# test data for the redaction utility itself, never real credentials. Realistic shapes
+# are the point: a redactor exercised only against obviously-fake input proves nothing.
+# The fixtures were rewritten in the following commit to be assembled from fragments, so
+# no scannable literal remains in the working tree; these entries only silence the
+# historical commit, which gitleaks still walks on every PR scan.
+2e50ec31863493678622892aaaaa61dee015cefe:src/test/java/com/assetiq/logging/LogRedactorTest.java:jwt:28
+2e50ec31863493678622892aaaaa61dee015cefe:src/test/java/com/assetiq/logging/LogRedactorTest.java:jwt:29
+2e50ec31863493678622892aaaaa61dee015cefe:src/test/java/com/assetiq/logging/LogRedactorTest.java:jwt:30
+2e50ec31863493678622892aaaaa61dee015cefe:src/test/java/com/assetiq/logging/LogRedactorTest.java:stripe-access-token:41
+2e50ec31863493678622892aaaaa61dee015cefe:src/test/java/com/assetiq/logging/LogRedactorTest.java:stripe-access-token:42
+2e50ec31863493678622892aaaaa61dee015cefe:src/test/java/com/assetiq/logging/LogRedactorTest.java:generic-api-key:43
+2e50ec31863493678622892aaaaa61dee015cefe:src/test/java/com/assetiq/logging/LogRedactorTest.java:generic-api-key:76

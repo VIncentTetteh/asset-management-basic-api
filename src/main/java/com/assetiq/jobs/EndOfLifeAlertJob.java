@@ -15,6 +15,7 @@ import org.springframework.stereotype.Component;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.stream.Collectors;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 
 /**
  * Scheduled job that detects end-of-life conditions across assets,
@@ -39,6 +40,7 @@ public class EndOfLifeAlertJob {
     private final NotificationService       notificationService;
 
     @Scheduled(cron = "0 0 8 * * *", zone = "UTC")
+    @SchedulerLock(name = "endOfLifeAlerts", lockAtMostFor = "PT30M", lockAtLeastFor = "PT10M")
     public void run() {
         log.info("[EOL-Alert] Starting end-of-life alert scan");
         checkWarrantyExpiry();

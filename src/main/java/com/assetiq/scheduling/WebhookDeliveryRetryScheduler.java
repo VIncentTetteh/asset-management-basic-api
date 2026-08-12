@@ -20,6 +20,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 
 /**
  * Dead-letter-queue (DLQ) retry scheduler for webhook deliveries.
@@ -76,7 +77,8 @@ public class WebhookDeliveryRetryScheduler {
      * Run every 5 minutes (fixed delay; not fixed rate, so runs never overlap).
      */
     @Scheduled(fixedDelayString = "${app.webhook.dlq.retry-interval-ms:300000}")
-    void retryFailedDeliveries() {
+    @SchedulerLock(name = "webhookDeliveryRetry", lockAtMostFor = "PT10M", lockAtLeastFor = "PT4M")
+    public void retryFailedDeliveries() {
         // NOTE: No @Transactional here — this method makes HTTP calls per delivery.
         // Wrapping the entire loop in one transaction would hold a DB connection open
         // for the duration of every HTTP round-trip.  Instead, each deliveryRepository.save()

@@ -1,11 +1,13 @@
 package com.assetiq.config;
 
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.cache.RedisCacheConfiguration;
 import org.springframework.data.redis.cache.RedisCacheManager;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
+import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSerializer;
+import org.springframework.data.redis.serializer.RedisSerializationContext;
 
 import java.time.Duration;
 
@@ -14,12 +16,39 @@ import java.time.Duration;
 @Configuration
 public class CachingConfig {
 
+    // Keyed off the property rather than @ConditionalOnBean(RedisConnectionFactory).
+    // @ConditionalOnBean is only reliable inside auto-configuration, where ordering is
+    // guaranteed; in a user @Configuration it is evaluated in scan order and can run
+    // before the connection factory is registered. When that happened this bean was
+    // silently skipped, Boot's own RedisCacheManager took over with the default JDK
+    // serializer, and the JSON serialization below never applied - which is why
+    // NotSerializableException survived a fix that looked correct. The property is
+    // redis in prod and none in the test profile, so the intent is explicit either way.
     @Bean
-    @ConditionalOnBean(RedisConnectionFactory.class)
+    @ConditionalOnProperty(name = "spring.cache.type", havingValue = "redis")
     public RedisCacheManager cacheManager(RedisConnectionFactory connectionFactory) {
         RedisCacheConfiguration config = RedisCacheConfiguration.defaultCacheConfig()
                 .entryTtl(Duration.ofMinutes(10))
-                .disableCachingNullValues();
+                .disableCachingNullValues()
+                // Cache values are stored as JSON rather than with the default JDK
+                // serializer.
+                //
+                // The default requires every cached type to implement Serializable, and
+                // the DTOs do not, so the first cache write against a live Redis threw
+                // NotSerializableException and turned GET /api/v1/billing/plans into a
+                // 500. That went unseen for as long as it did because Redis was never
+                // actually reachable: the test profile excludes it and sets
+                // spring.cache.type=none, and the first deployment could not connect to
+                // it, so the cache silently no-opped and every read fell through to the
+                // database.
+                //
+                // JSON is also the better default independently of that. Java
+                // serialization is a well known deserialization-gadget risk, and it
+                // couples cached entries to class shape: adding a field to a DTO
+                // invalidates every entry written by the previous build, which surfaces
+                // as deserialization errors mid-deploy rather than as cache misses.
+                .serializeValuesWith(RedisSerializationContext.SerializationPair
+                        .fromSerializer(new GenericJackson2JsonRedisSerializer()));
 
         return RedisCacheManager.builder(connectionFactory)
                 .cacheDefaults(config)

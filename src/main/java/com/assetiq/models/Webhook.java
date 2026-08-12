@@ -19,7 +19,10 @@ public class Webhook extends BaseEntity {
     private String url;
 
     /** Comma-separated event names e.g. "asset.created,asset.updated" */
-    @Column(name = "events", length = 1000)
+    // Stored as TEXT: the column is free text with no meaningful upper bound, and
+    // the migrated schema declares it TEXT. Pinning a varchar length here would
+    // both fail ddl-auto=validate and invite a truncating migration.
+    @Column(name = "events", columnDefinition = "TEXT")
     private String events;
 
     @Column(nullable = false)
