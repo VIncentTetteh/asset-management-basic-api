@@ -100,8 +100,18 @@ Resources:
             # treats Redis as optional at every call site (the rate limiter degrades
             # to a no-op, SSO state falls back in memory), so a managed cluster buys
             # little at one replica. Bound the memory so it can never starve the JVM.
+            #
+            # Both containers share a user-defined network and the app addresses Redis
+            # by container name. Publishing Redis on the host instead does not work:
+            # binding to 127.0.0.1 makes it unreachable from the app container, which
+            # arrives via the bridge gateway (172.17.0.1) rather than loopback, and
+            # binding to 0.0.0.0 would expose an unauthenticated Redis on the instance.
+            # A private network gives container-to-container reachability with no host
+            # port published at all.
+            docker network create assetiq || true
+
             docker run -d --name redis --restart unless-stopped \
-              -p 127.0.0.1:6379:6379 \
+              --network assetiq \
               redis:7-alpine redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
 
             aws ecr get-login-password --region ${AWS::Region} \
@@ -131,7 +141,7 @@ Resources:
             SPRING_DATASOURCE_PASSWORD=$DB_PASS
             APP_JWT_SECRET=$JWT_SECRET
             PAYSTACK_SECRET_KEY=$PAYSTACK_KEY
-            SPRING_DATA_REDIS_HOST=host.docker.internal
+            SPRING_DATA_REDIS_HOST=redis
             SPRING_DATA_REDIS_PORT=6379
             APP_STORAGE_S3_ENABLED=true
             APP_STORAGE_S3_BUCKET=${AppBucket}
@@ -152,7 +162,7 @@ Resources:
             set -x
 
             docker run -d --name assetiq --restart unless-stopped \
-              --add-host host.docker.internal:host-gateway \
+              --network assetiq \
               --env-file /etc/assetiq.env \
               -p 8080:8080 \
               ${RegistryHost}/${RepoName}:${ImageTag}

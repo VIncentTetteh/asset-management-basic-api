@@ -92,7 +92,14 @@ public class SecurityConfig {
 
                 // ── Internal / infrastructure ──────────────────────────────────────
                 .requestMatchers("/api/info", "/api/cache/ping", "/api/db/hits").permitAll()
-                .requestMatchers("/actuator/health").permitAll()
+                // Includes the probe sub-paths /actuator/health/liveness and
+                // /actuator/health/readiness. Matching only "/actuator/health" left both
+                // returning 403 to an unauthenticated caller, which is exactly what a load
+                // balancer or orchestrator is: the readiness probe could never pass, so an
+                // instance would never be marked healthy. Detail stays protected
+                // regardless - management.endpoint.health.show-details is when-authorized,
+                // so an anonymous caller sees only the aggregate status.
+                .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
                 .requestMatchers("/error").permitAll()
                 .requestMatchers("/api/v1/health").permitAll()
                 .requestMatchers("/api/v1/health/detailed", "/api/v1/metrics/**", "/api/v1/metrics")
