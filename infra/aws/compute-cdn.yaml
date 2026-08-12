@@ -151,6 +151,12 @@ Resources:
             APP_CORS_ALLOWED_ORIGINS=https://${DistributionDomain}
             APP_MODE=cloud
             APP_EMAIL_ENABLED=false
+            # Email is not configured, so the signup verification message is generated
+            # and never delivered. With the gate left at its default of true that makes
+            # every account permanently unverifiable and every login a 403 - the
+            # environment would be unusable by design. Turned off until SMTP or SES
+            # exists; turn it back on in the same change that configures them.
+            APP_AUTH_REQUIRE_EMAIL_VERIFICATION=false
             APP_AUTH_COOKIE_SECURE=true
             # Safe only because two things hold together: the security group
             # accepts traffic solely from CloudFront's prefix list, and the edge
@@ -365,16 +371,20 @@ Resources:
             FunctionAssociations:
               - EventType: viewer-request
                 FunctionARN: !GetAtt ApiHeaderSanitizerFunction.FunctionMetadata.FunctionARN
-        CustomErrorResponses:
-          # The Next export emits a real 404 page; serve it rather than S3 XML.
-          - ErrorCode: 403
-            ResponseCode: 404
-            ResponsePagePath: /404.html
-            ErrorCachingMinTTL: 10
-          - ErrorCode: 404
-            ResponseCode: 404
-            ResponsePagePath: /404.html
-            ErrorCachingMinTTL: 10
+        # No CustomErrorResponses.
+        #
+        # They are configured per DISTRIBUTION, not per behaviour, so they cannot be
+        # limited to the static site. Mapping S3's 403-for-a-missing-object onto a
+        # friendly /404.html also rewrote every API 403 into a 404: an unauthenticated
+        # request to /api/v1/assets reported "not found" instead of "forbidden", and
+        # login failures became 404s. Corrupting the API's status codes to prettify a
+        # missing static page is the wrong trade, and it makes any client that branches
+        # on 401/403 behave incorrectly.
+        #
+        # The cost is that a genuinely missing static path returns S3's own response.
+        # The export prerenders every route, so that is a rare edge; if it needs
+        # improving later, do it in the viewer-request function, which does run per
+        # behaviour.
         ViewerCertificate:
           # Default *.cloudfront.net certificate. Attaching a custom domain later
           # needs an ACM certificate in us-east-1 and changes nothing else here.
