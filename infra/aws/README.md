@@ -1,7 +1,13 @@
 # AssetIQ on AWS — staging
 
 Two CloudFormation stacks, deployed with the AWS CLI. Region **eu-central-1**,
-account **775899412527**.
+account **369736283466** (`techieszon`), using the `assetiq` CLI profile.
+
+> **The account is on AWS's credit-based FREE plan.** It caps RDS backup retention
+> (1 day, not the template default of 7) and carries an expiring credit balance,
+> after which the environment is restricted rather than billed. Deployments use the
+> `assetiq-deployer` IAM user rather than root, because root sessions here expire
+> within minutes and root credentials cannot be scoped.
 
 ## Shape
 
@@ -51,8 +57,9 @@ aws cloudformation deploy \
   --stack-name assetiq-staging-foundation \
   --capabilities CAPABILITY_NAMED_IAM \
   --parameter-overrides \
-      VpcId=vpc-05c427b1e9d41b79b \
-      "SubnetIds=subnet-0a05990bc3c6efa0b,subnet-05997714038f3c236,subnet-06676be33cc7651e0" \
+      VpcId=vpc-0523a9f29c2982fe9 \
+      "SubnetIds=subnet-06a1256f7cc04c2bd,subnet-0fe3e6d16c56071b5,subnet-054e8cf4d8babce17" \
+      DbBackupRetentionDays=1 \
   --tags Project=assetiq Environment=staging ManagedBy=cloudformation \
          CostCenter=engineering Team=platform
 ```
@@ -64,7 +71,7 @@ mismatch fails at container start with an exec format error, not at build.
 
 ```bash
 SHA=$(git rev-parse --short HEAD)
-REPO=775899412527.dkr.ecr.eu-central-1.amazonaws.com/assetiq-staging-ecr-backend
+REPO=369736283466.dkr.ecr.eu-central-1.amazonaws.com/assetiq-staging-ecr-backend
 
 aws ecr get-login-password --region eu-central-1 \
   | docker login --username AWS --password-stdin "${REPO%%/*}"
@@ -83,7 +90,7 @@ aws cloudformation deploy \
   --template-file infra/aws/compute-cdn.yaml \
   --stack-name assetiq-staging-compute \
   --capabilities CAPABILITY_NAMED_IAM \
-  --parameter-overrides ImageTag=$SHA SubnetId=subnet-0a05990bc3c6efa0b
+  --parameter-overrides ImageTag=$SHA SubnetId=subnet-06a1256f7cc04c2bd
 ```
 
 ### 4. Frontend
@@ -128,6 +135,27 @@ aws cloudfront create-invalidation --distribution-id "$DIST" --paths "/*"
 - **IMDSv2 is required**, so an SSRF in the application cannot read the instance
   role's credentials with a plain GET.
 
+## Tearing a stack down
+
+Two resources deliberately resist deletion, so `delete-stack` fails until each is
+cleared by hand. Both are working as intended, and both will confuse you at 2am:
+
+```bash
+# RDS has DeletionProtection: true
+aws rds modify-db-instance --db-instance-identifier assetiq-staging-rds-main \
+  --no-deletion-protection --apply-immediately
+
+# ECR refuses to delete a repository that still holds images, including the
+# untagged attestation manifests buildx pushes alongside the tagged one.
+aws ecr batch-delete-image --repository-name assetiq-staging-ecr-backend \
+  --image-ids $(aws ecr list-images --repository-name assetiq-staging-ecr-backend \
+                  --filter tagStatus=ANY --query 'imageIds[*]' --output json)
+```
+
+The S3 buckets and the KMS key carry `DeletionPolicy: Retain`, so they survive the
+stack on purpose. A retained KMS key costs about a dollar a month; schedule its
+deletion explicitly when retiring an environment for good.
+
 ## Known gaps
 
 Honest list; none are oversights.
@@ -138,15 +166,20 @@ Honest list; none are oversights.
 2. **Single instance, single AZ.** ShedLock now makes multiple replicas safe, but
    this deployment does not run them. An instance failure is a full outage until
    the stack redeploys.
-3. **The Paystack secret is a generated placeholder.** The application refuses to
+3. **The backend does not currently start.** Hibernate validates the entities
+   against the migrated schema and fails: 184 columns the entities expect are never
+   created by a migration, and 83 more disagree on type. This is a pre-existing
+   application defect, not a deployment one, and it blocks the API on any host. See
+   `docs/SCHEMA_DRIFT.md`. The frontend is unaffected and fully served.
+4. **The Paystack secret is a generated placeholder.** The application refuses to
    boot without one, so it exists to satisfy `StartupSecurityValidator`. Billing
    flows will fail until a real key is set. Replace it directly in Secrets Manager;
    do not commit it or pass it as a parameter.
-4. **Email is disabled** (`APP_EMAIL_ENABLED=false`). Signup verification and
+5. **Email is disabled** (`APP_EMAIL_ENABLED=false`). Signup verification and
    password reset generate tokens that are never delivered. Needs SES or SMTP
    credentials.
-5. **No CD.** Every step above is manual. Wiring it into GitHub Actions is Phase 1.5.
-6. **The restore has not been rehearsed.** See `docs/DR.md`; the figures there are
+6. **No CD.** Every step above is manual. Wiring it into GitHub Actions is Phase 1.5.
+7. **The restore has not been rehearsed.** See `docs/DR.md`; the figures there are
    design intent until the log records a real restore.
 
 ## Costs

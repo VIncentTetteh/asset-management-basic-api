@@ -12,11 +12,16 @@ has been executed end to end and the date recorded below.
 |---|---|---|
 | **RPO** (data loss) | ≤ 5 minutes | RDS continuous backup to S3. PITR granularity is ~5 minutes, so a restore lands within that of the failure. |
 | **RTO** (time to serve) | ≤ 90 minutes | Dominated by RDS restore time for a 20 GB instance (~20–40 min), plus stack redeploy and DNS/CloudFront propagation. |
-| **Backup retention** | 7 days | `DbBackupRetentionDays` in `infra/aws/foundation.yaml`. Raise before production; 7 days does not survive a fortnight's holiday. |
+| **Backup retention** | **1 day** | Forced down from the template default of 7. The AWS account hosting this is on the credit-based **FREE plan**, which rejects longer retention outright (`The specified backup retention period exceeds the maximum available to free tier customers`). **This is the weakest link in the whole DR story**: anything noticed more than 24 hours after it happened is unrecoverable. Raising it requires upgrading the account plan, not editing the template. |
 
 These are staging targets. Production needs Multi-AZ (removes the restore from the
 critical path for an AZ failure), a longer retention window, and cross-region
-snapshot copies — none of which are configured here, deliberately, on cost grounds.
+snapshot copies — none of which are configured here.
+
+The retention limit is not a cost trade-off that was chosen; it is imposed by the
+account plan. A FREE-plan account also carries a credit balance that expires, after
+which the environment stops rather than bills. Treat this account as a sandbox with
+a deadline, not as somewhere durable data should live.
 
 ## What is protected, and what is not
 
