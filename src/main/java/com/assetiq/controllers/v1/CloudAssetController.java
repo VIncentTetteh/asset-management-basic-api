@@ -40,7 +40,7 @@ public class CloudAssetController {
      * Register a new cloud asset.
      */
     @PostMapping
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','VIEW_ASSETS','EDIT_ASSET','MANAGE_CLOUD_ASSETS')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','EDIT_ASSET','MANAGE_CLOUD_ASSETS')")
     public ResponseEntity<CloudAssetDto> create(@Valid @RequestBody CloudAssetDto dto) {
         return ResponseEntity.status(HttpStatus.CREATED).body(cloudAssetService.create(dto));
     }
@@ -86,7 +86,7 @@ public class CloudAssetController {
      * PUT /api/v1/cloud-assets/{id}
      */
     @PutMapping("/{id}")
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','VIEW_ASSETS','EDIT_ASSET','MANAGE_CLOUD_ASSETS')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','EDIT_ASSET','MANAGE_CLOUD_ASSETS')")
     public ResponseEntity<CloudAssetDto> update(@PathVariable UUID id, @Valid @RequestBody CloudAssetDto dto) {
         return ResponseEntity.ok(cloudAssetService.update(id, dto));
     }
@@ -95,7 +95,7 @@ public class CloudAssetController {
      * DELETE /api/v1/cloud-assets/{id}
      */
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','VIEW_ASSETS','EDIT_ASSET','MANAGE_CLOUD_ASSETS')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','EDIT_ASSET','MANAGE_CLOUD_ASSETS')")
     public ResponseEntity<Void> delete(@PathVariable UUID id) {
         cloudAssetService.delete(id);
         return ResponseEntity.noContent().build();
@@ -117,7 +117,7 @@ public class CloudAssetController {
      * Body: { "billingMonth": "2025-01", "amount": 120.50, "serviceName": "EC2 Compute" }
      */
     @PostMapping("/{id}/cost")
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','VIEW_ASSETS','EDIT_ASSET','MANAGE_CLOUD_ASSETS')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_CLOUD_ASSETS')")
     public ResponseEntity<Void> recordCost(@PathVariable UUID id, @RequestBody Map<String, Object> body) {
         String billingMonth = (String) body.get("billingMonth");
         BigDecimal amount = new BigDecimal(body.get("amount").toString());
