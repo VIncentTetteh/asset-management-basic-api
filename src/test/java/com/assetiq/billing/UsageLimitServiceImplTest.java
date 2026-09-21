@@ -17,6 +17,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.access.AccessDeniedException;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
@@ -184,6 +185,65 @@ class UsageLimitServiceImplTest {
     /**
      * Attaches an ACTIVE subscription with the given plan limits to the mock repository.
      */
+    // ============================================================
+    // Dunning grace window and downgrade fit
+    // ============================================================
+
+    private SubscriptionPlan attachPastDueSubscription(Organisation org, Instant pastDueSince) {
+        SubscriptionPlan paid = makePlan(10_000, 250);
+        paid.setName("Business");
+        OrganisationSubscription sub = new OrganisationSubscription();
+        sub.setOrganisation(org);
+        sub.setPlan(paid);
+        sub.setStatus(SubscriptionStatus.PAST_DUE);
+        sub.setPastDueSince(pastDueSince);
+        when(subscriptionRepository.findFirstByOrganisationAndDeletedAtIsNullOrderByCreatedAtDesc(org))
+                .thenReturn(Optional.of(sub));
+        return paid;
+    }
+
+    @Test
+    @DisplayName("PAST_DUE keeps paid limits inside the grace window")
+    void pastDue_insideGrace_keepsPaidPlan() {
+        SubscriptionPlan paid = attachPastDueSubscription(org, Instant.now().minus(Duration.ofDays(3)));
+
+        assertThat(service.resolveEffectivePlan(org)).isSameAs(paid);
+    }
+
+    @Test
+    @DisplayName("PAST_DUE falls back to Freemium once the grace window has passed")
+    void pastDue_afterGrace_fallsBackToFreemium() {
+        attachPastDueSubscription(org, Instant.now().minus(Duration.ofDays(15)));
+        SubscriptionPlan freemium = makePlan(50, 5);
+        when(planRepository.findByCodeAndDeletedAtIsNull("FREEMIUM")).thenReturn(Optional.of(freemium));
+
+        assertThat(service.resolveEffectivePlan(org)).isSameAs(freemium);
+    }
+
+    @Test
+    @DisplayName("assertUsageFitsPlan names every overage")
+    void usageFitsPlan_reportsOverages() {
+        SubscriptionPlan target = makePlan(50, 5);
+        target.setName("Freemium");
+        when(assetRepository.countByOrganisationAndDeletedAtIsNull(org)).thenReturn(108L);
+        when(userRepository.countByOrganisationAndDeletedAtIsNull(org)).thenReturn(7L);
+
+        assertThatThrownBy(() -> service.assertUsageFitsPlan(org, target))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("108 assets")
+                .hasMessageContaining("7 users");
+    }
+
+    @Test
+    @DisplayName("assertUsageFitsPlan passes when usage fits")
+    void usageFitsPlan_passesWhenWithinLimits() {
+        SubscriptionPlan target = makePlan(250, 10);
+        when(assetRepository.countByOrganisationAndDeletedAtIsNull(org)).thenReturn(40L);
+        when(userRepository.countByOrganisationAndDeletedAtIsNull(org)).thenReturn(4L);
+
+        assertThatCode(() -> service.assertUsageFitsPlan(org, target)).doesNotThrowAnyException();
+    }
+
     private void attachActiveSubscription(Organisation org, int maxAssets, int maxEmployees) {
         attachActiveSubscription(org, maxAssets, maxEmployees, false);
     }

@@ -61,6 +61,18 @@ public class BillingController {
         return ResponseEntity.ok(billingService.setAutoRenew(request.getEnabled()));
     }
 
+    @PostMapping("/subscription/change-plan")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_ORGANIZATION_SETTINGS')")
+    public ResponseEntity<PlanChangeResponse> changePlan(@Valid @RequestBody BillingCheckoutRequest request) {
+        return ResponseEntity.ok(billingService.changePlan(request));
+    }
+
+    @DeleteMapping("/subscription/scheduled-change")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_ORGANIZATION_SETTINGS')")
+    public ResponseEntity<OrganisationSubscriptionDto> cancelScheduledChange() {
+        return ResponseEntity.ok(billingService.cancelScheduledChange());
+    }
+
     @PostMapping("/webhooks/paystack")
     public ResponseEntity<Void> paystackWebhook(
             @RequestHeader(value = "x-paystack-signature", required = false) String signature,
@@ -91,9 +103,13 @@ public class BillingController {
             log.warn("[WEBHOOK] Webhook validation error: {}", e.getMessage());
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
         } catch (Exception e) {
-            // Processing error — log it but return 200 so Paystack does not flood us with retries.
-            // The handler is idempotent; Paystack will re-deliver if needed.
-            log.error("[WEBHOOK] Error processing Paystack webhook", e);
+            // A processing failure must reach the gateway as a failure. Returning 200 here
+            // (as this used to) told Paystack the event was handled, and since replay
+            // protection had already marked it seen, a paid renewal was lost for good.
+            // Release the event so the gateway's retry is processed, and let it retry.
+            webhookReplayProtector.release(payload);
+            log.error("[WEBHOOK] Error processing Paystack webhook; released for retry", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
         }
         return ResponseEntity.ok().build();
     }

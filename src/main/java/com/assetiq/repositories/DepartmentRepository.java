@@ -22,6 +22,8 @@ public interface DepartmentRepository extends JpaRepository<Department, UUID> {
         // Organisation-scoped queries
         List<Department> findAllByOrganisationAndDeletedAtIsNull(Organisation organisation);
 
+        long countByOrganisationAndDeletedAtIsNull(Organisation organisation);
+
         List<Department> findAllByOrganisationAndParentDepartmentIdAndDeletedAtIsNull(
                         Organisation organisation,
                         UUID parentDepartmentId);

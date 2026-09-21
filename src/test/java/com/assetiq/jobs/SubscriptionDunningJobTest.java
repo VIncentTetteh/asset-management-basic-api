@@ -10,6 +10,7 @@ import com.assetiq.repositories.SubscriptionPlanRepository;
 import com.assetiq.repositories.UserRepository;
 import com.assetiq.services.EmailService;
 import com.assetiq.services.NotificationService;
+import com.assetiq.services.impl.SubscriptionLifecycleService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -48,6 +49,7 @@ class SubscriptionDunningJobTest {
     @Mock UserRepository                     userRepository;
     @Mock NotificationService                notificationService;
     @Mock EmailService                       emailService;
+    @Mock SubscriptionLifecycleService       lifecycleService;
 
     SubscriptionDunningJob job;
     Organisation org;
@@ -57,7 +59,7 @@ class SubscriptionDunningJobTest {
     @BeforeEach
     void setUp() {
         job = new SubscriptionDunningJob(subscriptionRepository, subscriptionPlanRepository,
-                userRepository, notificationService, emailService);
+                userRepository, notificationService, emailService, lifecycleService);
         ReflectionTestUtils.setField(job, "reminderDays", List.of(1, 3, 7));
         ReflectionTestUtils.setField(job, "graceDays", 14);
         ReflectionTestUtils.setField(job, "emailBaseUrl", "https://app.example.com");

@@ -16,7 +16,14 @@ public class OrganisationSubscriptionDto {
     private Instant currentPeriodStart;
     private Instant currentPeriodEnd;
     private Instant nextBillingAt;
+    private Instant canceledAt;
+    private Instant pastDueSince;
+    /** While PAST_DUE, paid limits stay in force until this instant. */
+    private Instant graceEndsAt;
+    private SubscriptionPlanDto scheduledPlan;
+    private Instant scheduledChangeAt;
     private Long currentAssetCount;
     private Long currentEmployeeCount;
+    private Long currentDepartmentCount;
 }
 

@@ -74,6 +74,25 @@ public class WebhookReplayProtector {
         return false;
     }
 
+    /**
+     * Forgets an event marked seen by {@link #isReplay}, so a delivery whose processing
+     * failed is accepted when the gateway retries it.
+     */
+    public void release(String payload) {
+        if (!enabled || redis == null) {
+            return;
+        }
+        String eventId = extractEventId(payload);
+        if (eventId == null || eventId.isBlank()) {
+            return;
+        }
+        try {
+            redis.delete(KEY_PREFIX + eventId);
+        } catch (RuntimeException e) {
+            log.warn("[WEBHOOK-REPLAY] Could not release event {} for retry", eventId, e);
+        }
+    }
+
     private String extractEventId(String payload) {
         try {
             JsonNode root = objectMapper.readTree(payload);

@@ -51,6 +51,18 @@ public class OrganisationSubscription extends BaseEntity {
      */
     private Instant pastDueSince;
 
+    /**
+     * Plan the subscription switches to at {@link #scheduledChangeAt}.
+     *
+     * <p>Only downgrades are scheduled: the customer keeps what they paid for until the
+     * period ends. Upgrades apply immediately and never set this.
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "scheduled_plan_id")
+    private SubscriptionPlan scheduledPlan;
+
+    private Instant scheduledChangeAt;
+
     @Column(length = 120)
     private String paystackCustomerCode;
 

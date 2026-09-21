@@ -8,6 +8,7 @@ import com.assetiq.models.*;
 import com.assetiq.repositories.*;
 import com.assetiq.services.AssetImportService;
 import com.assetiq.services.AssetService;
+import com.assetiq.services.UsageLimitService;
 import com.assetiq.storage.FileStorageService;
 import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
@@ -81,8 +82,7 @@ public class AssetImportServiceImpl extends com.assetiq.services.TenantAwareServ
     private final SupplierRepository supplierRepository;
     private final DepartmentRepository departmentRepository;
     private final UserRepository userRepository;
-    private final OrganisationSubscriptionRepository organisationSubscriptionRepository;
-    private final SubscriptionPlanRepository subscriptionPlanRepository;
+    private final UsageLimitService usageLimitService;
     private final FileStorageService storageService;
     private final TransactionTemplate transactionTemplate;
     private final DataFormatter dataFormatter = new DataFormatter();
@@ -100,8 +100,7 @@ public class AssetImportServiceImpl extends com.assetiq.services.TenantAwareServ
             DepartmentRepository departmentRepository,
             UserRepository userRepository,
             OrganisationRepository organisationRepository,
-            OrganisationSubscriptionRepository organisationSubscriptionRepository,
-            SubscriptionPlanRepository subscriptionPlanRepository,
+            UsageLimitService usageLimitService,
             FileStorageService storageService,
             TransactionTemplate transactionTemplate) {
         super(organisationRepository);
@@ -113,8 +112,7 @@ public class AssetImportServiceImpl extends com.assetiq.services.TenantAwareServ
         this.supplierRepository = supplierRepository;
         this.departmentRepository = departmentRepository;
         this.userRepository = userRepository;
-        this.organisationSubscriptionRepository = organisationSubscriptionRepository;
-        this.subscriptionPlanRepository = subscriptionPlanRepository;
+        this.usageLimitService = usageLimitService;
         this.storageService = storageService;
         this.transactionTemplate = transactionTemplate;
     }
@@ -279,16 +277,9 @@ public class AssetImportServiceImpl extends com.assetiq.services.TenantAwareServ
     }
 
     private SubscriptionPlan resolvePlan(Organisation org) {
-        OrganisationSubscription subscription = organisationSubscriptionRepository
-                .findFirstByOrganisationAndDeletedAtIsNullOrderByCreatedAtDesc(org)
-                .orElse(null);
-        if (subscription != null
-                && subscription.getPlan() != null
-                && subscription.getStatus() == SubscriptionStatus.ACTIVE) {
-            return subscription.getPlan();
-        }
-        return subscriptionPlanRepository.findByCodeAndDeletedAtIsNull("FREEMIUM")
-                .orElseThrow(() -> new IllegalStateException("FREEMIUM plan is not configured"));
+        // One definition of "which plan applies", shared with the create paths, so an
+        // import cannot disagree with asset creation about the dunning grace window.
+        return usageLimitService.resolveEffectivePlan(org);
     }
 
     // ── Lookup cache ──────────────────────────────────────────────────────────

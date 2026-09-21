@@ -13,6 +13,7 @@ import com.assetiq.services.EmailService;
 import com.assetiq.services.EmailVerificationService;
 import com.assetiq.services.RefreshSessionService;
 import com.assetiq.services.SessionRevocationService;
+import com.assetiq.services.UsageLimitService;
 import com.assetiq.enums.UserStatus;
 import com.assetiq.multitenancy.TenantContext;
 import org.springframework.http.HttpHeaders;
@@ -59,6 +60,7 @@ public class AuthController {
 
     private final UserRepository userRepository;
     private final OrganisationRepository organisationRepository;
+    private final UsageLimitService usageLimitService;
     private final RoleRepository roleRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
@@ -94,7 +96,8 @@ public class AuthController {
             PermissionCacheService permissionCacheService,
             EmailVerificationService emailVerificationService,
             RefreshSessionService refreshSessionService,
-            SessionRevocationService sessionRevocationService) {
+            SessionRevocationService sessionRevocationService,
+            UsageLimitService usageLimitService) {
         this.userRepository = userRepository;
         this.organisationRepository = organisationRepository;
         this.roleRepository = roleRepository;
@@ -106,6 +109,7 @@ public class AuthController {
         this.emailVerificationService = emailVerificationService;
         this.refreshSessionService = refreshSessionService;
         this.sessionRevocationService = sessionRevocationService;
+        this.usageLimitService = usageLimitService;
     }
 
     /**
@@ -141,6 +145,9 @@ public class AuthController {
         // Validate organization exists
         var organisation = organisationRepository.findById(tenantId)
                 .orElseThrow(() -> new IllegalArgumentException("Organization not found"));
+        // Same plan limit as the user-management create path; without it this endpoint
+        // let a tenant add users past its plan (and past a downgrade) without paying.
+        usageLimitService.assertCanCreateEmployee(organisation);
 
         // Get default role or specified role
         Role role = null;

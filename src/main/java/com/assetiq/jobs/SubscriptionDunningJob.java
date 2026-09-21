@@ -11,6 +11,7 @@ import com.assetiq.repositories.SubscriptionPlanRepository;
 import com.assetiq.repositories.UserRepository;
 import com.assetiq.services.EmailService;
 import com.assetiq.services.NotificationService;
+import com.assetiq.services.impl.SubscriptionLifecycleService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -60,6 +61,7 @@ public class SubscriptionDunningJob {
     private final UserRepository userRepository;
     private final NotificationService notificationService;
     private final EmailService emailService;
+    private final SubscriptionLifecycleService lifecycleService;
 
     /** Days after going past due on which a reminder is sent. */
     @Value("${app.billing.dunning.reminder-days:1,3,7}")
@@ -155,6 +157,11 @@ public class SubscriptionDunningJob {
             return;
         }
 
+        // Stop the gateway retrying a charge for the plan being taken away.
+        lifecycleService.disableGatewaySubscription(subscription);
+        subscription.setPaystackSubscriptionCode(null);
+        subscription.setScheduledPlan(null);
+        subscription.setScheduledChangeAt(null);
         subscription.setPlan(freemium);
         // ACTIVE on Freemium, not EXPIRED: they are now a legitimate free-tier tenant.
         // Leaving them PAST_DUE would re-enter this sweep forever and keep emailing them.

@@ -1,6 +1,7 @@
 package com.assetiq.controllers.v1;
 
 import com.assetiq.exceptions.PaymentGatewayException;
+import com.assetiq.exceptions.PaymentRejectedException;
 import com.assetiq.services.FeatureDisabledException;
 import jakarta.persistence.EntityNotFoundException;
 import org.slf4j.Logger;
@@ -68,6 +69,11 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     public ResponseEntity<Object> handlePaymentGateway(PaymentGatewayException ex) {
         log.error("Payment gateway error: {}", ex.getMessage());
         return new ResponseEntity<>(errorBody(502, ex.getMessage(), "PAYMENT_GATEWAY_ERROR"), HttpStatus.BAD_GATEWAY);
+    }
+
+    @ExceptionHandler(PaymentRejectedException.class)
+    public ResponseEntity<Object> handlePaymentRejected(PaymentRejectedException ex) {
+        return new ResponseEntity<>(errorBody(422, ex.getMessage(), "PAYMENT_REJECTED"), HttpStatus.UNPROCESSABLE_ENTITY);
     }
 
     @ExceptionHandler(IllegalStateException.class)

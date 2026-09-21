@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -23,4 +24,13 @@ public interface OrganisationSubscriptionRepository extends JpaRepository<Organi
     /** Dunning scan: every subscription currently in a given lifecycle state. */
     @EntityGraph(attributePaths = {"plan", "organisation"})
     List<OrganisationSubscription> findByStatusAndDeletedAtIsNull(SubscriptionStatus status);
+
+    /** Period-end sweep: subscriptions in {@code status} whose paid period ended before {@code cutoff}. */
+    @EntityGraph(attributePaths = {"plan", "organisation", "scheduledPlan"})
+    List<OrganisationSubscription> findByStatusAndCurrentPeriodEndBeforeAndDeletedAtIsNull(
+            SubscriptionStatus status, Instant cutoff);
+
+    /** Renewal charges carry the gateway customer, not our checkout reference. */
+    @EntityGraph(attributePaths = {"plan", "organisation"})
+    Optional<OrganisationSubscription> findFirstByPaystackCustomerCodeAndDeletedAtIsNull(String paystackCustomerCode);
 }
