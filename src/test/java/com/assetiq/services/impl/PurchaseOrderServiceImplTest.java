@@ -7,6 +7,7 @@ import com.assetiq.multitenancy.TenantContext;
 import com.assetiq.repositories.*;
 import com.assetiq.services.CurrencyResolver;
 import com.assetiq.services.NotificationService;
+import com.assetiq.services.budget.LedgerFixture;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -38,15 +39,17 @@ class PurchaseOrderServiceImplTest {
     @Mock CurrencyResolver currencyResolver;
 
     private PurchaseOrderServiceImpl service;
+    private LedgerFixture ledger;
     private Organisation organisation;
     private User maker;
 
     @BeforeEach
     void setUp() {
+        ledger = new LedgerFixture(budgetRepository, notificationService);
         service = new PurchaseOrderServiceImpl(
                 poRepository, organisationRepository, departmentRepository,
                 supplierRepository, userRepository, budgetRepository,
-                notificationService, currencyResolver);
+                notificationService, currencyResolver, ledger.service);
         organisation = new Organisation();
         organisation.setId(UUID.randomUUID());
         maker = user("maker@example.com");
@@ -123,6 +126,9 @@ class PurchaseOrderServiceImplTest {
         po.setCurrency("GHS");
         po.setTotalAmount(new BigDecimal("50.00"));
         po.setLinkedBudget(budget);
+        budget.setStatus(com.assetiq.enums.BudgetStatus.ACTIVE);
+        budget.setTotalAmount(new BigDecimal("1000"));
+        LedgerFixture.lockable(budgetRepository, organisation, budget);
         authenticate(checker);
 
         when(poRepository.findByIdAndOrganisationAndDeletedAtIsNull(po.getId(), organisation))
@@ -149,7 +155,7 @@ class PurchaseOrderServiceImplTest {
         PurchaseOrder po = new PurchaseOrder();
         po.setId(UUID.randomUUID());
         po.setOrganisation(organisation);
-        po.setStatus(POStatus.DRAFT);
+        po.setStatus(POStatus.SUBMITTED);
         po.setRequestedBy(requester);
         return po;
     }

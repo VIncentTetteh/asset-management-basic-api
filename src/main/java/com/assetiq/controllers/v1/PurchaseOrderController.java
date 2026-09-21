@@ -72,6 +72,13 @@ public class PurchaseOrderController {
         return ResponseEntity.ok(updatedPo);
     }
 
+    /** DRAFT -> SUBMITTED. The caller becomes the maker and cannot approve the order. */
+    @PostMapping("/{id}/submit")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_EXPENSES','MANAGE_PROCUREMENT')")
+    public ResponseEntity<PurchaseOrderDto> submitPurchaseOrder(@PathVariable UUID id) {
+        return ResponseEntity.ok(poService.submitPurchaseOrder(id));
+    }
+
     @PostMapping("/{id}/approve")
     @RequireFreshMfa
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_EXPENSES','APPROVE_PROCUREMENT','APPROVE_REQUESTS')")
@@ -88,6 +95,20 @@ public class PurchaseOrderController {
     public ResponseEntity<PurchaseOrderDto> rejectPurchaseOrder(@PathVariable UUID id) {
         PurchaseOrderDto rejectedPo = poService.rejectPurchaseOrder(id);
         return ResponseEntity.ok(rejectedPo);
+    }
+
+    /** APPROVED -> DELIVERED: goods received; the budget commitment becomes spend. */
+    @PostMapping("/{id}/receive")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_PROCUREMENT','APPROVE_PROCUREMENT')")
+    public ResponseEntity<PurchaseOrderDto> receivePurchaseOrder(@PathVariable UUID id) {
+        return ResponseEntity.ok(poService.receivePurchaseOrder(id));
+    }
+
+    /** DRAFT/SUBMITTED/APPROVED -> CANCELLED; an approved order's commitment is released. */
+    @PostMapping("/{id}/cancel")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_PROCUREMENT','APPROVE_PROCUREMENT')")
+    public ResponseEntity<PurchaseOrderDto> cancelPurchaseOrder(@PathVariable UUID id) {
+        return ResponseEntity.ok(poService.cancelPurchaseOrder(id));
     }
 
     @DeleteMapping("/{id}")

@@ -1,6 +1,7 @@
 package com.assetiq.services.impl;
 
 import com.assetiq.dto.PurchaseOrderDto;
+import com.assetiq.enums.BudgetLedgerKind;
 import com.assetiq.enums.POStatus;
 import com.assetiq.models.Budget;
 import com.assetiq.models.PurchaseOrder;
@@ -14,6 +15,8 @@ import com.assetiq.services.CurrencyResolver;
 import com.assetiq.services.NotificationService;
 import com.assetiq.services.PurchaseOrderService;
 import com.assetiq.services.TenantAwareService;
+import com.assetiq.services.budget.BudgetLedgerService;
+import com.assetiq.services.budget.BudgetPosting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.security.core.Authentication;
@@ -40,6 +43,7 @@ public class PurchaseOrderServiceImpl extends TenantAwareService implements Purc
     private final BudgetRepository budgetRepository;
     private final NotificationService notificationService;
     private final CurrencyResolver currencyResolver;
+    private final BudgetLedgerService budgetLedger;
 
     public PurchaseOrderServiceImpl(PurchaseOrderRepository poRepository,
             OrganisationRepository organisationRepository,
@@ -48,7 +52,8 @@ public class PurchaseOrderServiceImpl extends TenantAwareService implements Purc
             UserRepository userRepository,
             BudgetRepository budgetRepository,
             NotificationService notificationService,
-            CurrencyResolver currencyResolver) {
+            CurrencyResolver currencyResolver,
+            BudgetLedgerService budgetLedger) {
         super(organisationRepository);
         this.poRepository = poRepository;
         this.departmentRepository = departmentRepository;
@@ -57,6 +62,7 @@ public class PurchaseOrderServiceImpl extends TenantAwareService implements Purc
         this.budgetRepository = budgetRepository;
         this.notificationService = notificationService;
         this.currencyResolver = currencyResolver;
+        this.budgetLedger = budgetLedger;
     }
 
     @Override
@@ -85,9 +91,9 @@ public class PurchaseOrderServiceImpl extends TenantAwareService implements Purc
         po.setRequestedBy(resolveCurrentUser(org));
 
         if (poDto.getLinkedBudgetId() != null) {
-            budgetRepository.findByIdAndOrganisationAndDeletedAtIsNull(poDto.getLinkedBudgetId(), org)
-                    .ifPresent(po::setLinkedBudget);
+            po.setLinkedBudget(requireLinkableBudget(poDto.getLinkedBudgetId(), org));
         }
+        requireBudgetCurrency(po);
 
         PurchaseOrder saved = poRepository.save(po);
         logger.info("Created Purchase Order {} (PO Number: {})", saved.getId(), saved.getPoNumber());
@@ -152,17 +158,19 @@ public class PurchaseOrderServiceImpl extends TenantAwareService implements Purc
     @Override
     public PurchaseOrderDto updatePurchaseOrder(UUID id, PurchaseOrderDto poDto) {
         Organisation org = requireTenantOrg();
-        PurchaseOrder po = poRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
-                .orElseThrow(() -> new IllegalArgumentException("Purchase order not found"));
-
-        if (po.getStatus() != POStatus.DRAFT) {
-            throw new IllegalStateException("Cannot update a non-draft purchase order");
-        }
+        PurchaseOrder po = requireOrder(id, org);
+        requireStatus(po, "edit", POStatus.DRAFT);
 
         po.setPoNumber(poDto.getPoNumber());
         po.setTotalAmount(poDto.getTotalAmount());
         po.setCurrency(currencyResolver.resolveOrDefault(poDto.getCurrency()));
         po.setRemarks(poDto.getRemarks());
+        po.setDepartment(requireDepartment(poDto.getDepartmentId(), org));
+        po.setSupplier(requireSupplier(poDto.getSupplierId(), org));
+        // PUT is a full replacement: a null linkedBudgetId unlinks the budget.
+        po.setLinkedBudget(poDto.getLinkedBudgetId() != null
+                ? requireLinkableBudget(poDto.getLinkedBudgetId(), org) : null);
+        requireBudgetCurrency(po);
 
         return mapToDto(poRepository.save(po));
     }
@@ -170,12 +178,8 @@ public class PurchaseOrderServiceImpl extends TenantAwareService implements Purc
     @Override
     public PurchaseOrderDto patchPurchaseOrder(UUID id, PurchaseOrderDto poDto) {
         Organisation org = requireTenantOrg();
-        PurchaseOrder po = poRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
-                .orElseThrow(() -> new IllegalArgumentException("Purchase order not found"));
-
-        if (po.getStatus() != POStatus.DRAFT) {
-            throw new IllegalStateException("Cannot update a non-draft purchase order");
-        }
+        PurchaseOrder po = requireOrder(id, org);
+        requireStatus(po, "edit", POStatus.DRAFT);
 
         if (poDto.getPoNumber() != null) {
             po.setPoNumber(poDto.getPoNumber());
@@ -190,61 +194,82 @@ public class PurchaseOrderServiceImpl extends TenantAwareService implements Purc
             po.setRemarks(poDto.getRemarks());
         }
         if (poDto.getDepartmentId() != null) {
-            Department department = departmentRepository.findByIdAndOrganisationAndDeletedAtIsNull(
-                    poDto.getDepartmentId(), org)
-                    .orElseThrow(() -> new IllegalArgumentException("Department not found in your organisation"));
-            po.setDepartment(department);
+            po.setDepartment(requireDepartment(poDto.getDepartmentId(), org));
         }
         if (poDto.getSupplierId() != null) {
-            Supplier supplier = supplierRepository.findByIdAndOrganisationAndDeletedAtIsNull(
-                    poDto.getSupplierId(), org)
-                    .orElseThrow(() -> new IllegalArgumentException("Supplier not found in your organisation"));
-            po.setSupplier(supplier);
+            po.setSupplier(requireSupplier(poDto.getSupplierId(), org));
         }
+        if (poDto.getLinkedBudgetId() != null) {
+            po.setLinkedBudget(requireLinkableBudget(poDto.getLinkedBudgetId(), org));
+        }
+        requireBudgetCurrency(po);
 
         return mapToDto(poRepository.save(po));
+    }
+
+    // ── Workflow ─────────────────────────────────────────────────────────────
+    //
+    //   DRAFT ──submit──▶ SUBMITTED ──approve──▶ APPROVED ──receive──▶ DELIVERED
+    //     │                  │  └──reject──▶ REJECTED        │
+    //     └──cancel──▶ CANCELLED ◀──cancel──┘◀────cancel─────┘
+    //
+    // Budget effect (when a budget is linked): approve commits the amount (funds
+    // checked), receive turns the commitment into spend, cancel/delete release the
+    // commitment, and deleting a delivered order reverses its spend.
+
+    @Override
+    public PurchaseOrderDto submitPurchaseOrder(UUID id) {
+        Organisation org = requireTenantOrg();
+        PurchaseOrder po = requireOrder(id, org);
+        if (po.getStatus() == POStatus.SUBMITTED) {
+            return mapToDto(po);
+        }
+        requireStatus(po, "submit", POStatus.DRAFT);
+        requireBudgetCurrency(po);
+
+        // The person who submits is the maker: they cannot also be the checker.
+        User submitter = resolveCurrentUser(org);
+        po.setRequestedBy(submitter);
+        po.setStatus(POStatus.SUBMITTED);
+        PurchaseOrder submitted = poRepository.save(po);
+        logger.info("Purchase Order {} submitted for approval by {}", id, submitter.getEmail());
+        notificationService.notifyOrgAdmins(org, NotificationType.APPROVAL,
+                "Purchase Order Awaiting Approval",
+                "Purchase Order '" + submitted.getPoNumber() + "' has been submitted for approval.",
+                submitted.getId(), "/purchase-orders");
+        return mapToDto(submitted);
     }
 
     @Override
     public PurchaseOrderDto approvePurchaseOrder(UUID id) {
         Organisation org = requireTenantOrg();
-        PurchaseOrder po = poRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
-                .orElseThrow(() -> new IllegalArgumentException("Purchase order not found"));
+        PurchaseOrder po = requireOrder(id, org);
 
         if (po.getStatus() == POStatus.APPROVED) {
             logger.warn("Purchase Order {} is already approved", id);
             return mapToDto(po);
         }
-
-        if (po.getStatus() == POStatus.REJECTED) {
-            throw new IllegalStateException("Cannot approve a rejected purchase order. Create a new one instead.");
-        }
+        requireStatus(po, "approve", POStatus.SUBMITTED);
 
         User approver = resolveCurrentUser(org);
         if (po.getRequestedBy() != null && po.getRequestedBy().getId().equals(approver.getId())) {
             throw new IllegalStateException("A purchase order requester cannot approve their own order");
         }
-        po.setApprovedBy(approver);
-        logger.info("Purchase Order {} approved by user {}", id, approver.getEmail());
-        po.setStatus(POStatus.APPROVED);
-        po.setApprovedAt(Instant.now());
 
-        // Auto-deduct from linked budget when PO is approved
-        if (po.getLinkedBudget() != null && po.getTotalAmount() != null) {
-            Budget budget = po.getLinkedBudget();
-            if (budget.getCurrency() == null || po.getCurrency() == null
-                    || !budget.getCurrency().equalsIgnoreCase(po.getCurrency())) {
-                throw new IllegalStateException("Purchase order and linked budget currencies must match");
-            }
-            java.math.BigDecimal alreadySpent = budget.getSpentAmount() == null
-                    ? java.math.BigDecimal.ZERO : budget.getSpentAmount();
-            budget.setSpentAmount(alreadySpent.add(po.getTotalAmount()));
-            budgetRepository.save(budget);
-            logger.info("Auto-deducted {} {} from budget {} for approved PO {}",
-                    po.getTotalAmount(), po.getCurrency(), budget.getId(), po.getId());
+        // Commit before changing the order: an insufficient-funds or currency failure
+        // must leave the order SUBMITTED and the budget untouched.
+        if (po.getLinkedBudget() != null) {
+            budgetLedger.post(org, po.getLinkedBudget().getId(),
+                    BudgetPosting.forPurchaseOrder(BudgetLedgerKind.PO_COMMIT, po));
+            logger.info("Committed {} {} against budget {} for approved PO {}",
+                    po.getTotalAmount(), po.getCurrency(), po.getLinkedBudget().getId(), po.getId());
         }
 
+        po.setApprovedBy(approver);
+        po.setStatus(POStatus.APPROVED);
+        po.setApprovedAt(Instant.now());
         PurchaseOrder approved = poRepository.save(po);
+        logger.info("Purchase Order {} approved by user {}", id, approver.getEmail());
         notificationService.notifyOrgAdmins(org, NotificationType.APPROVAL,
                 "Purchase Order Approved",
                 "Purchase Order '" + approved.getPoNumber() + "' has been approved.",
@@ -255,17 +280,17 @@ public class PurchaseOrderServiceImpl extends TenantAwareService implements Purc
     @Override
     public PurchaseOrderDto rejectPurchaseOrder(UUID id) {
         Organisation org = requireTenantOrg();
-        PurchaseOrder po = poRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
-                .orElseThrow(() -> new IllegalArgumentException("Purchase order not found"));
-
-        if (po.getStatus() == POStatus.APPROVED) {
-            throw new IllegalStateException("Cannot reject an already approved purchase order");
-        }
+        PurchaseOrder po = requireOrder(id, org);
 
         if (po.getStatus() == POStatus.REJECTED) {
             logger.warn("Purchase Order {} is already rejected", id);
             return mapToDto(po);
         }
+        if (po.getStatus() == POStatus.APPROVED) {
+            throw new IllegalStateException(
+                    "Cannot reject an already approved purchase order; cancel it instead to release its budget commitment");
+        }
+        requireStatus(po, "reject", POStatus.SUBMITTED);
 
         User rejector = resolveCurrentUser(org);
         if (po.getRequestedBy() != null && po.getRequestedBy().getId().equals(rejector.getId())) {
@@ -284,13 +309,123 @@ public class PurchaseOrderServiceImpl extends TenantAwareService implements Purc
     }
 
     @Override
+    public PurchaseOrderDto receivePurchaseOrder(UUID id) {
+        Organisation org = requireTenantOrg();
+        PurchaseOrder po = requireOrder(id, org);
+        if (po.getStatus() == POStatus.DELIVERED) {
+            return mapToDto(po);
+        }
+        requireStatus(po, "mark as received", POStatus.APPROVED);
+
+        if (po.getLinkedBudget() != null && hasCommitment(org, po)) {
+            budgetLedger.post(org, po.getLinkedBudget().getId(),
+                    BudgetPosting.forPurchaseOrder(BudgetLedgerKind.PO_SPEND, po));
+        }
+        // No commitment entry: the order was approved before commitments existed,
+        // when approval charged spend directly. It is already counted as spent.
+
+        po.setStatus(POStatus.DELIVERED);
+        PurchaseOrder received = poRepository.save(po);
+        logger.info("Purchase Order {} marked as received", id);
+        return mapToDto(received);
+    }
+
+    @Override
+    public PurchaseOrderDto cancelPurchaseOrder(UUID id) {
+        Organisation org = requireTenantOrg();
+        PurchaseOrder po = requireOrder(id, org);
+        if (po.getStatus() == POStatus.CANCELLED) {
+            return mapToDto(po);
+        }
+        requireStatus(po, "cancel", POStatus.DRAFT, POStatus.SUBMITTED, POStatus.APPROVED);
+
+        if (po.getStatus() == POStatus.APPROVED) {
+            unwindBudget(org, po);
+        }
+        po.setStatus(POStatus.CANCELLED);
+        PurchaseOrder cancelled = poRepository.save(po);
+        logger.info("Purchase Order {} cancelled", id);
+        notificationService.notifyOrgAdmins(org, NotificationType.PURCHASE_ORDER,
+                "Purchase Order Cancelled",
+                "Purchase Order '" + cancelled.getPoNumber() + "' has been cancelled.",
+                cancelled.getId(), "/purchase-orders");
+        return mapToDto(cancelled);
+    }
+
+    @Override
     public void deletePurchaseOrder(UUID id) {
         Organisation org = requireTenantOrg();
-        PurchaseOrder po = poRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
-                .orElseThrow(() -> new IllegalArgumentException("Purchase order not found"));
+        PurchaseOrder po = requireOrder(id, org);
+        if (po.getStatus() == POStatus.APPROVED || po.getStatus() == POStatus.DELIVERED) {
+            unwindBudget(org, po);
+        }
         po.setDeletedAt(Instant.now());
         poRepository.save(po);
         logger.info("Soft-deleted Purchase Order {} (PO Number: {})", id, po.getPoNumber());
+    }
+
+    /**
+     * Takes an approved or delivered order back off its budget: an open commitment
+     * is released; spend already recorded (a delivered order, or one approved before
+     * commitments existed, when approval charged spend directly) is reversed.
+     */
+    private void unwindBudget(Organisation org, PurchaseOrder po) {
+        if (po.getLinkedBudget() == null) return;
+        boolean openCommitment = po.getStatus() == POStatus.APPROVED && hasCommitment(org, po);
+        BudgetLedgerKind kind = openCommitment ? BudgetLedgerKind.PO_RELEASE : BudgetLedgerKind.PO_SPEND_REVERSAL;
+        budgetLedger.post(org, po.getLinkedBudget().getId(), BudgetPosting.forPurchaseOrder(kind, po));
+        logger.info("{} {} {} on budget {} for PO {}", kind, po.getTotalAmount(), po.getCurrency(),
+                po.getLinkedBudget().getId(), po.getId());
+    }
+
+    private boolean hasCommitment(Organisation org, PurchaseOrder po) {
+        return budgetLedger.hasPosted(org, BudgetPosting.keyFor(BudgetLedgerKind.PO_COMMIT, po.getId()));
+    }
+
+    private static void requireStatus(PurchaseOrder po, String action, POStatus... allowed) {
+        for (POStatus status : allowed) {
+            if (po.getStatus() == status) return;
+        }
+        throw new IllegalStateException("Cannot " + action + " a purchase order in status " + po.getStatus()
+                + "; allowed from " + java.util.Arrays.toString(allowed));
+    }
+
+    /** Early, user-facing currency check (the ledger enforces it again at posting time). */
+    private static void requireBudgetCurrency(PurchaseOrder po) {
+        Budget budget = po.getLinkedBudget();
+        if (budget == null) return;
+        if (budget.getCurrency() == null || po.getCurrency() == null
+                || !budget.getCurrency().equalsIgnoreCase(po.getCurrency())) {
+            throw new IllegalArgumentException("Purchase order currency " + po.getCurrency()
+                    + " does not match budget '" + budget.getName() + "' currency " + budget.getCurrency()
+                    + "; purchase order and linked budget currencies must match");
+        }
+    }
+
+    private PurchaseOrder requireOrder(UUID id, Organisation org) {
+        return poRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
+                .orElseThrow(() -> new IllegalArgumentException("Purchase order not found"));
+    }
+
+    private Department requireDepartment(UUID departmentId, Organisation org) {
+        if (departmentId == null) {
+            throw new IllegalArgumentException("Department is required");
+        }
+        return departmentRepository.findByIdAndOrganisationAndDeletedAtIsNull(departmentId, org)
+                .orElseThrow(() -> new IllegalArgumentException("Department not found in your organisation"));
+    }
+
+    private Supplier requireSupplier(UUID supplierId, Organisation org) {
+        if (supplierId == null) {
+            throw new IllegalArgumentException("Supplier is required");
+        }
+        return supplierRepository.findByIdAndOrganisationAndDeletedAtIsNull(supplierId, org)
+                .orElseThrow(() -> new IllegalArgumentException("Supplier not found in your organisation"));
+    }
+
+    private Budget requireLinkableBudget(UUID budgetId, Organisation org) {
+        return budgetRepository.findByIdAndOrganisationAndDeletedAtIsNull(budgetId, org)
+                .orElseThrow(() -> new IllegalArgumentException("Budget not found in your organisation"));
     }
 
     private PurchaseOrderDto mapToDto(PurchaseOrder po) {
