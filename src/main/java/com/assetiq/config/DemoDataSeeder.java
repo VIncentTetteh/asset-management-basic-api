@@ -11,6 +11,7 @@ import com.assetiq.enums.AssetCondition;
 import com.assetiq.enums.AssetStatus;
 import com.assetiq.enums.AssetType;
 import com.assetiq.enums.DepreciationMethod;
+import com.assetiq.services.finance.DepreciationCalculator;
 import com.assetiq.enums.MaintenanceStatus;
 import com.assetiq.enums.MaintenanceType;
 import com.assetiq.enums.ProcurementType;
@@ -244,7 +245,7 @@ public class DemoDataSeeder implements ApplicationRunner {
                 BigDecimal residual = purchaseCost.multiply(BigDecimal.valueOf(0.10))
                         .setScale(2, RoundingMode.HALF_UP);
                 a.setResidualValue(residual);
-                a.setCurrentBookValue(straightLineNbv(purchaseCost, residual, t.usefulLifeMonths(), monthsAgo));
+                a.setCurrentBookValue(DepreciationCalculator.forAsset(a, LocalDate.now()).netBookValue());
                 a.setWarrantyExpiryDate(purchaseDate.plusMonths(
                         category.getDefaultWarrantyPeriodMonths() != null
                                 ? category.getDefaultWarrantyPeriodMonths() : 12));
@@ -262,16 +263,6 @@ public class DemoDataSeeder implements ApplicationRunner {
             }
         }
         return saved;
-    }
-
-    private static BigDecimal straightLineNbv(BigDecimal cost, BigDecimal residual,
-            int usefulLifeMonths, int monthsElapsed) {
-        if (usefulLifeMonths <= 0) return cost;
-        BigDecimal depreciable = cost.subtract(residual);
-        if (depreciable.signum() <= 0) return cost;
-        BigDecimal monthly = depreciable.divide(BigDecimal.valueOf(usefulLifeMonths), 2, RoundingMode.HALF_UP);
-        BigDecimal accumulated = monthly.multiply(BigDecimal.valueOf(Math.min(monthsElapsed, usefulLifeMonths)));
-        return cost.subtract(accumulated).max(residual).setScale(2, RoundingMode.HALF_UP);
     }
 
     private void seedMaintenance(Organisation org, List<Asset> assets) {

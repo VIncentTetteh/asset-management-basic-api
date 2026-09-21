@@ -6,21 +6,31 @@ import com.assetiq.repositories.AssetRepository;
 import com.assetiq.repositories.OrganisationRepository;
 import com.assetiq.services.DepreciationService;
 import com.assetiq.services.TenantAwareService;
+import com.assetiq.services.finance.DepreciationCalculator;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.time.LocalDate;
-import java.time.YearMonth;
-import java.util.Set;
 import java.util.UUID;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 
+/**
+ * Tenant-scoped depreciation queries plus the monthly book-value refresh. All
+ * figures come from {@link DepreciationCalculator}.
+ */
 @Service
 @Transactional
 public class DepreciationServiceImpl extends TenantAwareService implements DepreciationService {
+
+    private static final Logger log = LoggerFactory.getLogger(DepreciationServiceImpl.class);
+    private static final int BATCH_SIZE = 500;
 
     private final AssetRepository assetRepository;
 
@@ -37,97 +47,55 @@ public class DepreciationServiceImpl extends TenantAwareService implements Depre
 
     @Override
     public BigDecimal calculateDepreciationAsOf(UUID assetId, LocalDate asOfDate) {
-        Organisation org = requireTenantOrg();
-        Asset asset = assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(assetId, org)
-                .orElseThrow(() -> new IllegalArgumentException("Asset not found in your organisation"));
-        return computeDepreciation(asset, asOfDate);
+        return DepreciationCalculator.forAsset(requireAsset(assetId), asOfDate).accumulatedDepreciation();
     }
 
     @Override
     public BigDecimal calculateMonthlyDepreciation(UUID assetId) {
-        Organisation org = requireTenantOrg();
-        Asset asset = assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(assetId, org)
-                .orElseThrow(() -> new IllegalArgumentException("Asset not found in your organisation"));
-
-        if (asset.getPurchaseCost() == null)
-            return BigDecimal.ZERO;
-
-        var policy = asset.getCategory() != null ? asset.getCategory().getDepreciationPolicy() : null;
-        if (policy == null)
-            return BigDecimal.ZERO;
-
-        int usefulLifeMonths = policy.getUsefulLifeMonths() != null ? policy.getUsefulLifeMonths() : 60;
-        BigDecimal salvagePct = policy.getSalvageValuePercent() != null ? policy.getSalvageValuePercent()
-                : BigDecimal.ZERO;
-        BigDecimal depreciable = asset.getPurchaseCost()
-                .multiply(BigDecimal.ONE.subtract(salvagePct.divide(new BigDecimal(100), 4, RoundingMode.HALF_UP)));
-
-        return depreciable.divide(new BigDecimal(usefulLifeMonths), 2, RoundingMode.HALF_UP);
+        return DepreciationCalculator.forAsset(requireAsset(assetId), LocalDate.now()).monthlyDepreciation();
     }
 
     @Override
     public BigDecimal getCurrentBookValue(UUID assetId) {
-        Organisation org = requireTenantOrg();
-        Asset asset = assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(assetId, org)
-                .orElseThrow(() -> new IllegalArgumentException("Asset not found in your organisation"));
-
-        if (asset.getPurchaseCost() == null)
-            return BigDecimal.ZERO;
-        BigDecimal accumulated = computeDepreciation(asset, LocalDate.now());
-        return asset.getPurchaseCost().subtract(accumulated);
+        BigDecimal nbv = DepreciationCalculator.forAsset(requireAsset(assetId), LocalDate.now()).netBookValue();
+        return nbv != null ? nbv : BigDecimal.ZERO;
     }
 
     @Override
     public void updateBookValue(UUID assetId) {
-        Organisation org = requireTenantOrg();
-        Asset asset = assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(assetId, org)
-                .orElseThrow(() -> new IllegalArgumentException("Asset not found in your organisation"));
-        BigDecimal currentBookValue = asset.getPurchaseCost() == null ? BigDecimal.ZERO
-                : asset.getPurchaseCost().subtract(computeDepreciation(asset, LocalDate.now()));
-        asset.setCurrentBookValue(currentBookValue);
+        Asset asset = requireAsset(assetId);
+        asset.setCurrentBookValue(DepreciationCalculator.forAsset(asset, LocalDate.now()).netBookValue());
         assetRepository.save(asset);
     }
 
+    /**
+     * Refreshes the stored book value of every non-disposed asset (all statuses,
+     * all tenants). Disposed assets keep the value they had at disposal.
+     */
     @Override
     @Transactional
     @Scheduled(cron = "0 0 1 1 * ?") // 01:00 on the 1st of every month
     @SchedulerLock(name = "monthlyDepreciation", lockAtMostFor = "PT2H", lockAtLeastFor = "PT30M")
     public void runMonthlyDepreciationBatch() {
-        Set<Asset> assets = assetRepository.findByStatusAndDeletedAtIsNull(
-                com.assetiq.enums.AssetStatus.IN_USE);
-        for (Asset asset : assets) {
-            if (asset.getPurchaseCost() == null)
-                continue;
-            BigDecimal bookValue = asset.getPurchaseCost()
-                    .subtract(computeDepreciation(asset, LocalDate.now()));
-            asset.setCurrentBookValue(bookValue);
-            assetRepository.save(asset);
-        }
+        LocalDate today = LocalDate.now();
+        int pageNumber = 0;
+        long refreshed = 0;
+        Page<Asset> page;
+        do {
+            page = assetRepository.findUndisposedForDepreciation(
+                    PageRequest.of(pageNumber++, BATCH_SIZE, Sort.by("id")));
+            for (Asset asset : page.getContent()) {
+                asset.setCurrentBookValue(DepreciationCalculator.forAsset(asset, today).netBookValue());
+            }
+            assetRepository.saveAll(page.getContent());
+            refreshed += page.getNumberOfElements();
+        } while (page.hasNext());
+        log.info("[DEPRECIATION] Refreshed book value of {} assets", refreshed);
     }
 
-    // --- Internal helper (no tenant check needed — caller already validated) ---
-    private BigDecimal computeDepreciation(Asset asset, LocalDate asOfDate) {
-        if (asset.getPurchaseDate() == null || asset.getPurchaseCost() == null)
-            return BigDecimal.ZERO;
-
-        var policy = asset.getCategory() != null ? asset.getCategory().getDepreciationPolicy() : null;
-        if (policy == null)
-            return BigDecimal.ZERO;
-
-        int usefulLifeMonths = policy.getUsefulLifeMonths() != null ? policy.getUsefulLifeMonths() : 60;
-        BigDecimal salvagePct = policy.getSalvageValuePercent() != null ? policy.getSalvageValuePercent()
-                : BigDecimal.ZERO;
-        BigDecimal depreciable = asset.getPurchaseCost()
-                .multiply(BigDecimal.ONE.subtract(salvagePct.divide(new BigDecimal(100), 4, RoundingMode.HALF_UP)));
-
-        YearMonth purchaseMonth = YearMonth.from(asset.getPurchaseDate());
-        YearMonth asOfMonth = YearMonth.from(asOfDate);
-        long monthsElapsed = Math.max(0, java.time.temporal.ChronoUnit.MONTHS.between(purchaseMonth, asOfMonth));
-
-        if (monthsElapsed >= usefulLifeMonths)
-            return depreciable;
-
-        BigDecimal monthly = depreciable.divide(new BigDecimal(usefulLifeMonths), 4, RoundingMode.HALF_UP);
-        return monthly.multiply(new BigDecimal(monthsElapsed));
+    private Asset requireAsset(UUID assetId) {
+        Organisation org = requireTenantOrg();
+        return assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(assetId, org)
+                .orElseThrow(() -> new IllegalArgumentException("Asset not found in your organisation"));
     }
 }

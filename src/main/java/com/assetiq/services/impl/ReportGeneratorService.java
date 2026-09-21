@@ -13,6 +13,7 @@ import com.assetiq.repositories.OrganisationRepository;
 import com.assetiq.repositories.PurchaseOrderRepository;
 import com.assetiq.repositories.ReportMetadataRepository;
 import com.assetiq.repositories.SupplierRepository;
+import com.assetiq.services.finance.DepreciationCalculator;
 import com.assetiq.storage.FileStorageService;
 import com.assetiq.storage.StoredObject;
 import org.springframework.beans.factory.annotation.Value;
@@ -25,12 +26,14 @@ import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
 import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.LocalDate;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -80,6 +83,8 @@ public class ReportGeneratorService {
 
     // ── Public generate methods ───────────────────────────────────────────────
 
+    // Transactional so the book value can read the lazy category policy (open-in-view is off).
+    @Transactional
     public UUID generateAssetReport(String format) throws IOException {
         Organisation org = requireOrg();
         List<Asset> assets = assetRepository.findAllByOrganisationAndDeletedAtIsNull(org);
@@ -112,6 +117,8 @@ public class ReportGeneratorService {
         return store("maintenance", normalized, contentType, filename, bytes);
     }
 
+    // Transactional so the book value can read the lazy category policy (open-in-view is off).
+    @Transactional
     public UUID generateFinancialReport(String format) throws IOException {
         Organisation org = requireOrg();
         List<Asset> assets = assetRepository.findAllByOrganisationAndDeletedAtIsNull(org);
@@ -270,13 +277,18 @@ public class ReportGeneratorService {
             "Current Book Value", "Residual Value", "Warranty Expiry"
     };
 
+    /** Live book value from the single depreciation engine (the stored column may lag). */
+    private static BigDecimal bookValue(Asset a) {
+        return DepreciationCalculator.forAsset(a, LocalDate.now()).netBookValue();
+    }
+
     private String[] assetRow(Asset a) {
         return new String[]{
                 safe(a.getName()), safe(a.getAssetTag()), safe(a.getSerialNumber()),
                 safe(a.getAssetType()), safe(a.getStatus()), safe(a.getCondition()),
                 safe(a.getManufacturer()), safe(a.getModel()),
                 safe(a.getPurchaseDate()), money(a.getPurchaseCost()), safe(a.getCurrency()),
-                money(a.getCurrentBookValue()), money(a.getResidualValue()),
+                money(bookValue(a)), money(a.getResidualValue()),
                 safe(a.getWarrantyExpiryDate())
         };
     }
@@ -344,7 +356,7 @@ public class ReportGeneratorService {
         return new String[]{
                 safe(a.getName()), safe(a.getAssetTag()), safe(a.getPurchaseDate()),
                 safe(a.getCurrency()), money(a.getPurchaseCost()),
-                money(a.getCurrentBookValue()), money(a.getResidualValue()),
+                money(bookValue(a)), money(a.getResidualValue()),
                 safe(a.getDepreciationMethod()), safe(a.getUsefulLifeMonths()),
                 safe(a.getWarrantyExpiryDate())
         };

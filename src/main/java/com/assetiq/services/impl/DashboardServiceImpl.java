@@ -4,14 +4,13 @@ import com.assetiq.enums.*;
 import com.assetiq.models.*;
 import com.assetiq.repositories.*;
 import com.assetiq.services.DashboardService;
+import com.assetiq.services.finance.PortfolioValuation;
 import com.assetiq.services.money.CurrencyConversion;
 import com.assetiq.services.money.MoneyAccumulator;
 import com.assetiq.services.money.MoneyAggregator;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
@@ -79,9 +78,10 @@ public class DashboardServiceImpl implements DashboardService {
                           || a.getStatus() == AssetStatus.RETIRED)
                 .count();
 
-        // Total asset value (sum of purchase costs, converted to the base currency)
+        // Register value: cost and book value of every asset still on the books
+        // (disposed assets excluded), converted to the base currency.
         CurrencyConversion fx = moneyAggregator.begin(org);
-        BigDecimal totalAssetValue = sumValue(fx, assets).amount();
+        PortfolioValuation valuation = PortfolioValuation.of(fx, assets, today);
 
         // Purchase order counts
         long pendingApprovals = pos.stream()
@@ -124,7 +124,8 @@ public class DashboardServiceImpl implements DashboardService {
         summary.put("activeAssets", activeAssets);
         summary.put("inMaintenanceAssets", inMaintenanceAssets);
         summary.put("disposedAssets", disposedAssets);
-        summary.put("totalAssetValue", totalAssetValue);
+        summary.put("totalAssetValue", valuation.cost().amount());
+        summary.put("netBookValue", valuation.netBookValue().amount());
         fx.putMetadata(summary);
 
         // Organisation / user metrics
@@ -270,22 +271,13 @@ public class DashboardServiceImpl implements DashboardService {
     public Map<String, Object> getDepreciationSummary(Organisation org) {
         List<Asset> assets = assetRepository.findAllByOrganisationAndDeletedAtIsNull(org);
         CurrencyConversion fx = moneyAggregator.begin(org);
-        // Each per-asset figure is computed in the asset's own currency and only
-        // then converted, so an asset lacking a rate drops out of every total alike.
-        MoneyAccumulator totalAssetValue = sumValue(fx, assets);
-        MoneyAccumulator netBookValue = fx.newAccumulator();
-        assets.forEach(a -> netBookValue.add(calculateDynamicNBV(a), a.getCurrency()));
-        BigDecimal totalDepreciation = totalAssetValue.rawSum().subtract(netBookValue.rawSum());
-        if (totalDepreciation.signum() < 0) totalDepreciation = BigDecimal.ZERO;
+        // Disposed assets are off the books; each remaining asset is valued in its
+        // own currency by the depreciation engine and only then converted.
+        PortfolioValuation valuation = PortfolioValuation.of(fx, assets, LocalDate.now());
 
         Map<String, Object> response = new LinkedHashMap<>();
-        response.put("totalAssetValue", totalAssetValue.amount());
-        response.put("totalDepreciation", CurrencyConversion.round(totalDepreciation));
-        response.put("netBookValue", netBookValue.amount());
-        response.put("monthlyDepreciation", calculateMonthlyDepreciation(fx, assets).amount());
-        response.put("assetsFullyDepreciated", assets.stream().filter(this::isFullyDepreciated).count());
+        valuation.putTotals(response);
         fx.putMetadata(response);
-
         return response;
     }
 
@@ -294,41 +286,5 @@ public class DashboardServiceImpl implements DashboardService {
     /** Sum of purchase costs in the base currency; assets without a rate are excluded. */
     private MoneyAccumulator sumValue(CurrencyConversion fx, List<Asset> assets) {
         return fx.sum(assets, Asset::getPurchaseCost, Asset::getCurrency);
-    }
-
-    private BigDecimal calculateDynamicNBV(Asset asset) {
-        if (asset.getPurchaseCost() == null) return BigDecimal.ZERO;
-        if (asset.getUsefulLifeMonths() == null || asset.getUsefulLifeMonths() <= 0 || asset.getPurchaseDate() == null) {
-            return asset.getCurrentBookValue() != null ? asset.getCurrentBookValue() : asset.getPurchaseCost();
-        }
-        long monthsElapsed = asset.getPurchaseDate().until(LocalDate.now(), ChronoUnit.MONTHS);
-        if (monthsElapsed <= 0) return asset.getPurchaseCost();
-        BigDecimal residual = asset.getResidualValue() != null ? asset.getResidualValue() : BigDecimal.ZERO;
-        BigDecimal depreciableAmount = asset.getPurchaseCost().subtract(residual);
-        if (depreciableAmount.signum() <= 0) return asset.getPurchaseCost();
-        BigDecimal monthlyDep = depreciableAmount.divide(BigDecimal.valueOf(asset.getUsefulLifeMonths()), 2, RoundingMode.HALF_UP);
-        BigDecimal accumulatedDep = monthlyDep.multiply(BigDecimal.valueOf(monthsElapsed));
-        return asset.getPurchaseCost().subtract(accumulatedDep).max(residual);
-    }
-
-    private MoneyAccumulator calculateMonthlyDepreciation(CurrencyConversion fx, List<Asset> assets) {
-        MoneyAccumulator acc = fx.newAccumulator();
-        assets.stream()
-                .filter(a -> a.getPurchaseCost() != null && a.getUsefulLifeMonths() != null && a.getUsefulLifeMonths() > 0)
-                .forEach(a -> {
-                    BigDecimal dep = a.getPurchaseCost().subtract(
-                            a.getResidualValue() != null ? a.getResidualValue() : BigDecimal.ZERO);
-                    if (dep.signum() > 0) {
-                        acc.add(dep.divide(BigDecimal.valueOf(a.getUsefulLifeMonths()), 2, RoundingMode.HALF_UP),
-                                a.getCurrency());
-                    }
-                });
-        return acc;
-    }
-
-    private boolean isFullyDepreciated(Asset a) {
-        BigDecimal nbv = calculateDynamicNBV(a);
-        BigDecimal residual = a.getResidualValue() != null ? a.getResidualValue() : BigDecimal.ZERO;
-        return nbv.compareTo(residual) <= 0;
     }
 }

@@ -33,13 +33,13 @@ public class AnalyticsController {
      * GET /api/v1/analytics/assets
      * Asset breakdown by status, department, or condition.
      * Query params:
-     *   period  — display label only (week | month | quarter | year), default "month"
+     *   period  — acquisition window (week | month | quarter | year | all), default "year"
      *   groupBy — status | department | condition, default "status"
      */
     @GetMapping("/assets")
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','VIEW_REPORTS','GENERATE_REPORTS')")
     public ResponseEntity<Map<String, Object>> getAssetAnalytics(
-            @RequestParam(defaultValue = "month") String period,
+            @RequestParam(defaultValue = "year") String period,
             @RequestParam(defaultValue = "status") String groupBy) {
         Organisation org = requireOrg();
         return ResponseEntity.ok(analyticsService.getAssetAnalytics(period, groupBy, org));
@@ -47,12 +47,14 @@ public class AnalyticsController {
 
     /**
      * GET /api/v1/analytics/financial
-     * Asset values, depreciation totals, and per-category breakdown.
+     * Portfolio values (cost, net book value, depreciation, per-category breakdown)
+     * as of today across every non-disposed asset, plus activity inside
+     * {@code period} (acquisitions, maintenance spend, disposals).
      */
     @GetMapping("/financial")
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','VIEW_REPORTS','GENERATE_REPORTS')")
     public ResponseEntity<Map<String, Object>> getFinancialAnalytics(
-            @RequestParam(defaultValue = "month") String period) {
+            @RequestParam(defaultValue = "year") String period) {
         Organisation org = requireOrg();
         return ResponseEntity.ok(analyticsService.getFinancialAnalytics(period, org));
     }
@@ -64,7 +66,7 @@ public class AnalyticsController {
     @GetMapping("/purchase-orders")
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','VIEW_REPORTS','GENERATE_REPORTS')")
     public ResponseEntity<Map<String, Object>> getPurchaseOrderAnalytics(
-            @RequestParam(defaultValue = "month") String period) {
+            @RequestParam(defaultValue = "year") String period) {
         Organisation org = requireOrg();
         return ResponseEntity.ok(analyticsService.getPurchaseOrderAnalytics(period, org));
     }
@@ -76,7 +78,7 @@ public class AnalyticsController {
     @GetMapping("/maintenance")
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','VIEW_REPORTS','GENERATE_REPORTS')")
     public ResponseEntity<Map<String, Object>> getMaintenanceAnalytics(
-            @RequestParam(defaultValue = "month") String period) {
+            @RequestParam(defaultValue = "year") String period) {
         Organisation org = requireOrg();
         return ResponseEntity.ok(analyticsService.getMaintenanceAnalytics(period, org));
     }

@@ -17,6 +17,8 @@ import com.assetiq.repositories.PurchaseOrderRepository;
 import com.assetiq.models.Budget;
 import com.assetiq.models.DisposalRecord;
 import com.assetiq.services.AnalyticsService;
+import com.assetiq.services.finance.DepreciationCalculator;
+import com.assetiq.services.finance.PortfolioValuation;
 import com.assetiq.services.money.CurrencyConversion;
 import com.assetiq.services.money.MoneyAccumulator;
 import com.assetiq.services.money.MoneyAggregator;
@@ -116,11 +118,24 @@ public class AnalyticsServiceImpl implements AnalyticsService {
 
     // ── Financial Analytics ───────────────────────────────────────────────────
 
+    /**
+     * Two kinds of figure, kept apart on purpose:
+     * <ul>
+     *   <li><b>Portfolio</b> (totalAssets, totalAssetValue, netBookValue, totalDepreciation,
+     *       monthlyDepreciation, fully-depreciated / missing-setup counts, average age,
+     *       category breakdown): every asset still on the books as of today, whatever its
+     *       acquisition date. Disposed assets are excluded.</li>
+     *   <li><b>Period activity</b> (acquisitionsInPeriod, totalAcquisition, totalMaintenance,
+     *       totalDisposal): only records dated inside {@code period}.</li>
+     * </ul>
+     */
     @Override
     public Map<String, Object> getFinancialAnalytics(String period, Organisation org) {
         LocalDate start = getPeriodStart(period);
         LocalDate end = LocalDate.now();
-        List<Asset> assets = assetRepository.findAllByOrganisationAndDeletedAtIsNull(org).stream()
+        List<Asset> allAssets = assetRepository.findAllByOrganisationAndDeletedAtIsNull(org);
+        List<Asset> onBooks = allAssets.stream().filter(PortfolioValuation::isOnBooks).toList();
+        List<Asset> acquired = allAssets.stream()
                 .filter(asset -> isWithinPeriod(assetDate(asset), start, end))
                 .toList();
         Set<MaintenanceRecord> records = maintenanceRecordRepository.findByOrganisationAndDeletedAtIsNull(org).stream()
@@ -129,50 +144,38 @@ public class AnalyticsServiceImpl implements AnalyticsService {
 
         CurrencyConversion fx = moneyAggregator.begin(org);
 
-        // Per-asset figures are computed in the asset's currency, then converted.
-        MoneyAccumulator totalAssetValue = sumPurchaseCost(fx, assets);
-
-        MoneyAccumulator netBookValue = fx.newAccumulator();
-        assets.forEach(a -> netBookValue.add(calculateDynamicNBV(a), a.getCurrency()));
-
-        BigDecimal totalDepreciation = totalAssetValue.rawSum().subtract(netBookValue.rawSum());
-        if (totalDepreciation.signum() < 0) totalDepreciation = BigDecimal.ZERO;
+        // Portfolio: per-asset figures come from the depreciation engine in the
+        // asset's currency, then are converted.
+        PortfolioValuation portfolio = PortfolioValuation.of(fx, onBooks, end);
 
         // Maintenance cost has no currency column: it is in the related asset's currency.
         MoneyAccumulator totalMaintenanceCost = fx.sum(records, MaintenanceRecord::getCost, this::maintenanceCurrency);
 
-        // Sum of monthly depreciation charges across all actively-depreciating assets
-        MoneyAccumulator monthlyDepreciation = sumMonthlyDepreciation(fx, assets);
-
-        long assetsFullyDepreciated = assets.stream()
-                .filter(a -> a.getCurrentBookValue() != null && a.getResidualValue() != null
-                        && a.getCurrentBookValue().compareTo(a.getResidualValue()) <= 0)
-                .count();
-
-        double averageAgeMonths = assets.stream()
+        double averageAgeMonths = onBooks.stream()
                 .filter(a -> a.getPurchaseDate() != null)
-                .mapToLong(a -> a.getPurchaseDate().until(LocalDate.now(), ChronoUnit.MONTHS))
+                .mapToLong(a -> a.getPurchaseDate().until(end, ChronoUnit.MONTHS))
                 .average()
                 .orElse(0.0);
 
-        // Breakdown by category
-        Map<String, List<Asset>> byCategory = assets.stream().collect(
+        // Breakdown by category: the same valuation per category, so the categories
+        // add up to the portfolio totals.
+        Map<String, List<Asset>> byCategory = onBooks.stream().collect(
                 Collectors.groupingBy(a -> a.getCategory() != null ? a.getCategory().getName() : "Uncategorized"));
 
         Map<String, Object> categoryBreakdown = new LinkedHashMap<>();
         byCategory.forEach((catName, catAssets) -> {
+            PortfolioValuation cat = PortfolioValuation.of(fx, catAssets, end);
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("category", catName);
             m.put("count", catAssets.size());
-            m.put("value", sumPurchaseCost(fx, catAssets).amount());
-            m.put("netBookValue", fx.sum(catAssets, Asset::getCurrentBookValue, Asset::getCurrency).amount());
-            m.put("monthlyDepreciation", sumMonthlyDepreciation(fx, catAssets).amount());
+            m.put("value", cat.cost().amount());
+            m.put("netBookValue", cat.netBookValue().amount());
+            m.put("accumulatedDepreciation", cat.accumulatedDepreciation().amount());
+            m.put("monthlyDepreciation", cat.monthlyDepreciation().amount());
             categoryBreakdown.put(catName, m);
         });
 
-        MoneyAccumulator totalAcquisition = sumPurchaseCost(fx, assets.stream()
-                .filter(a -> a.getPurchaseDate() != null && !a.getPurchaseDate().isBefore(start) && !a.getPurchaseDate().isAfter(end))
-                .toList());
+        MoneyAccumulator totalAcquisition = sumPurchaseCost(fx, acquired);
 
         // Disposal sale value has no currency column: it is in the disposed asset's currency.
         MoneyAccumulator totalDisposal = fx.sum(
@@ -192,18 +195,16 @@ public class AnalyticsServiceImpl implements AnalyticsService {
 
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("period", period);
-        response.put("totalAssets", assets.size());
-        response.put("totalAssetValue", totalAssetValue.amount());
-        response.put("totalDepreciation", CurrencyConversion.round(totalDepreciation));
-        response.put("netBookValue", netBookValue.amount());
+        response.put("periodStart", start.toString());
+        response.put("totalAssets", portfolio.assetCount());
+        portfolio.putTotals(response);
         response.put("totalMaintenance", totalMaintenanceCost.amount());
-        response.put("monthlyDepreciation", monthlyDepreciation.amount());
+        response.put("acquisitionsInPeriod", acquired.size());
         response.put("totalAcquisition", totalAcquisition.amount());
         response.put("totalDisposal", totalDisposal.amount());
         response.put("totalBudget", totalBudget.amount());
         response.put("totalActualSpend", actualSpend.amount());
         response.put("budgetUtilization", Math.round(budgetUtilization * 100.0) / 100.0);
-        response.put("assetsFullyDepreciated", assetsFullyDepreciated);
         response.put("averageAssetAgeMonths", Math.round(averageAgeMonths * 10.0) / 10.0);
         response.put("breakdown", Map.of("byCategory", categoryBreakdown));
         fx.putMetadata(response);
@@ -390,39 +391,25 @@ public class AnalyticsServiceImpl implements AnalyticsService {
             MoneyAccumulator monthlyDepreciationCharge = fx.newAccumulator();
             int assetsRetiredOrDisposed = 0;
 
+            LocalDate priorMonthEnd = ym.minusMonths(1).atEndOfMonth();
             for (Asset asset : assets) {
                 if (asset.getPurchaseCost() == null) continue;
                 // Skip assets not yet purchased at this point in time
                 if (asset.getPurchaseDate() != null && asset.getPurchaseDate().isAfter(monthEnd)) continue;
 
-                if (asset.getUsefulLifeMonths() != null && asset.getUsefulLifeMonths() > 0
-                        && asset.getPurchaseDate() != null) {
-                    long monthsElapsed = asset.getPurchaseDate().until(monthEnd, ChronoUnit.MONTHS);
-                    BigDecimal residual = asset.getResidualValue() != null ? asset.getResidualValue() : BigDecimal.ZERO;
-                    BigDecimal depreciable = asset.getPurchaseCost().subtract(residual);
-                    if (depreciable.signum() <= 0) {
-                        totalValue.add(asset.getPurchaseCost(), asset.getCurrency());
-                        continue;
-                    }
-                    BigDecimal monthlyDep = depreciable.divide(
-                            BigDecimal.valueOf(asset.getUsefulLifeMonths()), 2, RoundingMode.HALF_UP);
-                    BigDecimal accDep = monthlyDep.multiply(BigDecimal.valueOf(monthsElapsed));
-                    if (accDep.compareTo(depreciable) > 0) accDep = depreciable;
-                    BigDecimal bookValue = asset.getPurchaseCost().subtract(accDep).max(residual);
-                    totalValue.add(bookValue, asset.getCurrency());
-
-                    // Depreciation charge for this month (zero if already fully depreciated)
-                    BigDecimal remaining = depreciable.subtract(accDep.subtract(monthlyDep).max(BigDecimal.ZERO));
-                    BigDecimal charge = monthlyDep.min(remaining).max(BigDecimal.ZERO);
-                    monthlyDepreciationCharge.add(charge, asset.getCurrency());
-                } else {
-                    // No depreciation data: carry purchase cost as book value
-                    totalValue.add(asset.getPurchaseCost(), asset.getCurrency());
-                }
-
                 if (asset.getStatus() == AssetStatus.RETIRED || asset.getStatus() == AssetStatus.DISPOSED) {
                     assetsRetiredOrDisposed++;
                 }
+                // Disposed assets are off the books (no disposal date is tracked on
+                // the asset, so they are excluded from every month alike).
+                if (!PortfolioValuation.isOnBooks(asset)) continue;
+
+                DepreciationCalculator.Result atMonthEnd = DepreciationCalculator.forAsset(asset, monthEnd);
+                totalValue.add(atMonthEnd.netBookValue(), asset.getCurrency());
+                // Charge taken during this calendar month (zero once fully depreciated)
+                BigDecimal charge = atMonthEnd.accumulatedDepreciation().subtract(
+                        DepreciationCalculator.forAsset(asset, priorMonthEnd).accumulatedDepreciation());
+                monthlyDepreciationCharge.add(charge.max(BigDecimal.ZERO), asset.getCurrency());
             }
 
             BigDecimal charge = monthlyDepreciationCharge.amount();
@@ -452,23 +439,6 @@ public class AnalyticsServiceImpl implements AnalyticsService {
         return fx.sum(assets, Asset::getPurchaseCost, Asset::getCurrency);
     }
 
-    /** Straight-line monthly depreciation charge per asset, converted and summed. */
-    private MoneyAccumulator sumMonthlyDepreciation(CurrencyConversion fx, List<Asset> assets) {
-        MoneyAccumulator acc = fx.newAccumulator();
-        for (Asset a : assets) {
-            if (a.getPurchaseCost() == null || a.getUsefulLifeMonths() == null || a.getUsefulLifeMonths() <= 0) {
-                continue;
-            }
-            BigDecimal depreciable = a.getPurchaseCost()
-                    .subtract(a.getResidualValue() != null ? a.getResidualValue() : BigDecimal.ZERO);
-            if (depreciable.signum() > 0) {
-                acc.add(depreciable.divide(BigDecimal.valueOf(a.getUsefulLifeMonths()), 2, RoundingMode.HALF_UP),
-                        a.getCurrency());
-            }
-        }
-        return acc;
-    }
-
     /** Maintenance records have no currency column; their cost is in the asset's currency. */
     private String maintenanceCurrency(MaintenanceRecord record) {
         return record.getAsset() != null ? record.getAsset().getCurrency() : null;
@@ -494,11 +464,12 @@ public class AnalyticsServiceImpl implements AnalyticsService {
 
     private LocalDate getPeriodStart(String period) {
         LocalDate today = LocalDate.now();
-        String normalized = period == null ? "month" : period.toLowerCase();
+        String normalized = period == null ? "year" : period.toLowerCase();
         return switch (normalized) {
             case "week" -> today.minusWeeks(1);
             case "quarter" -> today.minusMonths(3);
             case "year" -> today.minusYears(1);
+            case "all" -> LocalDate.of(1900, 1, 1);
             default -> today.withDayOfMonth(1); // month
         };
     }
@@ -521,24 +492,5 @@ public class AnalyticsServiceImpl implements AnalyticsService {
 
     private LocalDate toLocalDate(Instant instant) {
         return instant == null ? null : instant.atZone(ZoneId.systemDefault()).toLocalDate();
-    }
-
-    private BigDecimal calculateDynamicNBV(Asset asset) {
-        if (asset.getPurchaseCost() == null) return BigDecimal.ZERO;
-        if (asset.getUsefulLifeMonths() == null || asset.getUsefulLifeMonths() <= 0 || asset.getPurchaseDate() == null) {
-            return asset.getCurrentBookValue() != null ? asset.getCurrentBookValue() : asset.getPurchaseCost();
-        }
-
-        long monthsElapsed = asset.getPurchaseDate().until(LocalDate.now(), ChronoUnit.MONTHS);
-        if (monthsElapsed <= 0) return asset.getPurchaseCost();
-
-        BigDecimal residual = asset.getResidualValue() != null ? asset.getResidualValue() : BigDecimal.ZERO;
-        BigDecimal depreciableAmount = asset.getPurchaseCost().subtract(residual);
-        if (depreciableAmount.signum() <= 0) return asset.getPurchaseCost();
-
-        BigDecimal monthlyDep = depreciableAmount.divide(BigDecimal.valueOf(asset.getUsefulLifeMonths()), 2, RoundingMode.HALF_UP);
-        BigDecimal accumulatedDep = monthlyDep.multiply(BigDecimal.valueOf(monthsElapsed));
-
-        return asset.getPurchaseCost().subtract(accumulatedDep).max(residual);
     }
 }

@@ -13,6 +13,7 @@ import com.assetiq.repositories.AssetRepository;
 import com.assetiq.repositories.MaintenanceRecordRepository;
 import com.assetiq.repositories.OrganisationRepository;
 import com.assetiq.repositories.PredictiveInsightRepository;
+import com.assetiq.services.finance.DepreciationCalculator;
 import com.assetiq.services.PredictiveMaintenanceService;
 import com.assetiq.services.TenantAwareService;
 import org.slf4j.Logger;
@@ -172,14 +173,14 @@ public class PredictiveMaintenanceServiceImpl extends TenantAwareService impleme
     // ── Rule 5: Depreciation Complete ────────────────────────────────────────
 
     private List<PredictiveInsight> checkDepreciationComplete(Asset asset, Organisation org) {
-        if (asset.getCurrentBookValue() == null || asset.getResidualValue() == null) return Collections.emptyList();
-        if (asset.getCurrentBookValue().compareTo(asset.getResidualValue()) > 0) return Collections.emptyList();
         if (!AssetStatus.IN_USE.equals(asset.getStatus())) return Collections.emptyList();
+        DepreciationCalculator.Result dep = DepreciationCalculator.forAsset(asset, LocalDate.now());
+        if (!dep.configured() || !dep.fullyDepreciated()) return Collections.emptyList();
 
         return List.of(upsertInsight(asset, InsightType.DEPRECIATION_COMPLETE, InsightSeverity.LOW,
                 "Asset fully depreciated but still active",
                 "'" + asset.getName() + "' has reached its residual value of " +
-                        asset.getResidualValue() + " " + asset.getCurrency() +
+                        dep.residualValue() + " " + asset.getCurrency() +
                         " but remains in active use. Review disposal or write-off.",
                 0.99, LocalDate.now(), org));
     }

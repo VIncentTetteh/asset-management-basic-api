@@ -98,6 +98,17 @@ public interface AssetRepository extends JpaRepository<Asset, UUID>, JpaSpecific
                         "AND a.status NOT IN ('DISPOSED','RETIRED')")
         Page<Asset> findActiveAssetsWithUsefulLife(Pageable pageable);
 
+        /** Purchase cost of the organisation's on-book (non-disposed) assets, summed per currency. */
+        @Query("SELECT a.currency, SUM(a.purchaseCost) FROM Asset a WHERE a.organisation = :org " +
+                        "AND a.deletedAt IS NULL AND (a.status IS NULL OR a.status <> 'DISPOSED') " +
+                        "AND a.purchaseCost IS NOT NULL GROUP BY a.currency")
+        List<Object[]> sumOnBookPurchaseCostByCurrency(@Param("org") Organisation org);
+
+        /** Every live, non-disposed asset across all tenants, for the monthly book-value refresh. */
+        @Query("SELECT a FROM Asset a WHERE a.deletedAt IS NULL " +
+                        "AND (a.status IS NULL OR a.status <> 'DISPOSED')")
+        Page<Asset> findUndisposedForDepreciation(Pageable pageable);
+
         @Query("SELECT a FROM Asset a WHERE a.deletedAt IS NULL " +
                         "AND a.insurancePolicyExpiry = :expiryDate " +
                         "AND a.status NOT IN ('DISPOSED','RETIRED')")

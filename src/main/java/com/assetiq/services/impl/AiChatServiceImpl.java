@@ -10,6 +10,8 @@ import com.assetiq.repositories.compliance.ComplianceControlRepository;
 import com.assetiq.repositories.compliance.RiskRegisterRepository;
 import com.assetiq.services.AiChatService;
 import com.assetiq.services.TenantAwareService;
+import com.assetiq.services.finance.DepreciationCalculator;
+import com.assetiq.services.finance.PortfolioValuation;
 import com.assetiq.services.money.CurrencyConversion;
 import com.assetiq.services.money.MoneyAccumulator;
 import com.assetiq.services.money.MoneyAggregator;
@@ -216,9 +218,8 @@ public class AiChatServiceImpl extends TenantAwareService implements AiChatServi
         Map<String, Long> byStatus    = groupByName(assets,    a -> a.getStatus()    != null ? a.getStatus().name()    : "UNKNOWN");
         Map<String, Long> byCondition = groupByName(assets,    a -> a.getCondition() != null ? a.getCondition().name() : "UNKNOWN");
         MoneyAccumulator totalPurchaseCost = fx.sum(assets, Asset::getPurchaseCost, Asset::getCurrency);
-        MoneyAccumulator totalBookValue    = fx.sum(assets,
-                a -> a.getCurrentBookValue() != null ? a.getCurrentBookValue() : a.getPurchaseCost(),
-                Asset::getCurrency);
+        // Book value of the assets still on the books, from the single depreciation engine.
+        MoneyAccumulator totalBookValue    = PortfolioValuation.of(fx, assets, LocalDate.now()).netBookValue();
 
         List<Map<String, Object>> assetSample = assets.stream().limit(MAX_ASSET_SAMPLE).map(a -> {
             Map<String, Object> m = new LinkedHashMap<>();
@@ -230,7 +231,7 @@ public class AiChatServiceImpl extends TenantAwareService implements AiChatServi
             m.put("model",            a.getModel());
             m.put("purchaseCost",     a.getPurchaseCost());
             m.put("currency",         a.getCurrency());
-            m.put("currentBookValue", a.getCurrentBookValue());
+            m.put("currentBookValue", DepreciationCalculator.forAsset(a, LocalDate.now()).netBookValue());
             m.put("warrantyExpiry",   a.getWarrantyExpiryDate());
             m.put("department",       a.getDepartment()    != null ? a.getDepartment().getName() : null);
             m.put("location",         a.getLocation()      != null ? a.getLocation().getName()   : null);
