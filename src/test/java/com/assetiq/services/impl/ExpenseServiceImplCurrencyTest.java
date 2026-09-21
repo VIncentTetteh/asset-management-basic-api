@@ -1,6 +1,7 @@
 package com.assetiq.services.impl;
 
 import com.assetiq.dto.ExpenseDto;
+import com.assetiq.enums.BudgetStatus;
 import com.assetiq.enums.ExpenseStatus;
 import com.assetiq.models.Budget;
 import com.assetiq.models.Expense;
@@ -15,6 +16,7 @@ import com.assetiq.repositories.OrganisationRepository;
 import com.assetiq.repositories.UserRepository;
 import com.assetiq.services.CurrencyResolver;
 import com.assetiq.services.NotificationService;
+import com.assetiq.services.budget.LedgerFixture;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -51,14 +53,16 @@ class ExpenseServiceImplCurrencyTest {
     @Mock CurrencyResolver currencyResolver;
 
     private ExpenseServiceImpl service;
+    private LedgerFixture ledger;
     private Organisation org;
     private User submitter;
     private Budget ghsBudget;
 
     @BeforeEach
     void setUp() {
+        ledger = new LedgerFixture(budgetRepository, notificationService);
         service = new ExpenseServiceImpl(expenseRepository, assetRepository, userRepository, budgetRepository,
-                departmentRepository, organisationRepository, notificationService, currencyResolver);
+                departmentRepository, organisationRepository, notificationService, currencyResolver, ledger.service);
         org = new Organisation();
         org.setId(UUID.randomUUID());
         TenantContext.setOrganisationId(org.getId());
@@ -70,6 +74,8 @@ class ExpenseServiceImplCurrencyTest {
         ghsBudget.setOrganisation(org);
         ghsBudget.setCurrency("GHS");
         ghsBudget.setTotalAmount(new BigDecimal("1000"));
+        ghsBudget.setStatus(BudgetStatus.ACTIVE);
+        LedgerFixture.lockable(budgetRepository, org, ghsBudget);
     }
 
     @AfterEach

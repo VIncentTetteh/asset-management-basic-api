@@ -3,7 +3,7 @@ package com.assetiq.services.impl;
 import com.assetiq.dto.ExpenseDto;
 import com.assetiq.dto.ExpenseFilterRequest;
 import com.assetiq.dto.PagedResponseDto;
-import com.assetiq.enums.BudgetStatus;
+import com.assetiq.enums.BudgetLedgerKind;
 import com.assetiq.enums.ExpenseStatus;
 import com.assetiq.enums.NotificationType;
 import com.assetiq.enums.UserStatus;
@@ -13,6 +13,8 @@ import com.assetiq.services.CurrencyResolver;
 import com.assetiq.services.ExpenseService;
 import com.assetiq.services.NotificationService;
 import com.assetiq.services.TenantAwareService;
+import com.assetiq.services.budget.BudgetLedgerService;
+import com.assetiq.services.budget.BudgetPosting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.PageRequest;
@@ -23,8 +25,6 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
@@ -44,6 +44,7 @@ public class ExpenseServiceImpl extends TenantAwareService implements ExpenseSer
     private final DepartmentRepository departmentRepository;
     private final NotificationService notificationService;
     private final CurrencyResolver currencyResolver;
+    private final BudgetLedgerService budgetLedger;
 
     public ExpenseServiceImpl(ExpenseRepository expenseRepository,
                               AssetRepository assetRepository,
@@ -52,7 +53,8 @@ public class ExpenseServiceImpl extends TenantAwareService implements ExpenseSer
                               DepartmentRepository departmentRepository,
                               OrganisationRepository organisationRepository,
                               NotificationService notificationService,
-                              CurrencyResolver currencyResolver) {
+                              CurrencyResolver currencyResolver,
+                              BudgetLedgerService budgetLedger) {
         super(organisationRepository);
         this.expenseRepository = expenseRepository;
         this.assetRepository = assetRepository;
@@ -61,6 +63,7 @@ public class ExpenseServiceImpl extends TenantAwareService implements ExpenseSer
         this.departmentRepository = departmentRepository;
         this.notificationService = notificationService;
         this.currencyResolver = currencyResolver;
+        this.budgetLedger = budgetLedger;
     }
 
     // ── Submit ────────────────────────────────────────────────────────────────
@@ -87,8 +90,9 @@ public class ExpenseServiceImpl extends TenantAwareService implements ExpenseSer
                     .ifPresent(expense::setLinkedAsset);
         }
         if (dto.getLinkedBudgetId() != null) {
-            budgetRepository.findByIdAndOrganisationAndDeletedAtIsNull(dto.getLinkedBudgetId(), org)
-                    .ifPresent(expense::setLinkedBudget);
+            expense.setLinkedBudget(budgetRepository
+                    .findByIdAndOrganisationAndDeletedAtIsNull(dto.getLinkedBudgetId(), org)
+                    .orElseThrow(() -> new IllegalArgumentException("Budget not found in your organisation")));
         }
         if (dto.getDepartmentId() != null) {
             departmentRepository.findByIdAndOrganisationAndDeletedAtIsNull(dto.getDepartmentId(), org)
@@ -105,14 +109,12 @@ public class ExpenseServiceImpl extends TenantAwareService implements ExpenseSer
 
         Expense saved = expenseRepository.save(expense);
 
-        // Increment committedAmount on the linked budget to reserve funds for pending approval
+        // Reserve the amount on the linked budget while the expense awaits approval.
         if (saved.getLinkedBudget() != null) {
-            Budget b = saved.getLinkedBudget();
-            BigDecimal current = b.getCommittedAmount() != null ? b.getCommittedAmount() : BigDecimal.ZERO;
-            b.setCommittedAmount(current.add(saved.getAmount()));
-            budgetRepository.save(b);
+            budgetLedger.post(org, saved.getLinkedBudget().getId(),
+                    BudgetPosting.forExpense(BudgetLedgerKind.EXPENSE_COMMIT, saved));
             log.info("Committed {} {} to budget {} for submitted expense {}",
-                    saved.getAmount(), saved.getCurrency(), b.getId(), saved.getId());
+                    saved.getAmount(), saved.getCurrency(), saved.getLinkedBudget().getId(), saved.getId());
         }
 
         try {
@@ -140,8 +142,9 @@ public class ExpenseServiceImpl extends TenantAwareService implements ExpenseSer
         if (expense.getStatus() == ExpenseStatus.APPROVED) {
             return toDto(expense);
         }
-        if (expense.getStatus() == ExpenseStatus.REJECTED) {
-            throw new IllegalStateException("Cannot approve a rejected expense.");
+        if (expense.getStatus() != ExpenseStatus.SUBMITTED) {
+            throw new IllegalStateException("Only submitted expenses can be approved (current status: "
+                    + expense.getStatus() + ").");
         }
 
         User approver = resolveCurrentUser(org);
@@ -152,51 +155,13 @@ public class ExpenseServiceImpl extends TenantAwareService implements ExpenseSer
         expense.setApprovedAt(Instant.now());
         expense.setStatus(ExpenseStatus.APPROVED);
 
-        // Move amount from committedAmount → spentAmount; check EXCEEDED and fire threshold alert
+        // Commitment becomes spend; the ledger keeps EXCEEDED in step and fires the
+        // threshold alert when this approval crosses it.
         if (expense.getLinkedBudget() != null) {
-            Budget b = expense.getLinkedBudget();
-            // Guards expenses linked before the submit-time check existed.
-            if (!sameCurrency(expense, b)) {
-                throw new IllegalStateException("Expense and linked budget currencies must match");
-            }
-
-            // Decrement committed (was reserved at submit time)
-            BigDecimal comm = b.getCommittedAmount() != null ? b.getCommittedAmount() : BigDecimal.ZERO;
-            b.setCommittedAmount(comm.subtract(expense.getAmount()).max(BigDecimal.ZERO));
-
-            // Increment actual spend
-            b.setSpentAmount(b.getSpentAmount().add(expense.getAmount()));
-
-            // Mark budget as EXCEEDED when spend surpasses total
-            if (b.getSpentAmount().compareTo(b.getTotalAmount()) > 0
-                    && b.getStatus() == BudgetStatus.ACTIVE) {
-                b.setStatus(BudgetStatus.EXCEEDED);
-            }
-
-            // Fire threshold notification when utilization crosses the configured alert pct
-            if (b.getTotalAmount().compareTo(BigDecimal.ZERO) > 0) {
-                int threshold = b.getAlertThresholdPct() != null ? b.getAlertThresholdPct() : 80;
-                double utilization = b.getSpentAmount()
-                        .divide(b.getTotalAmount(), 4, RoundingMode.HALF_UP)
-                        .doubleValue() * 100;
-                if (utilization >= threshold) {
-                    try {
-                        notificationService.notifyOrgAdmins(org, NotificationType.BUDGET_THRESHOLD,
-                                "Budget Threshold Reached",
-                                "Budget '" + b.getName() + "' has reached "
-                                        + String.format("%.1f", utilization) + "% utilization"
-                                        + " (threshold: " + threshold + "%).",
-                                b.getId(), null);
-                    } catch (Exception e) {
-                        log.warn("Budget threshold notification suppressed for budget {}: {}", b.getId(), e.getMessage());
-                    }
-                    log.info("Budget {} threshold alert fired at {:.1f}% utilization", b.getId(), utilization);
-                }
-            }
-
-            budgetRepository.save(b);
+            budgetLedger.post(org, expense.getLinkedBudget().getId(),
+                    BudgetPosting.forExpense(BudgetLedgerKind.EXPENSE_SPEND, expense));
             log.info("Approved expense {}: moved {} {} from committed to spent on budget {}",
-                    expense.getId(), expense.getAmount(), expense.getCurrency(), b.getId());
+                    expense.getId(), expense.getAmount(), expense.getCurrency(), expense.getLinkedBudget().getId());
         }
 
         Expense saved = expenseRepository.save(expense);
@@ -224,21 +189,26 @@ public class ExpenseServiceImpl extends TenantAwareService implements ExpenseSer
         Organisation org = requireTenantOrg();
         Expense expense = requireExpense(id, org);
 
+        if (expense.getStatus() == ExpenseStatus.REJECTED) {
+            return toDto(expense);
+        }
         if (expense.getStatus() == ExpenseStatus.APPROVED) {
             throw new IllegalStateException("Cannot reject an already approved expense.");
+        }
+        if (expense.getStatus() != ExpenseStatus.SUBMITTED) {
+            throw new IllegalStateException("Only submitted expenses can be rejected (current status: "
+                    + expense.getStatus() + ").");
         }
 
         expense.setStatus(ExpenseStatus.REJECTED);
         expense.setRejectionReason(reason);
 
-        // Release the reserved committedAmount back to the budget
+        // Release the reserved commitment back to the budget
         if (expense.getLinkedBudget() != null) {
-            Budget b = expense.getLinkedBudget();
-            BigDecimal comm = b.getCommittedAmount() != null ? b.getCommittedAmount() : BigDecimal.ZERO;
-            b.setCommittedAmount(comm.subtract(expense.getAmount()).max(BigDecimal.ZERO));
-            budgetRepository.save(b);
+            budgetLedger.post(org, expense.getLinkedBudget().getId(),
+                    BudgetPosting.forExpense(BudgetLedgerKind.EXPENSE_RELEASE, expense));
             log.info("Released committed {} {} back to budget {} for rejected expense {}",
-                    expense.getAmount(), expense.getCurrency(), b.getId(), expense.getId());
+                    expense.getAmount(), expense.getCurrency(), expense.getLinkedBudget().getId(), expense.getId());
         }
 
         Expense saved = expenseRepository.save(expense);
@@ -315,6 +285,20 @@ public class ExpenseServiceImpl extends TenantAwareService implements ExpenseSer
     public void delete(UUID id) {
         Organisation org = requireTenantOrg();
         Expense expense = requireExpense(id, org);
+        // Take the expense back off its budget: a pending one releases its commitment,
+        // an approved one reverses its spend. Drafts and rejections hold nothing.
+        if (expense.getLinkedBudget() != null) {
+            BudgetLedgerKind unwind = switch (expense.getStatus()) {
+                case SUBMITTED -> BudgetLedgerKind.EXPENSE_RELEASE;
+                case APPROVED -> BudgetLedgerKind.EXPENSE_SPEND_REVERSAL;
+                default -> null;
+            };
+            if (unwind != null) {
+                budgetLedger.post(org, expense.getLinkedBudget().getId(), BudgetPosting.forExpense(unwind, expense));
+                log.info("{} {} {} on budget {} for deleted expense {}", unwind, expense.getAmount(),
+                        expense.getCurrency(), expense.getLinkedBudget().getId(), id);
+            }
+        }
         expense.setDeletedAt(Instant.now());
         expenseRepository.save(expense);
         log.info("Soft-deleted expense {}", id);

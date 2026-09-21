@@ -63,32 +63,26 @@ public class ExpenseController {
     /** Approve a submitted expense. */
     @PostMapping("/{id}/approve")
     @RequireFreshMfa
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','MANAGE_EXPENSES','VIEW_REPORTS')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','MANAGE_EXPENSES','APPROVE_BUDGET')")
     public ResponseEntity<ExpenseDto> approve(@PathVariable UUID id) {
-        try {
-            return ResponseEntity.ok(expenseService.approve(id));
-        } catch (IllegalStateException e) {
-            return ResponseEntity.badRequest().build();
-        }
+        // Illegal transitions surface as 409 with the reason via GlobalExceptionHandler.
+        return ResponseEntity.ok(expenseService.approve(id));
     }
 
     /** Reject a submitted expense with an optional reason. */
     @PostMapping("/{id}/reject")
     @RequireFreshMfa
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','MANAGE_EXPENSES','VIEW_REPORTS')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','MANAGE_EXPENSES','APPROVE_BUDGET')")
     public ResponseEntity<ExpenseDto> reject(
             @PathVariable UUID id,
             @RequestBody(required = false) Map<String, String> body) {
         String reason = body != null ? body.get("reason") : null;
-        try {
-            return ResponseEntity.ok(expenseService.reject(id, reason));
-        } catch (IllegalStateException e) {
-            return ResponseEntity.badRequest().build();
-        }
+        return ResponseEntity.ok(expenseService.reject(id, reason));
     }
 
+    /** Deleting releases a pending expense's commitment or reverses an approved one's spend. */
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','MANAGE_EXPENSES','VIEW_REPORTS')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','MANAGE_EXPENSES')")
     public ResponseEntity<Void> delete(@PathVariable UUID id) {
         expenseService.delete(id);
         return ResponseEntity.noContent().build();
