@@ -93,6 +93,12 @@ public class MfaController {
     @PostMapping("/setup")
     public ResponseEntity<Map<String, String>> setup(Authentication auth) throws QrGenerationException {
         User user = resolveUser(auth);
+        if (Boolean.TRUE.equals(user.getMfaEnabled())) {
+            // Re-running setup would silently replace a live secret without proof of
+            // the current one: a hijacked session could take over the second factor,
+            // and the real user would be locked out. Disable (with a code) first.
+            throw new IllegalStateException("MFA is already enabled. Disable it before setting up a new authenticator.");
+        }
 
         String secret = secretGenerator.generate();
         user.setMfaSecret(secretCryptoService.encrypt(secret));
@@ -137,8 +143,10 @@ public class MfaController {
             return ResponseEntity.badRequest().body(Map.of("error", "Missing 'code' in request body."));
         }
 
-        if (!codeVerifier.isValidCode(secretCryptoService.decrypt(user.getMfaSecret()), code)) {
-            return ResponseEntity.status(401).body(Map.of("error", "Invalid TOTP code."));
+        if (!isValidTotp(user, code)) {
+            // Typed errorCode, not a bare 401 body: the web client must be able to
+            // tell a mistyped code apart from an expired session (which signs out).
+            throw new MfaCodeInvalidException("Invalid authenticator code.");
         }
 
         user.setMfaEnabled(true);
@@ -167,8 +175,10 @@ public class MfaController {
             return ResponseEntity.badRequest().body(Map.of("error", "Missing 'code' in request body."));
         }
 
-        if (!codeVerifier.isValidCode(secretCryptoService.decrypt(user.getMfaSecret()), code)) {
-            return ResponseEntity.status(401).body(Map.of("error", "Invalid TOTP code."));
+        if (!isValidTotp(user, code)) {
+            // Typed errorCode, not a bare 401 body: the web client must be able to
+            // tell a mistyped code apart from an expired session (which signs out).
+            throw new MfaCodeInvalidException("Invalid authenticator code.");
         }
 
         user.setMfaEnabled(false);
