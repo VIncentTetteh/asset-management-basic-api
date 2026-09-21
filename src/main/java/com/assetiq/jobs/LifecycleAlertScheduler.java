@@ -1,5 +1,6 @@
 package com.assetiq.jobs;
 
+import com.assetiq.assets.AssetLabels;
 import com.assetiq.enums.NotificationType;
 import com.assetiq.models.Asset;
 import com.assetiq.repositories.AssetRepository;
@@ -77,8 +78,8 @@ public class LifecycleAlertScheduler {
                     pageable -> assetRepository.findWarrantyExpiringOn(milestone, pageable),
                     asset -> {
                         String title = "Warranty Expiring in " + days + " Day(s)";
-                        String body = "Asset '" + asset.getName() + "' (tag: " + asset.getAssetTag()
-                                + ") warranty expires on " + milestone + ".";
+                        String body = AssetLabels.describe(asset)
+                                + " warranty expires on " + milestone + ".";
                         notifyOnce(asset, NotificationType.WARRANTY_EXPIRY, title, body,
                                 "warranty", milestone);
                     });
@@ -93,8 +94,8 @@ public class LifecycleAlertScheduler {
                 return;
             }
             String title = "Asset Reached End of Useful Life";
-            String body = "Asset '" + asset.getName() + "' (tag: " + asset.getAssetTag()
-                    + ") reached its end of useful life on " + endOfLife
+            String body = AssetLabels.describe(asset)
+                    + " reached its end of useful life on " + endOfLife
                     + ". Consider scheduling disposal or replacement.";
             notifyOnce(asset, NotificationType.END_OF_LIFE, title, body, "eol", endOfLife);
         });
@@ -108,8 +109,8 @@ public class LifecycleAlertScheduler {
                     pageable -> assetRepository.findInsuranceExpiringOn(milestone, pageable),
                     asset -> {
                         String title = "Insurance Expiring in " + days + " Day(s)";
-                        String body = "Insurance for asset '" + asset.getName() + "' (tag: "
-                                + asset.getAssetTag() + ") expires on " + milestone
+                        String body = "Insurance for asset '" + asset.getName() + "'"
+                                + AssetLabels.tagClause(asset.getAssetTag()) + " expires on " + milestone
                                 + ". Renew to avoid a coverage gap.";
                         notifyOnce(asset, NotificationType.INSURANCE_EXPIRY, title, body,
                                 "insurance", milestone);
@@ -167,8 +168,8 @@ public class LifecycleAlertScheduler {
         Instant cutoff = Instant.now().minus(INACTIVE_DAYS, ChronoUnit.DAYS);
         forEachPage(pageable -> assetRepository.findInactiveInStock(cutoff, pageable), asset -> {
             String lastScan = asset.getLastScannedAt() == null ? "never" : asset.getLastScannedAt().toString();
-            String body = "Asset '" + asset.getName() + "' (tag: " + asset.getAssetTag()
-                    + ") has been inactive in stock for over " + INACTIVE_DAYS
+            String body = AssetLabels.describe(asset)
+                    + " has been inactive in stock for over " + INACTIVE_DAYS
                     + " days (last scan: " + lastScan + ").";
             notificationService.notifyOrgAdminsOnce(
                     asset.getOrganisation(), NotificationType.SYSTEM,
