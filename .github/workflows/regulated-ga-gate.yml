@@ -1,0 +1,37 @@
+name: Regulated GA gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_candidate:
+        description: Immutable release candidate (regulated-ga-YYYY.MM.DD.N)
+        required: true
+        type: string
+  push:
+    tags:
+      - "regulated-ga-*"
+
+permissions:
+  contents: read
+
+jobs:
+  evidence:
+    name: Verify regulated GA evidence
+    runs-on: ubuntu-latest
+    environment: regulated-ga-approval
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Resolve release candidate
+        id: release
+        env:
+          INPUT_CANDIDATE: ${{ inputs.release_candidate }}
+          REF_NAME: ${{ github.ref_name }}
+        run: echo "candidate=${INPUT_CANDIDATE:-$REF_NAME}" >> "$GITHUB_OUTPUT"
+      - name: Verify evidence manifest
+        run: >-
+          python3 scripts/verify_regulated_ga_evidence.py
+          --manifest docs/commercial-readiness/regulated-ga-evidence.json
+          --release-candidate "${{ steps.release.outputs.candidate }}"

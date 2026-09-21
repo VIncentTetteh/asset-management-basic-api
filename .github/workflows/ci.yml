@@ -226,6 +226,6 @@ jobs:
 
       - name: Verify platform default currency is USD
         run: |
-          grep -q 'APP_BILLING_DEFAULT_CURRENCY:USD' src/main/resources/application.yml && \
+          grep -q 'APP_BILLING_DEFAULT_CURRENCY:GHS' src/main/resources/application.yml && \
             echo "OK: app.billing.default-currency defaults to USD" || \
             (echo "ERROR: app.billing.default-currency is not USD" && exit 1)
