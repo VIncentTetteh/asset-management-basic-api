@@ -37,6 +37,9 @@ public class StartupSecurityValidator implements ApplicationRunner {
     @Value("${paystack.secret.key:}")
     private String paystackSecretKey;
 
+    @Value("${app.security.data-encryption-key:}")
+    private String dataEncryptionKey;
+
     @Value("${app.startup.skip-secret-validation:false}")
     private boolean skipValidation;
 
@@ -74,6 +77,7 @@ public class StartupSecurityValidator implements ApplicationRunner {
         }
 
         validateJwtSecret();
+        validateDataEncryptionKey();
         validatePaystackKey();
 
         // Warn if email is disabled — forgot-password and DSAR acknowledgements will silently fail
@@ -176,5 +180,17 @@ public class StartupSecurityValidator implements ApplicationRunner {
         } else {
             log.info("[SECURITY] ✓ Paystack key validation passed");
         }
+    }
+
+    private void validateDataEncryptionKey() {
+        try {
+            byte[] decoded = java.util.Base64.getDecoder().decode(dataEncryptionKey == null ? "" : dataEncryptionKey);
+            if (decoded.length != 32) throw new IllegalArgumentException("key length");
+        } catch (IllegalArgumentException invalid) {
+            throw new IllegalStateException(
+                    "[SECURITY STARTUP FAILURE] APP_DATA_ENCRYPTION_KEY must be Base64 for exactly 32 random bytes. " +
+                    "Generate with: openssl rand -base64 32");
+        }
+        log.info("[SECURITY] ✓ data-encryption key validation passed");
     }
 }

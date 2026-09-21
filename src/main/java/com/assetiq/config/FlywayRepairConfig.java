@@ -24,12 +24,12 @@ import org.springframework.context.annotation.Profile;
  * descriptions in the history table — it does NOT roll back or re-apply
  * migrations. The actual schema remains untouched.</p>
  *
- * <p>This bean is active on the {@code default} and {@code dev} profiles.
- * It is excluded from the {@code prod} profile. In production, migration
- * files should never be modified after deployment.</p>
+ * <p>This bean is active only on the explicitly selected {@code dev} profile.
+ * Shared, test, staging, and production environments always validate immutable
+ * migration checksums and require the audited repair runbook.</p>
  */
 @Configuration
-@Profile("!prod")   // never run in production — migration files must not change there
+@Profile("dev")
 public class FlywayRepairConfig {
 
     private static final Logger log = LoggerFactory.getLogger(FlywayRepairConfig.class);

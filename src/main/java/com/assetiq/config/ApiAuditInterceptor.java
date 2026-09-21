@@ -114,7 +114,11 @@ public class ApiAuditInterceptor implements HandlerInterceptor {
             return null;
         }
         UUID orgId = TenantContext.getOrganisationId();
-        return organisationRepository.findByIdAndDeletedAtIsNull(orgId).orElse(null);
+        // Account-closure requests soft-delete the organisation before MVC invokes
+        // afterCompletion. The audit record must still retain that tenant owner;
+        // filtering deleted rows here produced an ownerless AuditEvent that the
+        // ORM tenant guard correctly rejected.
+        return organisationRepository.findById(orgId).orElse(null);
     }
 
     private String resolveActorEmail() {
@@ -160,4 +164,3 @@ public class ApiAuditInterceptor implements HandlerInterceptor {
         return value.length() <= 500 ? value : value.substring(0, 500);
     }
 }
-

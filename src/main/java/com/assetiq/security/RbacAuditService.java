@@ -10,7 +10,6 @@ import com.assetiq.repositories.OrganisationRepository;
 import com.assetiq.repositories.UserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
@@ -26,13 +25,10 @@ import java.util.stream.Collectors;
 /**
  * Writes structured RBAC change events to the audit_event table.
  *
- * Each method runs in its own independent transaction (REQUIRES_NEW) so that
- * audit records are persisted even when the calling transaction rolls back (e.g.
- * a failed role update should still leave a trace that the attempt occurred).
- *
- * Recording is also @Async so the audit write never adds latency to the main
- * request path.  Failures are logged as WARN and swallowed — the audit trail is
- * best-effort; it must not break core business operations.
+ * Security-administration mutations are recorded synchronously in the caller's
+ * transaction. A failed audit write therefore rolls back the role/user change;
+ * regulated access-control changes must never succeed without their evidence.
+ * Permission-denied observations are non-mutating and remain best-effort.
  */
 @Service
 public class RbacAuditService {
@@ -63,8 +59,7 @@ public class RbacAuditService {
      * @param roleId   the UUID of the newly created role
      * @param roleName human-readable name for the new_value snapshot
      */
-    @Async
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @Transactional
     public void recordRoleCreated(UUID roleId, String roleName) {
         persist(AuditEventType.ROLE_CREATED,
                 roleId.toString(), null, roleName,
@@ -78,8 +73,7 @@ public class RbacAuditService {
      * @param oldName the role name before the update
      * @param newName the role name after the update
      */
-    @Async
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @Transactional
     public void recordRoleUpdated(UUID roleId, String oldName, String newName) {
         persist(AuditEventType.ROLE_UPDATED,
                 roleId.toString(), oldName, newName,
@@ -93,8 +87,7 @@ public class RbacAuditService {
      * @param oldPerms the permission names before the change
      * @param newPerms the permission names after the change
      */
-    @Async
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @Transactional
     public void recordRolePermissionsChanged(UUID roleId,
                                              Collection<String> oldPerms,
                                              Collection<String> newPerms) {
@@ -111,8 +104,7 @@ public class RbacAuditService {
      * @param roleId   the UUID of the deleted role
      * @param roleName its name at deletion time
      */
-    @Async
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @Transactional
     public void recordRoleDeleted(UUID roleId, String roleName) {
         persist(AuditEventType.ROLE_DELETED,
                 roleId.toString(), roleName, null,
@@ -128,8 +120,7 @@ public class RbacAuditService {
      * @param oldRoleName the role name before the change (null if first assignment)
      * @param newRoleName the role name after the change (null if role was removed)
      */
-    @Async
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @Transactional
     public void recordUserRoleAssigned(UUID userId, String oldRoleName, String newRoleName) {
         persist(AuditEventType.USER_ROLE_ASSIGNED,
                 userId.toString(), oldRoleName, newRoleName,
@@ -145,7 +136,6 @@ public class RbacAuditService {
      * @param path        the request path that was denied
      * @param permission  the required permission that the actor lacked
      */
-    @Async
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void recordPermissionDenied(String actorEmail, String path, String permission) {
         AuditEvent event = buildBase(AuditEventType.PERMISSION_DENIED, "GET", path);
@@ -156,7 +146,11 @@ public class RbacAuditService {
         event.setOldValue(permission);  // "old_value" holds the required permission name
         event.setResponseStatus(403);
         event.setSuccess(false);
-        save(event);
+        try {
+            auditEventRepository.save(event);
+        } catch (RuntimeException ex) {
+            log.error("[RBAC_AUDIT] Failed to record permission denial for path={}", path, ex);
+        }
     }
 
     // ── Internal helpers ──────────────────────────────────────────────────────
@@ -165,18 +159,13 @@ public class RbacAuditService {
                          String targetId,
                          String oldValue, String newValue,
                          String method, String path) {
-        try {
-            AuditEvent event = buildBase(type, method, path);
-            event.setTargetId(targetId);
-            event.setOldValue(truncate(oldValue));
-            event.setNewValue(truncate(newValue));
-            event.setResponseStatus(200);
-            event.setSuccess(true);
-            save(event);
-        } catch (Exception ex) {
-            log.warn("[RBAC_AUDIT] Failed to persist {} event for target={}: {}",
-                    type, targetId, ex.getMessage());
-        }
+        AuditEvent event = buildBase(type, method, path);
+        event.setTargetId(targetId);
+        event.setOldValue(truncate(oldValue));
+        event.setNewValue(truncate(newValue));
+        event.setResponseStatus(200);
+        event.setSuccess(true);
+        auditEventRepository.save(event);
     }
 
     private AuditEvent buildBase(AuditEventType type, String method, String path) {
@@ -213,15 +202,6 @@ public class RbacAuditService {
             if (byOrg.isPresent()) return byOrg;
         }
         return userRepository.findByEmail(email);
-    }
-
-    private void save(AuditEvent event) {
-        try {
-            auditEventRepository.save(event);
-        } catch (Exception ex) {
-            log.warn("[RBAC_AUDIT] Failed to save audit event type={}: {}",
-                    event.getEventType(), ex.getMessage());
-        }
     }
 
     // ── Value formatters ──────────────────────────────────────────────────────

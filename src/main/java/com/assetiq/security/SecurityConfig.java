@@ -4,8 +4,10 @@ import com.assetiq.license.LicenseGuardFilter;
 import com.assetiq.multitenancy.TenantFilter;
 import com.assetiq.repositories.UserRepository;
 import org.springframework.context.annotation.Bean;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
@@ -14,6 +16,8 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.authentication.HttpStatusEntryPoint;
+import org.springframework.security.web.access.AccessDeniedHandlerImpl;
 import org.springframework.web.cors.CorsConfigurationSource;
 
 import java.util.Optional;
@@ -28,6 +32,10 @@ public class SecurityConfig {
     private final CorsConfigurationSource corsConfigurationSource;
     private final JwtBlacklist jwtBlacklist;
     private final PermissionCacheService permissionCacheService;
+    private final BrowserMutationOriginFilter browserMutationOriginFilter;
+
+    @Value("${app.auth.require-email-verification:true}")
+    private boolean requireEmailVerification;
 
     /**
      * Only present when APP_MODE=standalone (annotated with @ConditionalOnAppMode).
@@ -38,6 +46,7 @@ public class SecurityConfig {
     public SecurityConfig(JwtUtil jwtUtil, UserRepository userRepository, TenantFilter tenantFilter,
             CorsConfigurationSource corsConfigurationSource, JwtBlacklist jwtBlacklist,
             PermissionCacheService permissionCacheService,
+            BrowserMutationOriginFilter browserMutationOriginFilter,
             Optional<LicenseGuardFilter> licenseGuardFilter) {
         this.jwtUtil = jwtUtil;
         this.userRepository = userRepository;
@@ -45,16 +54,26 @@ public class SecurityConfig {
         this.corsConfigurationSource = corsConfigurationSource;
         this.jwtBlacklist = jwtBlacklist;
         this.permissionCacheService = permissionCacheService;
+        this.browserMutationOriginFilter = browserMutationOriginFilter;
         this.licenseGuardFilter = licenseGuardFilter;
     }
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
-        JwtAuthenticationFilter jwtFilter = new JwtAuthenticationFilter(jwtUtil, userRepository, jwtBlacklist, permissionCacheService);
+        JwtAuthenticationFilter jwtFilter = new JwtAuthenticationFilter(
+                jwtUtil, userRepository, jwtBlacklist, permissionCacheService, requireEmailVerification);
 
         http
             .cors(cors -> cors.configurationSource(corsConfigurationSource))
+            // Cookie browser mutations are CSRF-protected by the strict origin filter;
+            // bearer-only mobile/desktop/API requests remain stateless.
             .csrf(AbstractHttpConfigurer::disable)
+            .exceptionHandling(exceptions -> {
+                exceptions.authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED));
+                AccessDeniedHandlerImpl denied = new AccessDeniedHandlerImpl();
+                denied.setErrorPage(null);
+                exceptions.accessDeniedHandler(denied);
+            })
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests((authz) -> authz
                 // ── Swagger / OpenAPI ──────────────────────────────────────────────
@@ -70,12 +89,14 @@ public class SecurityConfig {
                 // ── Auth: only truly-public endpoints are permit-all ───────────────
                 // login, register, password reset — no token needed
                 .requestMatchers(HttpMethod.POST, "/api/v1/auth/login").permitAll()
-                .requestMatchers(HttpMethod.POST, "/api/v1/auth/register").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/v1/auth/forgot-password").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/v1/auth/reset-password").permitAll()
                 // Necessarily public: the user cannot sign in until they have verified.
                 .requestMatchers(HttpMethod.POST, "/api/v1/auth/verify-email").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/v1/auth/resend-verification").permitAll()
+                // Refresh/logout authenticate using rotating opaque refresh sessions.
+                .requestMatchers(HttpMethod.POST, "/api/v1/auth/refresh").permitAll()
+                .requestMatchers(HttpMethod.POST, "/api/v1/auth/logout").permitAll()
                 // SSO callbacks and initiation — called by external IdP or before login
                 .requestMatchers("/api/v1/auth/sso/**").permitAll()
                 // /auth/profile, /auth/refresh, /auth/logout remain AUTHENTICATED (see anyRequest below)
@@ -91,7 +112,6 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.GET, "/api/v1/license/status").permitAll()
 
                 // ── Internal / infrastructure ──────────────────────────────────────
-                .requestMatchers("/api/info", "/api/cache/ping", "/api/db/hits").permitAll()
                 // Includes the probe sub-paths /actuator/health/liveness and
                 // /actuator/health/readiness. Matching only "/actuator/health" left both
                 // returning 403 to an unauthenticated caller, which is exactly what a load
@@ -101,12 +121,12 @@ public class SecurityConfig {
                 // so an anonymous caller sees only the aggregate status.
                 .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
                 .requestMatchers("/error").permitAll()
-                .requestMatchers("/api/v1/health").permitAll()
-                .requestMatchers("/api/v1/health/detailed", "/api/v1/metrics/**", "/api/v1/metrics")
-                    .hasAnyAuthority("ROLE_ADMIN", "ROLE_ORG_ADMIN")
+                .requestMatchers("/api/v1/health", "/api/v1/health/detailed", "/api/v1/metrics/**", "/api/v1/metrics")
+                    .hasAuthority("ROLE_ADMIN")
 
                 // ── All other requests require a valid JWT ─────────────────────────
                 .anyRequest().authenticated())
+            .addFilterBefore(browserMutationOriginFilter, UsernamePasswordAuthenticationFilter.class)
             .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
             .addFilterAfter(tenantFilter, JwtAuthenticationFilter.class);
 

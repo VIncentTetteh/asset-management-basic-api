@@ -276,26 +276,17 @@ class CrossTenantIsolationTest {
                                 "salvageValuePercent", 10),
                         "Alpha Policy " + s, "?organisationId={orgId}"),
 
-                // Webhooks hand back an HMAC signing secret on create. A cross-tenant read
-                // would let another tenant forge signed deliveries, so this one matters
-                // well beyond the usual "they can see our data".
-                Arguments.of("webhooks", "/api/v1/webhooks",
-                        Map.<String, Object>of(
-                                "name", "Alpha Hook " + s,
-                                "url", "https://alpha-" + s + ".example.com/hook",
-                                "events", List.of("test.webhook"),
-                                "active", true),
-                        "Alpha Hook " + s, ""),
+                // Outbound webhooks are intentionally absent: the commercial feature is
+                // default-off until its outbox/egress controls are complete.
 
-                // Software licences store licence keys — vendor credentials in all but name.
+                // Reusable licence credentials are intentionally not accepted or returned.
                 Arguments.of("software licences", "/api/v1/licenses",
                         Map.<String, Object>of(
                                 "name", "Alpha Licence " + s,
                                 "vendor", "Alpha Vendor",
-                                "licenseKey", "ALPHA-KEY-" + s,
                                 "licenseType", "SUBSCRIPTION",
                                 "status", "ACTIVE"),
-                        "ALPHA-KEY-" + s, ""),
+                        "Alpha Licence " + s, ""),
 
                 Arguments.of("budgets", "/api/v1/budgets",
                         Map.<String, Object>of(
@@ -445,7 +436,17 @@ class CrossTenantIsolationTest {
         TenantRegisterResponse resp = objectMapper.readValue(
                 result.getResponse().getContentAsString(), TenantRegisterResponse.class);
 
-        return new Tenant(resp.getOrganisationId(), resp.getUserId(), resp.getToken(), suffix);
+        MvcResult login = mockMvc.perform(post("/api/v1/auth/login")
+                        .header("X-Forwarded-For", nextClient())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "email", req.getAdminEmail(),
+                                "password", "Password123",
+                                "organisationId", resp.getOrganisationId()))))
+                .andExpect(status().isOk())
+                .andReturn();
+        String token = objectMapper.readTree(login.getResponse().getContentAsString()).path("token").asText();
+        return new Tenant(resp.getOrganisationId(), resp.getUserId(), token, suffix);
     }
 
     /** Fills the {orgId} placeholder used by create endpoints that demand it as a parameter. */

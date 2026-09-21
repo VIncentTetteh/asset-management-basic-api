@@ -17,8 +17,8 @@ import org.springframework.stereotype.Component;
  * <p>AssetIQ's public pricing surface lists four packages: Freemium, Basic,
  * Business, and Enterprise. Amounts are expressed in the platform's minor unit
  * (currency × 100), matching Paystack's minor-unit convention. The currency is
- * whatever {@code app.billing.default-currency} resolves to — USD since the
- * multi-currency migration, not the GHS this once assumed.
+ * whatever {@code app.billing.default-currency} resolves to; the public default
+ * is GHS and can be overridden for a regional deployment.
  *
  * <ul>
  *   <li><b>FREEMIUM</b> — free. 50 assets, 5 employees.</li>
@@ -54,17 +54,14 @@ public class BillingPlanSeeder implements ApplicationRunner {
     @Value("${app.billing.plans.basic.paystack-plan-code:}")
     private String basicPaystackPlanCode;
 
-    // ── Business ($799/mo = 79900 cents) ────────────────────────────────────
-    // Was 10000 ($100) — a dollar above Basic's $99, which is not a ladder. The
-    // amount drifted from the documented 799 during the GHS→USD migration while
-    // the tier boundaries (10,000 assets / 250 users) stayed put.
+    // ── Business (GHS 799/mo = 79900 pesewas) ───────────────────────────────
     @Value("${app.billing.plans.business.amount-minor:79900}")
     private Long businessAmount;
 
     @Value("${app.billing.plans.business.paystack-plan-code:}")
     private String businessPaystackPlanCode;
 
-    // ── Business Annual ($8,629.20/yr = 862920 cents, 10% off $9,588) ───────
+    // ── Business Annual (GHS 8,629.20/yr, 10% off GHS 9,588) ────────────────
     // Re-derived from the corrected monthly: 799 × 12 = 9,588, less the same 10%
     // annual discount the previous figure used.
     @Value("${app.billing.plans.business-annual.amount-minor:862920}")
@@ -92,7 +89,7 @@ public class BillingPlanSeeder implements ApplicationRunner {
 
     private void seedFreemium() {
         upsert("FREEMIUM", "Freemium", BillingPlanTier.FREEMIUM, BillingInterval.MONTHLY,
-                0L, defaultCurrency, 50, 5, false, 365, null, null, true);
+                0L, defaultCurrency, 50, 5, false, 30, null, null, true);
     }
 
     private void seedBasic() {

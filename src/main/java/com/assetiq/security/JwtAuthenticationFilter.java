@@ -1,5 +1,8 @@
 package com.assetiq.security;
 
+import com.assetiq.enums.OrganisationStatus;
+import com.assetiq.enums.UserStatus;
+import com.assetiq.models.User;
 import com.assetiq.repositories.UserRepository;
 import io.jsonwebtoken.Claims;
 import org.springframework.http.HttpHeaders;
@@ -18,37 +21,33 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Set;
+import java.util.Optional;
+import java.util.UUID;
 
 /**
  * JWT authentication filter.
  *
  * Authority loading strategy:
- *  1. The `role` claim becomes ROLE_<name> (e.g. ROLE_ADMIN, ROLE_USER, ROLE_Manager).
- *  2. Built-in system roles (ROLE_ADMIN, ROLE_ORG_ADMIN, ROLE_USER) are passed through as-is.
- *  3. Custom org roles (anything else) ALSO receive ROLE_USER so that standard
- *     organisation-member endpoints (guarded by ROLE_USER) remain accessible.
- *  4. Every permission string stored in the `permissions` JWT claim is added as its
- *     own GrantedAuthority (e.g. VIEW_ASSETS, CREATE_ASSET) so that fine-grained
- *     @PreAuthorize("hasAuthority('VIEW_ASSETS')") checks work.
+ * Identity and the primary role are resolved from the database on every request.
+ * The token selects the user and tenant but cannot keep a disabled account or a
+ * stale role alive. Fine-grained permissions are loaded by PermissionCacheService.
  */
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
-    /** Roles that are part of the built-in hierarchy — not treated as custom org roles. */
-    private static final Set<String> SYSTEM_ROLES = Set.of(
-            "ROLE_ADMIN", "ROLE_ORG_ADMIN", "ROLE_USER"
-    );
-
     private final JwtUtil jwtUtil;
+    private final UserRepository userRepository;
     private final JwtBlacklist jwtBlacklist;
     private final PermissionCacheService permissionCacheService;
+    private final boolean requireEmailVerification;
 
     public JwtAuthenticationFilter(JwtUtil jwtUtil, UserRepository userRepository,
-                                   JwtBlacklist jwtBlacklist, PermissionCacheService permissionCacheService) {
+                                   JwtBlacklist jwtBlacklist, PermissionCacheService permissionCacheService,
+                                   boolean requireEmailVerification) {
         this.jwtUtil = jwtUtil;
+        this.userRepository = userRepository;
         this.jwtBlacklist = jwtBlacklist;
         this.permissionCacheService = permissionCacheService;
-        // userRepository retained in constructor signature for backward-compat with SecurityConfig
+        this.requireEmailVerification = requireEmailVerification;
     }
 
     @Override
@@ -70,23 +69,31 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
                 Claims claims = jwtUtil.parseToken(token);
                 String username = claims.getSubject();
+                String orgIdClaim = claims.get("organisationId", String.class);
+
+                User liveUser = resolveActiveUser(username, orgIdClaim).orElse(null);
+                if (liveUser == null) {
+                    SecurityContextHolder.clearContext();
+                    response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Account or tenant is not active");
+                    return;
+                }
+                Number tokenSessionVersion = claims.get("sessionVersion", Number.class);
+                if (tokenSessionVersion == null
+                        || tokenSessionVersion.longValue() != liveUser.getSessionVersion()) {
+                    SecurityContextHolder.clearContext();
+                    response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Session has been revoked");
+                    return;
+                }
 
                 List<SimpleGrantedAuthority> authorities = new ArrayList<>();
 
-                // ── 1. Role authority ─────────────────────────────────────────────
-                Object roleClaim = claims.get("role");
-                if (roleClaim != null) {
-                    String roleStr = roleClaim.toString().trim();
+                // Role is read live so role changes take effect immediately. Custom
+                // roles do not inherit ROLE_USER; their permissions are explicit.
+                if (liveUser.getRole() != null && liveUser.getRole().getName() != null) {
+                    String roleStr = liveUser.getRole().getName().trim();
                     if (!roleStr.isEmpty()) {
                         String authority = roleStr.startsWith("ROLE_") ? roleStr : "ROLE_" + roleStr;
                         authorities.add(new SimpleGrantedAuthority(authority));
-
-                        // ── 2. Custom-role fallback ───────────────────────────────
-                        // Users with a custom org role (e.g. ROLE_Manager) must also
-                        // receive ROLE_USER so that standard member endpoints work.
-                        if (!SYSTEM_ROLES.contains(authority)) {
-                            authorities.add(new SimpleGrantedAuthority("ROLE_USER"));
-                        }
                     }
                 }
 
@@ -95,7 +102,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 // that role permission changes take effect immediately — no re-login
                 // required. Results are cached in Redis and evicted by RoleServiceImpl
                 // whenever a role's permissions are updated.
-                String orgIdClaim = claims.get("organisationId", String.class);
                 List<String> livePermissions = permissionCacheService.getPermissionsForUser(username, orgIdClaim);
                 for (String perm : livePermissions) {
                     if (!perm.isEmpty()) {
@@ -113,6 +119,28 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             }
         }
         filterChain.doFilter(request, response);
+    }
+
+    private Optional<User> resolveActiveUser(String username, String organisationId) {
+        if (!StringUtils.hasText(username) || !StringUtils.hasText(organisationId)) {
+            return Optional.empty();
+        }
+
+        final UUID orgId;
+        try {
+            orgId = UUID.fromString(organisationId);
+        } catch (IllegalArgumentException invalidOrganisationId) {
+            return Optional.empty();
+        }
+
+        return userRepository.findByEmailAndOrganisationId(username, orgId)
+                .filter(user -> user.getDeletedAt() == null)
+                .filter(user -> user.getStatus() == UserStatus.ACTIVE)
+                .filter(user -> !user.isLockedOut())
+                .filter(user -> !requireEmailVerification || user.isEmailVerified())
+                .filter(user -> user.getOrganisation() != null)
+                .filter(user -> user.getOrganisation().getDeletedAt() == null)
+                .filter(user -> user.getOrganisation().getStatus() == OrganisationStatus.ACTIVE);
     }
 
     /**

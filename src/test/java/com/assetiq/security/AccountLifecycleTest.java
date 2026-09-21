@@ -202,7 +202,17 @@ class AccountLifecycleTest {
         TenantRegisterResponse resp = objectMapper.readValue(
                 result.getResponse().getContentAsString(), TenantRegisterResponse.class);
 
-        return new Tenant(resp.getOrganisationId(), resp.getToken(), suffix, email);
+        MvcResult login = mockMvc.perform(post("/api/v1/auth/login")
+                        .header("X-Forwarded-For", nextClient())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "email", email,
+                                "password", "Password123",
+                                "organisationId", resp.getOrganisationId()))))
+                .andExpect(status().isOk())
+                .andReturn();
+        String token = objectMapper.readTree(login.getResponse().getContentAsString()).path("token").asText();
+        return new Tenant(resp.getOrganisationId(), token, suffix, email);
     }
 
     /**
