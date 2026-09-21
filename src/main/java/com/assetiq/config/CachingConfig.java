@@ -1,6 +1,13 @@
 package com.assetiq.config;
 
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.cache.Cache;
+import org.springframework.cache.annotation.CachingConfigurer;
+import org.springframework.cache.interceptor.CacheErrorHandler;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.cache.RedisCacheConfiguration;
@@ -14,7 +21,9 @@ import java.time.Duration;
 // @EnableCaching is on AssetIQApplication so it is always active regardless of Redis.
 // This class only wires the Redis-specific CacheManager when Redis is available.
 @Configuration
-public class CachingConfig {
+public class CachingConfig implements CachingConfigurer {
+
+    private static final Logger log = LoggerFactory.getLogger(CachingConfig.class);
 
     // Keyed off the property rather than @ConditionalOnBean(RedisConnectionFactory).
     // @ConditionalOnBean is only reliable inside auto-configuration, where ordering is
@@ -48,11 +57,63 @@ public class CachingConfig {
                 // invalidates every entry written by the previous build, which surfaces
                 // as deserialization errors mid-deploy rather than as cache misses.
                 .serializeValuesWith(RedisSerializationContext.SerializationPair
-                        .fromSerializer(new GenericJackson2JsonRedisSerializer()));
+                        .fromSerializer(redisValueSerializer()));
 
         return RedisCacheManager.builder(connectionFactory)
                 .cacheDefaults(config)
                 .build();
+    }
+
+    /**
+     * JSON serializer for cached values.
+     *
+     * <p>The no-arg {@link GenericJackson2JsonRedisSerializer} uses a bare
+     * ObjectMapper without the JSR-310 module, so the first write of any DTO with an
+     * {@code Instant}/{@code LocalDate} field threw "Java 8 date/time type not
+     * supported" and turned the whole request into a 500 (GET /suppliers on staging).
+     * {@code configure} keeps the serializer's own default typing (needed to read
+     * {@code HashSet}/{@code List} of DTOs back as the right types) and adds the
+     * module, writing dates as ISO strings rather than numeric timestamps.
+     */
+    public static GenericJackson2JsonRedisSerializer redisValueSerializer() {
+        return new GenericJackson2JsonRedisSerializer().configure(mapper -> {
+            mapper.registerModule(new JavaTimeModule());
+            mapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+        });
+    }
+
+    /**
+     * A cache is an optimisation: a Redis outage or a value that cannot be
+     * (de)serialized must fall through to the database, never fail the request.
+     * A failed get is treated as a miss; failed puts/evicts/clears are logged.
+     */
+    @Override
+    public CacheErrorHandler errorHandler() {
+        return new LoggingCacheErrorHandler();
+    }
+
+    /** Logs and swallows every cache error. */
+    public static class LoggingCacheErrorHandler implements CacheErrorHandler {
+        @Override
+        public void handleCacheGetError(RuntimeException ex, Cache cache, Object key) {
+            log.warn("[CACHE] get failed on '{}' (treated as a miss): {}", cache.getName(), ex.toString());
+        }
+
+        @Override
+        public void handleCachePutError(RuntimeException ex, Cache cache, Object key, Object value) {
+            log.warn("[CACHE] put failed on '{}': {}", cache.getName(), ex.toString());
+        }
+
+        @Override
+        public void handleCacheEvictError(RuntimeException ex, Cache cache, Object key) {
+            // A failed evict can leave a stale entry for up to the TTL; say so loudly.
+            log.error("[CACHE] evict failed on '{}' (entry may be stale until TTL): {}", cache.getName(), ex.toString());
+        }
+
+        @Override
+        public void handleCacheClearError(RuntimeException ex, Cache cache) {
+            log.error("[CACHE] clear failed on '{}' (entries may be stale until TTL): {}", cache.getName(), ex.toString());
+        }
     }
 
     /**
