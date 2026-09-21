@@ -59,4 +59,7 @@ public enum AuditEventType {
 
     /** The organisation's base (reporting) currency was changed. */
     BASE_CURRENCY_CHANGED,
+
+    /** A platform operator granted a tenant a plan period without payment. */
+    PLAN_GRANTED,
 }

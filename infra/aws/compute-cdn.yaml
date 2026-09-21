@@ -28,6 +28,14 @@ Parameters:
   SubnetId:
     Type: AWS::EC2::Subnet::Id
     Description: Public subnet for the application instance.
+  PlatformAdminOrgId:
+    Type: String
+    Default: ""
+    Description: Organisation id of the vendor's operator tenant. Blank disables platform endpoints.
+  PlatformAdminEmails:
+    Type: String
+    Default: ""
+    Description: Comma-separated operator emails within PlatformAdminOrgId.
 
 Resources:
 
@@ -184,6 +192,9 @@ Resources:
             SMTP_SSL=$SMTP_SSL
             APP_EMAIL_FROM=$EMAIL_FROM
             APP_EMAIL_BASE_URL=https://${DistributionDomain}
+            APP_PUBLIC_BASE_URL=https://${DistributionDomain}
+            APP_PLATFORM_ADMIN_ORG_ID=${PlatformAdminOrgId}
+            APP_PLATFORM_ADMIN_EMAILS=${PlatformAdminEmails}
             # Kept off on this demo environment even with SMTP configured: accounts
             # created while email was disabled were never verified, and turning the
             # gate on would lock every one of them out. Enable it together with a

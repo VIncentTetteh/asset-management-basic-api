@@ -64,6 +64,14 @@ public class RbacAuditService {
                 "PUT", "/api/v1/currency/settings");
     }
 
+    /** A platform operator granted a plan period to a tenant without payment. */
+    @Transactional
+    public void recordPlanGranted(UUID targetOrganisationId, String previousPlan, String grant) {
+        persist(AuditEventType.PLAN_GRANTED,
+                targetOrganisationId.toString(), previousPlan, grant,
+                "POST", "/api/v1/platform/subscriptions/" + targetOrganisationId + "/grant");
+    }
+
     // ── Role events ───────────────────────────────────────────────────────────
 
     /**

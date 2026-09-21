@@ -206,6 +206,12 @@ server:
 
 # ── App ──────────────────────────────────────────────────────────────────────
 app:
+  # Origin of the web app. Asset QR labels link to <public-base-url>/scan?a=<id>.
+  public-base-url: ${APP_PUBLIC_BASE_URL:${APP_EMAIL_BASE_URL:http://localhost:3000}}
+  # Vendor operators (plan grants etc). Both must be set; blank disables the endpoints.
+  platform:
+    admin-org-id: ${APP_PLATFORM_ADMIN_ORG_ID:}
+    admin-emails: ${APP_PLATFORM_ADMIN_EMAILS:}
   # cloud = SaaS hosted (default). standalone = self-hosted, requires license key.
   mode: ${APP_MODE:cloud}
   license:
