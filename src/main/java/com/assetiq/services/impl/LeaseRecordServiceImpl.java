@@ -55,6 +55,18 @@ public class LeaseRecordServiceImpl extends TenantAwareService implements LeaseR
     public LeaseRecordDto create(LeaseRecordDto dto) {
         Organisation org = requireTenantOrg();
 
+        if (dto.getAssetId() == null) {
+            throw new IllegalArgumentException("Asset is required");
+        }
+        if (dto.getLessorId() == null) {
+            throw new IllegalArgumentException("Lessor is required: choose the supplier the asset is leased from");
+        }
+        if (dto.getStartDate() == null || dto.getEndDate() == null) {
+            throw new IllegalArgumentException("Lease start and end dates are required");
+        }
+        if (dto.getEndDate().isBefore(dto.getStartDate())) {
+            throw new IllegalArgumentException("Lease end date must not be before its start date");
+        }
         Asset asset = assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(dto.getAssetId(), org)
                 .orElseThrow(() -> new IllegalArgumentException("Asset not found: " + dto.getAssetId()));
 
@@ -98,9 +110,18 @@ public class LeaseRecordServiceImpl extends TenantAwareService implements LeaseR
         Organisation org = requireTenantOrg();
         LeaseRecord record = requireLease(id, org);
 
+        if (dto.getLessorId() != null) {
+            record.setLessor(supplierRepository.findByIdAndOrganisationAndDeletedAtIsNull(dto.getLessorId(), org)
+                    .orElseThrow(() -> new IllegalArgumentException("Supplier (lessor) not found: " + dto.getLessorId())));
+        }
+        if (dto.getStartDate() != null) record.setStartDate(dto.getStartDate());
         if (dto.getEndDate() != null) record.setEndDate(dto.getEndDate());
+        if (record.getStartDate() != null && record.getEndDate() != null
+                && record.getEndDate().isBefore(record.getStartDate())) {
+            throw new IllegalArgumentException("Lease end date must not be before its start date");
+        }
         if (dto.getMonthlyPayment() != null) record.setMonthlyPayment(dto.getMonthlyPayment());
-        if (dto.getCurrency() != null) record.setCurrency(dto.getCurrency().toUpperCase());
+        if (dto.getCurrency() != null) record.setCurrency(CurrencyResolver.normaliseIsoCode(dto.getCurrency()));
         if (dto.getAutoRenew() != null) record.setAutoRenew(dto.getAutoRenew());
         if (dto.getNoticePeriodDays() != null) record.setNoticePeriodDays(dto.getNoticePeriodDays());
         if (dto.getNotes() != null) record.setNotes(dto.getNotes());
