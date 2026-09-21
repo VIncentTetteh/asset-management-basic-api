@@ -1,5 +1,8 @@
 package com.assetiq.controllers.v1;
 
+import com.assetiq.exceptions.MfaCodeInvalidException;
+import com.assetiq.exceptions.MfaEnrolmentRequiredException;
+import com.assetiq.exceptions.MfaStepUpRequiredException;
 import com.assetiq.exceptions.PaymentGatewayException;
 import com.assetiq.exceptions.PaymentRejectedException;
 import com.assetiq.services.FeatureDisabledException;
@@ -86,6 +89,27 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return new ResponseEntity<>(errorBody(403, ex.getMessage() != null ? ex.getMessage() : "Access denied",
                 "FORBIDDEN"),
                 HttpStatus.FORBIDDEN);
+    }
+
+    // Step-up MFA. 401 (not 403) because the fix is to re-authenticate, and the
+    // distinct errorCode lets the web client tell this apart from an expired
+    // session, which must redirect to login instead of prompting for a code.
+    @ExceptionHandler(MfaStepUpRequiredException.class)
+    public ResponseEntity<Object> handleMfaStepUpRequired(MfaStepUpRequiredException ex) {
+        return new ResponseEntity<>(errorBody(401, ex.getMessage(), "MFA_STEP_UP_REQUIRED"),
+                HttpStatus.UNAUTHORIZED);
+    }
+
+    @ExceptionHandler(MfaCodeInvalidException.class)
+    public ResponseEntity<Object> handleMfaCodeInvalid(MfaCodeInvalidException ex) {
+        return new ResponseEntity<>(errorBody(401, ex.getMessage(), "MFA_CODE_INVALID"),
+                HttpStatus.UNAUTHORIZED);
+    }
+
+    @ExceptionHandler(MfaEnrolmentRequiredException.class)
+    public ResponseEntity<Object> handleMfaEnrolmentRequired(MfaEnrolmentRequiredException ex) {
+        return new ResponseEntity<>(errorBody(428, ex.getMessage(), "MFA_ENROLMENT_REQUIRED"),
+                HttpStatus.PRECONDITION_REQUIRED);
     }
 
     @ExceptionHandler(EntityNotFoundException.class)
