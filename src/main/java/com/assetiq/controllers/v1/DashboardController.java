@@ -45,7 +45,7 @@ public class DashboardController {
      * Returns asset distribution by status
      */
     @GetMapping("/assets-by-status")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_USER','ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_USER','ROLE_ADMIN','VIEW_ASSETS')")
     public ResponseEntity<?> getAssetsByStatus() {
         return ResponseEntity.ok(dashboardService.getAssetsByStatus(requireOrg()));
     }
@@ -55,7 +55,7 @@ public class DashboardController {
      * Returns asset distribution by department
      */
     @GetMapping("/assets-by-department")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_USER','ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_USER','ROLE_ADMIN','VIEW_ASSETS','VIEW_DEPARTMENTS')")
     public ResponseEntity<?> getAssetsByDepartment() {
         return ResponseEntity.ok(dashboardService.getAssetsByDepartment(requireOrg()));
     }
@@ -106,4 +106,3 @@ public class DashboardController {
         return alert;
     }
 }
-

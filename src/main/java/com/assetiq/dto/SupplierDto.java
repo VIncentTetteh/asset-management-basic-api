@@ -27,8 +27,6 @@ public class SupplierDto {
 
     private String address;
 
-    private String bankDetails;
-
     private String taxId;
 
     private SupplierStatus status;
@@ -39,4 +37,3 @@ public class SupplierDto {
 
     private Instant updatedAt;
 }
-

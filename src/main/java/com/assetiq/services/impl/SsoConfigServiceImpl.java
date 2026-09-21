@@ -8,6 +8,7 @@ import com.assetiq.models.OrgSsoConfig;
 import com.assetiq.repositories.OrgSsoConfigRepository;
 import com.assetiq.repositories.OrganisationRepository;
 import com.assetiq.services.SsoConfigService;
+import com.assetiq.security.SecretCryptoService;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.http.HttpStatus;
@@ -22,11 +23,14 @@ public class SsoConfigServiceImpl implements SsoConfigService {
 
     private final OrgSsoConfigRepository ssoConfigRepository;
     private final OrganisationRepository organisationRepository;
+    private final SecretCryptoService secretCryptoService;
 
     public SsoConfigServiceImpl(OrgSsoConfigRepository ssoConfigRepository,
-            OrganisationRepository organisationRepository) {
+            OrganisationRepository organisationRepository,
+            SecretCryptoService secretCryptoService) {
         this.ssoConfigRepository = ssoConfigRepository;
         this.organisationRepository = organisationRepository;
+        this.secretCryptoService = secretCryptoService;
     }
 
     @Override
@@ -54,7 +58,7 @@ public class SsoConfigServiceImpl implements SsoConfigService {
         config.setClientId(dto.getClientId());
         // Only update secret if a non-masked value is supplied
         if (dto.getClientSecret() != null && !dto.getClientSecret().startsWith("****")) {
-            config.setClientSecret(dto.getClientSecret());
+            config.setClientSecret(secretCryptoService.encrypt(dto.getClientSecret()));
         }
         config.setIssuerUri(dto.getIssuerUri());
         if (dto.getScopes() != null)

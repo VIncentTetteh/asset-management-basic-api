@@ -6,10 +6,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.web.servlet.MockMvc;
 
-import static org.hamcrest.Matchers.not;
-import static org.hamcrest.Matchers.hasKey;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest
@@ -20,15 +17,14 @@ class HealthMonitoringSecurityTest {
     MockMvc mockMvc;
 
     @Test
-    void anonymousCanCallBasicHealthOnly() throws Exception {
+    void anonymousCannotCallTenantHealthOrMetrics() throws Exception {
         mockMvc.perform(get("/api/v1/health"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.components.database", not(hasKey("url"))));
+                .andExpect(status().isUnauthorized());
 
         mockMvc.perform(get("/api/v1/health/detailed"))
-                .andExpect(status().is4xxClientError());
+                .andExpect(status().isUnauthorized());
 
         mockMvc.perform(get("/api/v1/metrics"))
-                .andExpect(status().is4xxClientError());
+                .andExpect(status().isUnauthorized());
     }
 }

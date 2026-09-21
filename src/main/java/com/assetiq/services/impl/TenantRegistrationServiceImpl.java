@@ -15,7 +15,6 @@ import com.assetiq.repositories.OrganisationRepository;
 import com.assetiq.repositories.RoleRepository;
 import com.assetiq.repositories.SubscriptionPlanRepository;
 import com.assetiq.repositories.UserRepository;
-import com.assetiq.security.JwtUtil;
 import com.assetiq.services.CurrencyResolver;
 import com.assetiq.services.EmailService;
 import com.assetiq.services.EmailVerificationService;
@@ -38,7 +37,6 @@ public class TenantRegistrationServiceImpl implements TenantRegistrationService 
     private final SubscriptionPlanRepository subscriptionPlanRepository;
     private final OrganisationSubscriptionRepository organisationSubscriptionRepository;
     private final PasswordEncoder passwordEncoder;
-    private final JwtUtil jwtUtil;
     private final EmailService emailService;
     private final EmailVerificationService emailVerificationService;
 
@@ -51,7 +49,6 @@ public class TenantRegistrationServiceImpl implements TenantRegistrationService 
             SubscriptionPlanRepository subscriptionPlanRepository,
             OrganisationSubscriptionRepository organisationSubscriptionRepository,
             PasswordEncoder passwordEncoder,
-            JwtUtil jwtUtil,
             EmailService emailService,
             EmailVerificationService emailVerificationService) {
         this.organisationRepository = organisationRepository;
@@ -60,7 +57,6 @@ public class TenantRegistrationServiceImpl implements TenantRegistrationService 
         this.subscriptionPlanRepository = subscriptionPlanRepository;
         this.organisationSubscriptionRepository = organisationSubscriptionRepository;
         this.passwordEncoder = passwordEncoder;
-        this.jwtUtil = jwtUtil;
         this.emailService = emailService;
         this.emailVerificationService = emailVerificationService;
     }
@@ -175,19 +171,6 @@ public class TenantRegistrationServiceImpl implements TenantRegistrationService 
         subscription.setCurrentPeriodEnd(java.time.Instant.now().plus(java.time.Duration.ofDays(365)));
         organisationSubscriptionRepository.save(subscription);
 
-        // Build JWT claims similar to login
-        Map<String, Object> claims = new HashMap<>();
-        claims.put("email", savedUser.getEmail());
-        claims.put("firstName", savedUser.getFirstName());
-        claims.put("lastName", savedUser.getLastName());
-        String adminRoleName = adminRole.getName();
-        claims.put("role", adminRoleName.startsWith("ROLE_") ? adminRoleName : "ROLE_" + adminRoleName);
-        // Permissions intentionally excluded from JWT (Phase 1 / B-6) — resolved live from cache.
-        claims.put("organisationId", savedOrg.getId().toString());
-
-        long expiresMillis = 1000L * 60 * 60 * 24; // 24h
-        String token = jwtUtil.generateToken(savedUser.getEmail(), claims, expiresMillis);
-
         TenantRegisterResponse response = new TenantRegisterResponse();
         response.setOrganisationId(savedOrg.getId());
         response.setOrganisationName(savedOrg.getName());
@@ -196,8 +179,7 @@ public class TenantRegistrationServiceImpl implements TenantRegistrationService 
         response.setFirstName(savedUser.getFirstName());
         response.setLastName(savedUser.getLastName());
         response.setRole(adminRole.getName());
-        response.setToken(token);
-        response.setExpiresIn(expiresMillis / 1000);
+        response.setVerificationRequired(true);
 
         Map<String, Object> model = new HashMap<>();
         model.put("firstName", savedUser.getFirstName());
@@ -207,11 +189,8 @@ public class TenantRegistrationServiceImpl implements TenantRegistrationService 
         model.put("loginUrl", emailBaseUrl.replaceAll("/+$", "") + "/login");
         emailService.sendTemplate(savedUser.getEmail(), "Welcome to AssetIQ", "email/tenant-welcome", model);
 
-        // New signups start unverified (the V26 backfill only grandfathers accounts that
-        // predate verification). The response still carries a working token so the
-        // just-registered admin lands straight in the app; once it expires they must
-        // have verified to sign in again. That trade keeps signup frictionless while
-        // still making an unconfirmed address a dead end.
+        // New signups start unverified. Registration never creates an application
+        // session; the administrator must prove ownership and then sign in.
         emailVerificationService.sendVerificationEmail(savedUser);
 
         return response;

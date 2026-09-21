@@ -3,6 +3,7 @@ package com.assetiq.controllers.v1;
 import com.assetiq.dto.DocumentAttachmentDto;
 import com.assetiq.enums.AttachmentEntityType;
 import com.assetiq.services.DocumentAttachmentService;
+import com.assetiq.services.FeatureFlagGate;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -16,6 +17,7 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/documents")
+@FeatureFlagGate("commercial.document-attachments")
 public class DocumentController {
 
     private final DocumentAttachmentService documentService;

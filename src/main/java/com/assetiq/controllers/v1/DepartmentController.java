@@ -27,7 +27,7 @@ public class DepartmentController {
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_USER','ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_USER','ROLE_ADMIN','VIEW_DEPARTMENTS','MANAGE_DEPARTMENTS')")
     public ResponseEntity<DepartmentDto> get(@PathVariable UUID id) {
         DepartmentDto dto = departmentService.get(id);
         if (dto == null) return ResponseEntity.notFound().build();
@@ -35,13 +35,13 @@ public class DepartmentController {
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_USER','ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_USER','ROLE_ADMIN','VIEW_DEPARTMENTS','MANAGE_DEPARTMENTS')")
     public ResponseEntity<List<DepartmentDto>> list() {
         return ResponseEntity.ok(departmentService.list());
     }
 
     @GetMapping("/{parentId}/sub-departments")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_USER','ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_USER','ROLE_ADMIN','VIEW_DEPARTMENTS','MANAGE_DEPARTMENTS')")
     public ResponseEntity<List<DepartmentDto>> listSubDepartments(@PathVariable UUID parentId) {
         try {
             return ResponseEntity.ok(departmentService.listSubDepartments(parentId));

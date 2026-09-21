@@ -1,8 +1,12 @@
 package com.assetiq.controllers.v1;
 
+import com.assetiq.services.FeatureFlagGate;
+import com.assetiq.multitenancy.TenantContext;
+import org.springframework.security.access.AccessDeniedException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import javax.sql.DataSource;
@@ -16,6 +20,8 @@ import java.util.*;
  */
 @RestController
 @RequestMapping("/api/v1")
+@PreAuthorize("hasAuthority('ROLE_ADMIN')")
+@FeatureFlagGate("commercial.platform-health-dashboard")
 public class HealthMonitoringController {
 
     private static final Logger log = LoggerFactory.getLogger(HealthMonitoringController.class);
@@ -96,23 +102,21 @@ public class HealthMonitoringController {
 
         // API Metrics (Aggregated from last 24h Audit Logs)
         Instant last24h = Instant.now().minus(java.time.Duration.ofHours(24));
-        List<com.assetiq.models.AuditEvent> recentEvents = auditEventRepository.findAll().stream()
-                .filter(e -> e.getCreatedAt() != null && e.getCreatedAt().isAfter(last24h))
-                .toList();
-
-        int totalRequests = recentEvents.size();
-        long successCount = recentEvents.stream().filter(com.assetiq.models.AuditEvent::getSuccess).count();
+        UUID organisationId = TenantContext.getOrganisationId();
+        if (organisationId == null) {
+            throw new AccessDeniedException("Tenant context is required for metrics");
+        }
+        var metrics = auditEventRepository.aggregateMetricsSince(organisationId, last24h);
+        long totalRequests = metrics == null ? 0L : metrics.getTotalRequests();
+        long successCount = metrics == null ? 0L : metrics.getSuccessfulRequests();
         double successRate = totalRequests == 0 ? 0.0 : (successCount * 100.0 / totalRequests);
 
-        double avgLatency = recentEvents.stream()
-                .filter(e -> e.getResponseTimeMs() != null)
-                .mapToLong(com.assetiq.models.AuditEvent::getResponseTimeMs)
-                .average()
-                .orElse(0.0);
+        double avgLatency = metrics == null || metrics.getAverageLatency() == null
+                ? 0.0 : metrics.getAverageLatency();
 
         response.put("totalRequests", totalRequests);
-        response.put("successfulRequests", (int) successCount);
-        response.put("failedRequests", totalRequests - (int) successCount);
+        response.put("successfulRequests", successCount);
+        response.put("failedRequests", totalRequests - successCount);
         response.put("successRate", String.format("%.1f%%", successRate));
         response.put("averageLatency", (int) avgLatency);
 

@@ -11,6 +11,8 @@ import com.assetiq.repositories.OrgSsoConfigRepository;
 import com.assetiq.repositories.RoleRepository;
 import com.assetiq.repositories.UserRepository;
 import com.assetiq.security.JwtUtil;
+import com.assetiq.services.RefreshSessionService;
+import com.assetiq.security.SecretCryptoService;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletResponse;
@@ -85,6 +87,8 @@ public class SsoController {
     private final RoleRepository roleRepository;
     private final JwtUtil jwtUtil;
     private final PasswordEncoder passwordEncoder;
+    private final RefreshSessionService refreshSessionService;
+    private final SecretCryptoService secretCryptoService;
     private final org.springframework.data.redis.core.StringRedisTemplate redis;
     private final Map<String, StoredSsoState> inMemoryStates = new ConcurrentHashMap<>();
     private final Map<String, StoredSsoExchange> inMemoryExchangeCodes = new ConcurrentHashMap<>();
@@ -112,12 +116,16 @@ public class SsoController {
                          RoleRepository roleRepository,
                          JwtUtil jwtUtil,
                          PasswordEncoder passwordEncoder,
+                         RefreshSessionService refreshSessionService,
+                         SecretCryptoService secretCryptoService,
                          ObjectProvider<org.springframework.data.redis.core.StringRedisTemplate> redisProvider) {
         this.ssoConfigRepository = ssoConfigRepository;
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
         this.jwtUtil = jwtUtil;
         this.passwordEncoder = passwordEncoder;
+        this.refreshSessionService = refreshSessionService;
+        this.secretCryptoService = secretCryptoService;
         this.redis = redisProvider.getIfAvailable();
     }
 
@@ -221,8 +229,11 @@ public class SsoController {
                     .body(Map.of("error", "SSO user was not found"));
         }
 
+        RefreshSessionService.IssuedRefreshToken refresh = refreshSessionService.issue(user.get());
         return ResponseEntity.ok(Map.of(
                 "token", exchange.token(),
+                "refreshToken", refresh.token(),
+                "tokenType", "Bearer",
                 "user", userSummary(user.get()),
                 "expiresIn", jwtExpirationMillis / 1000));
     }
@@ -292,7 +303,8 @@ public class SsoController {
                 return;
             }
 
-            setAuthCookie(servletResponse, token, jwtExpirationMillis / 1000);
+            RefreshSessionService.IssuedRefreshToken refresh = refreshSessionService.issue(user);
+            setSessionCookies(servletResponse, token, refresh);
             servletResponse.sendRedirect(appBaseUrl + "/dashboard?sso=success");
 
         } catch (Exception ex) {
@@ -333,10 +345,15 @@ public class SsoController {
 
             User user = provisionUser(email, Map.of("email", email), orgId, cfg);
             String token = issueJwt(user);
-            setAuthCookie(servletResponse, token, jwtExpirationMillis / 1000);
+            RefreshSessionService.IssuedRefreshToken refresh = refreshSessionService.issue(user);
+            setSessionCookies(servletResponse, token, refresh);
 
             log.info("[SSO] SAML login succeeded for {} in org {}", email, orgId);
-            return ResponseEntity.ok(Map.of("token", token, "redirectUrl", appBaseUrl + "/dashboard"));
+            return ResponseEntity.ok(Map.of(
+                    "token", token,
+                    "refreshToken", refresh.token(),
+                    "tokenType", "Bearer",
+                    "redirectUrl", appBaseUrl + "/dashboard"));
 
         } catch (Exception ex) {
             log.error("[SSO] SAML ACS error for org {}: {}", orgId, ex.getMessage(), ex);
@@ -508,7 +525,8 @@ public class SsoController {
                 + "&code=" + enc(code)
                 + "&redirect_uri=" + enc(redirectUri)
                 + "&client_id=" + enc(cfg.getClientId())
-                + "&client_secret=" + enc(cfg.getClientSecret() != null ? cfg.getClientSecret() : "");
+                + "&client_secret=" + enc(cfg.getClientSecret() != null
+                        ? secretCryptoService.decrypt(cfg.getClientSecret()) : "");
 
         HttpRequest req = HttpRequest.newBuilder()
                 .uri(URI.create(tokenEndpoint))
@@ -712,6 +730,7 @@ public class SsoController {
         claims.put("email", user.getEmail());
         claims.put("firstName", user.getFirstName());
         claims.put("lastName", user.getLastName());
+        claims.put("sessionVersion", user.getSessionVersion());
         claims.put("sso", true);
         if (user.getRole() != null) {
             String r = user.getRole().getName();
@@ -736,10 +755,17 @@ public class SsoController {
         return result;
     }
 
-    private void setAuthCookie(HttpServletResponse response, String token, long maxAgeSec) {
+    private void setSessionCookies(HttpServletResponse response, String token,
+                                   RefreshSessionService.IssuedRefreshToken refresh) {
         ResponseCookie cookie = ResponseCookie.from("access_token", token)
-                .httpOnly(true).secure(authCookieSecure).sameSite("Lax").path("/api").maxAge(maxAgeSec).build();
+                .httpOnly(true).secure(authCookieSecure).sameSite("Lax").path("/api")
+                .maxAge(jwtExpirationMillis / 1000).build();
         response.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
+        long refreshMaxAge = Math.max(0, Duration.between(Instant.now(), refresh.expiresAt()).toSeconds());
+        ResponseCookie refreshCookie = ResponseCookie.from("refresh_token", refresh.token())
+                .httpOnly(true).secure(authCookieSecure).sameSite("Lax").path("/api/v1/auth")
+                .maxAge(refreshMaxAge).build();
+        response.addHeader(HttpHeaders.SET_COOKIE, refreshCookie.toString());
     }
 
     // ── Minimal JSON helpers (no Jackson dependency on this path) ────────────

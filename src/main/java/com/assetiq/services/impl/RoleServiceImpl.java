@@ -63,7 +63,7 @@ public class RoleServiceImpl extends TenantAwareService implements RoleService {
                 buildPermissions(role, roleDto.getPermissions(), grantAll));
 
         RoleDto saved = mapToDto(roleRepository.save(role));
-        // P4-B: structured audit event — async, best-effort
+        // Security administration fails closed if its structured audit cannot persist.
         rbacAuditService.recordRoleCreated(saved.getId(), saved.getName());
         return saved;
     }

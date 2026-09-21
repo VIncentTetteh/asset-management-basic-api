@@ -6,11 +6,15 @@ import com.assetiq.models.Asset;
 import com.assetiq.models.Organisation;
 import com.assetiq.models.User;
 import com.assetiq.enums.AssetStatus;
+import com.assetiq.enums.UserStatus;
 import com.assetiq.repositories.*;
 import com.assetiq.enums.NotificationType;
 import com.assetiq.services.DisposalService;
 import com.assetiq.services.NotificationService;
 import com.assetiq.services.TenantAwareService;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -49,9 +53,9 @@ public class DisposalServiceImpl extends TenantAwareService implements DisposalS
         Asset asset = assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(recordDto.getAssetId(), org)
                 .orElseThrow(() -> new IllegalArgumentException("Asset not found in your organisation"));
 
-        // Approver must belong to the tenant org
-        User approver = userRepository.findByIdAndOrganisation(recordDto.getApprovedById(), org)
-                .orElseThrow(() -> new IllegalArgumentException("Approver not found in your organisation"));
+        // The executing/approving identity is authoritative server-side. Never trust
+        // a client-supplied user or organisation identifier for a disposal action.
+        User approver = resolveCurrentUser(org);
 
         if (asset.getStatus() == AssetStatus.DISPOSED) {
             throw new IllegalArgumentException("Asset has already been disposed");
@@ -194,5 +198,18 @@ public class DisposalServiceImpl extends TenantAwareService implements DisposalS
         dto.setComplianceDocumentUrl(record.getComplianceDocumentUrl());
         dto.setOrganisationId(record.getOrganisation().getId());
         return dto;
+    }
+
+    private User resolveCurrentUser(Organisation org) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || auth.getName() == null) {
+            throw new AccessDeniedException("No authenticated user in security context");
+        }
+        User user = userRepository.findByEmailAndOrganisationId(auth.getName(), org.getId())
+                .orElseThrow(() -> new AccessDeniedException("Authenticated user not found in organisation"));
+        if (user.getDeletedAt() != null || user.getStatus() != UserStatus.ACTIVE || user.isLockedOut()) {
+            throw new AccessDeniedException("Authenticated user account is not active");
+        }
+        return user;
     }
 }

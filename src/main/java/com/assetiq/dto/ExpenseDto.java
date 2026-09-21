@@ -3,6 +3,7 @@ package com.assetiq.dto;
 import com.assetiq.enums.ExpenseCategory;
 import com.assetiq.enums.ExpenseStatus;
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -27,8 +28,11 @@ public class ExpenseDto {
     private BigDecimal amount;
     private String currency;
     private ExpenseCategory category;
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private UUID submittedById;
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private String submittedByName;
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private UUID approvedById;
 
     /** Actual date the expense was incurred (distinct from createdAt submission date). */
@@ -43,7 +47,10 @@ public class ExpenseDto {
     private UUID linkedAssetId;
     private UUID linkedBudgetId;
     private UUID departmentId;
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private UUID organisationId;
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private ExpenseStatus status;
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private Instant createdAt;
 }

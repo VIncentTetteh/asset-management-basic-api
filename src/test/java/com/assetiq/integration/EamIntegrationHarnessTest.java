@@ -11,6 +11,7 @@ import com.assetiq.repositories.AssetCustomFieldRepository;
 import com.assetiq.repositories.AssetRepository;
 import com.assetiq.repositories.AuditEventRepository;
 import com.assetiq.repositories.OrganisationRepository;
+import com.assetiq.services.FeatureFlagService;
 import org.springframework.jdbc.core.JdbcTemplate;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -26,6 +27,7 @@ import org.junit.jupiter.api.TestInstance;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
@@ -52,6 +54,7 @@ import javax.crypto.spec.SecretKeySpec;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+import static org.mockito.Mockito.when;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -84,6 +87,9 @@ class EamIntegrationHarnessTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @MockBean
+    private FeatureFlagService featureFlagService;
+
     private UUID organisationId;
     private String token;
 
@@ -106,6 +112,10 @@ class EamIntegrationHarnessTest {
 
     @BeforeEach
     void setupTenant() throws Exception {
+        // The feature service itself has focused persistence/evaluation tests.
+        // This workflow suite opts into the contained capability so it can
+        // exercise delivery, retry, signing and persistence through MockMvc.
+        when(featureFlagService.isEnabled("commercial.outbound-webhooks")).thenReturn(true);
         if (this.token != null && this.organisationId != null) {
             // Avoid re-registering tenants for every test method (rate limits + extra load).
             return;
@@ -140,7 +150,15 @@ class EamIntegrationHarnessTest {
                 TenantRegisterResponse.class
         );
         this.organisationId = resp.getOrganisationId();
-        this.token = resp.getToken();
+        MvcResult login = mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "email", adminEmail,
+                                "password", "Password123",
+                                "organisationId", organisationId))))
+                .andExpect(status().isOk())
+                .andReturn();
+        this.token = objectMapper.readTree(login.getResponse().getContentAsString()).path("token").asText();
     }
 
     private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder auth(
@@ -151,6 +169,20 @@ class EamIntegrationHarnessTest {
         return b.header("Authorization", "Bearer " + token)
                 .header("X-Client-ID", client)
                 .header("X-Forwarded-For", client);
+    }
+
+    @Test
+    void auditEvents_supportEmptyAndOptionalFiltersOnPostgres() throws Exception {
+        mockMvc.perform(auth(get("/api/v1/audit-events")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray());
+
+        mockMvc.perform(auth(get("/api/v1/audit-events")
+                        .param("method", "GET")
+                        .param("success", "true")
+                        .param("path", "/api/v1")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray());
     }
 
     @Test

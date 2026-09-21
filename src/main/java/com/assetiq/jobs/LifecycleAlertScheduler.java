@@ -1,15 +1,18 @@
 package com.assetiq.jobs;
 
-import com.assetiq.enums.AssetStatus;
-import com.assetiq.enums.LeaseStatus;
 import com.assetiq.enums.NotificationType;
 import com.assetiq.models.Asset;
-import com.assetiq.models.Budget;
-import com.assetiq.models.LeaseRecord;
-import com.assetiq.repositories.*;
+import com.assetiq.repositories.AssetRepository;
+import com.assetiq.repositories.BudgetRepository;
+import com.assetiq.repositories.LeaseRecordRepository;
 import com.assetiq.services.NotificationService;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -18,227 +21,177 @@ import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
-import java.util.List;
-import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
+import java.util.function.Consumer;
+import java.util.function.Function;
 
 /**
- * Comprehensive lifecycle alert scheduler.
+ * Bounded, idempotent lifecycle alert scheduler.
  *
- * <p>Runs once per day at 07:30 UTC and dispatches in-app notifications for:
- * <ul>
- *   <li>Warranty expiry (90 / 30 / 7 days ahead)</li>
- *   <li>End-of-useful-life assets</li>
- *   <li>Insurance policy expiry (60 / 30 / 7 days ahead)</li>
- *   <li>Lease expiry (60 / 30 / 7 days ahead)</li>
- *   <li>Budget overspend / threshold breaches (≥ 80% / 100%)</li>
- *   <li>Inactive assets (IN_STOCK with no scan in 180 days)</li>
- * </ul>
+ * <p>Every database scan is filtered and paged. Expiry notifications are sent
+ * only at the configured milestones, and stable deduplication keys make job
+ * retries safe across restarts.</p>
  */
 @Component
 public class LifecycleAlertScheduler {
 
     private static final Logger log = LoggerFactory.getLogger(LifecycleAlertScheduler.class);
-
-    // Warranty / insurance / lease thresholds (days)
     private static final int[] EXPIRY_THRESHOLDS = {90, 30, 7};
-
-    // Budget thresholds (percentage of total)
     private static final BigDecimal BUDGET_WARNING_PCT = new BigDecimal("80");
     private static final BigDecimal BUDGET_CRITICAL_PCT = new BigDecimal("100");
-
-    // Inactive asset threshold
     private static final int INACTIVE_DAYS = 180;
+    private static final int BATCH_SIZE = 250;
 
     private final AssetRepository assetRepository;
     private final LeaseRecordRepository leaseRecordRepository;
     private final BudgetRepository budgetRepository;
-    private final OrganisationRepository organisationRepository;
     private final NotificationService notificationService;
 
     public LifecycleAlertScheduler(AssetRepository assetRepository,
                                    LeaseRecordRepository leaseRecordRepository,
                                    BudgetRepository budgetRepository,
-                                   OrganisationRepository organisationRepository,
                                    NotificationService notificationService) {
         this.assetRepository = assetRepository;
         this.leaseRecordRepository = leaseRecordRepository;
         this.budgetRepository = budgetRepository;
-        this.organisationRepository = organisationRepository;
         this.notificationService = notificationService;
     }
 
     @Scheduled(cron = "0 30 7 * * *", zone = "UTC")
     @SchedulerLock(name = "lifecycleAlerts", lockAtMostFor = "PT30M", lockAtLeastFor = "PT10M")
     public void run() {
-        log.info("[LifecycleAlert] Starting lifecycle alert scan");
-
+        log.info("[LifecycleAlert] Starting bounded lifecycle alert scan");
         checkWarrantyExpiry();
         checkEndOfLife();
         checkInsuranceExpiry();
         checkLeaseExpiry();
         checkBudgetThresholds();
         checkInactiveAssets();
-
         log.info("[LifecycleAlert] Scan complete");
     }
 
-    // ── Warranty Expiry ───────────────────────────────────────────────────────
-
     private void checkWarrantyExpiry() {
         LocalDate today = LocalDate.now();
-
         for (int days : EXPIRY_THRESHOLDS) {
-            LocalDate cutoff = today.plusDays(days);
-            List<Asset> expiring = assetRepository.findWarrantyExpiringSoon(cutoff)
-                    .stream()
-                    .filter(a -> a.getWarrantyExpiryDate() != null
-                            && !a.getWarrantyExpiryDate().isBefore(today)
-                            && !a.getWarrantyExpiryDate().isAfter(cutoff))
-                    .toList();
-
-            for (Asset a : expiring) {
-                long daysLeft = ChronoUnit.DAYS.between(today, a.getWarrantyExpiryDate());
-                String title = "Warranty Expiring in " + daysLeft + " Day(s)";
-                String body = "Asset '" + a.getName() + "' (tag: " + a.getAssetTag()
-                        + ") warranty expires on " + a.getWarrantyExpiryDate() + ".";
-                notificationService.notifyOrgAdmins(a.getOrganisation(), NotificationType.WARRANTY_EXPIRY,
-                        title, body, a.getId(), "/api/v1/assets/" + a.getId());
-                log.info("[LifecycleAlert] Warranty expiry alert ({} days): asset {}", daysLeft, a.getId());
-            }
-        }
-    }
-
-    // ── End of Useful Life ────────────────────────────────────────────────────
-
-    private void checkEndOfLife() {
-        LocalDate today = LocalDate.now();
-
-        assetRepository.findActiveAssetsWithUsefulLife().stream()
-                .filter(a -> a.getPurchaseDate() != null && a.getUsefulLifeMonths() != null)
-                .filter(a -> {
-                    LocalDate eolDate = a.getPurchaseDate().plusMonths(a.getUsefulLifeMonths());
-                    return !eolDate.isAfter(today);
-                })
-                .filter(a -> a.getStatus() != AssetStatus.DISPOSED && a.getStatus() != AssetStatus.RETIRED)
-                .forEach(a -> {
-                    LocalDate eolDate = a.getPurchaseDate().plusMonths(a.getUsefulLifeMonths());
-                    String title = "Asset Reached End of Useful Life";
-                    String body = "Asset '" + a.getName() + "' (tag: " + a.getAssetTag()
-                            + ") reached its end of useful life on " + eolDate
-                            + ". Consider scheduling disposal or replacement.";
-                    notificationService.notifyOrgAdmins(a.getOrganisation(), NotificationType.END_OF_LIFE,
-                            title, body, a.getId(), "/api/v1/assets/" + a.getId());
-                    log.info("[LifecycleAlert] End-of-life alert: asset {}", a.getId());
-                });
-    }
-
-    // ── Insurance Expiry ──────────────────────────────────────────────────────
-
-    private void checkInsuranceExpiry() {
-        LocalDate today = LocalDate.now();
-
-        for (int days : EXPIRY_THRESHOLDS) {
-            LocalDate cutoff = today.plusDays(days);
-
-            assetRepository.findAllByDeletedAtIsNull().stream()
-                    .filter(a -> a.getInsurancePolicyExpiry() != null)
-                    .filter(a -> !a.getInsurancePolicyExpiry().isBefore(today)
-                            && !a.getInsurancePolicyExpiry().isAfter(cutoff))
-                    .forEach(a -> {
-                        long daysLeft = ChronoUnit.DAYS.between(today, a.getInsurancePolicyExpiry());
-                        String title = "Insurance Expiring in " + daysLeft + " Day(s)";
-                        String body = "Insurance for asset '" + a.getName() + "' (tag: " + a.getAssetTag()
-                                + ") expires on " + a.getInsurancePolicyExpiry() + ". Renew to avoid coverage gap.";
-                        notificationService.notifyOrgAdmins(a.getOrganisation(),
-                                NotificationType.INSURANCE_EXPIRY,
-                                title, body, a.getId(), "/api/v1/assets/" + a.getId());
-                        log.info("[LifecycleAlert] Insurance expiry alert ({} days): asset {}", daysLeft, a.getId());
+            LocalDate milestone = today.plusDays(days);
+            forEachPage(
+                    pageable -> assetRepository.findWarrantyExpiringOn(milestone, pageable),
+                    asset -> {
+                        String title = "Warranty Expiring in " + days + " Day(s)";
+                        String body = "Asset '" + asset.getName() + "' (tag: " + asset.getAssetTag()
+                                + ") warranty expires on " + milestone + ".";
+                        notifyOnce(asset, NotificationType.WARRANTY_EXPIRY, title, body,
+                                "warranty", milestone);
                     });
         }
     }
 
-    // ── Lease Expiry ──────────────────────────────────────────────────────────
-
-    private void checkLeaseExpiry() {
+    private void checkEndOfLife() {
         LocalDate today = LocalDate.now();
-
-        for (int days : EXPIRY_THRESHOLDS) {
-            LocalDate cutoff = today.plusDays(days);
-            List<LeaseRecord> expiring = leaseRecordRepository.findAll().stream()
-                    .filter(l -> l.getDeletedAt() == null
-                            && l.getStatus() == LeaseStatus.ACTIVE
-                            && l.getEndDate() != null
-                            && !l.getEndDate().isBefore(today)
-                            && !l.getEndDate().isAfter(cutoff))
-                    .toList();
-
-            for (LeaseRecord lr : expiring) {
-                long daysLeft = ChronoUnit.DAYS.between(today, lr.getEndDate());
-                String title = "Lease Expiring in " + daysLeft + " Day(s)";
-                String body = "Lease for asset '" + lr.getAsset().getName()
-                        + "' with lessor '" + lr.getLessor().getName()
-                        + "' expires on " + lr.getEndDate() + ".";
-                notificationService.notifyOrgAdmins(lr.getOrganisation(), NotificationType.LEASE_EXPIRY,
-                        title, body, lr.getId(), "/api/v1/leases/" + lr.getId());
-                log.info("[LifecycleAlert] Lease expiry alert ({} days): lease {}", daysLeft, lr.getId());
+        forEachPage(assetRepository::findActiveAssetsWithUsefulLife, asset -> {
+            LocalDate endOfLife = asset.getPurchaseDate().plusMonths(asset.getUsefulLifeMonths());
+            if (endOfLife.isAfter(today)) {
+                return;
             }
+            String title = "Asset Reached End of Useful Life";
+            String body = "Asset '" + asset.getName() + "' (tag: " + asset.getAssetTag()
+                    + ") reached its end of useful life on " + endOfLife
+                    + ". Consider scheduling disposal or replacement.";
+            notifyOnce(asset, NotificationType.END_OF_LIFE, title, body, "eol", endOfLife);
+        });
+    }
+
+    private void checkInsuranceExpiry() {
+        LocalDate today = LocalDate.now();
+        for (int days : EXPIRY_THRESHOLDS) {
+            LocalDate milestone = today.plusDays(days);
+            forEachPage(
+                    pageable -> assetRepository.findInsuranceExpiringOn(milestone, pageable),
+                    asset -> {
+                        String title = "Insurance Expiring in " + days + " Day(s)";
+                        String body = "Insurance for asset '" + asset.getName() + "' (tag: "
+                                + asset.getAssetTag() + ") expires on " + milestone
+                                + ". Renew to avoid a coverage gap.";
+                        notifyOnce(asset, NotificationType.INSURANCE_EXPIRY, title, body,
+                                "insurance", milestone);
+                    });
         }
     }
 
-    // ── Budget Thresholds ─────────────────────────────────────────────────────
-
-    private void checkBudgetThresholds() {
-        budgetRepository.findAll().stream()
-                .filter(b -> b.getDeletedAt() == null
-                        && b.getTotalAmount() != null
-                        && b.getTotalAmount().compareTo(BigDecimal.ZERO) > 0
-                        && b.getSpentAmount() != null)
-                .forEach(b -> {
-                    BigDecimal spentPct = b.getSpentAmount()
-                            .multiply(new BigDecimal("100"))
-                            .divide(b.getTotalAmount(), 2, RoundingMode.HALF_UP);
-
-                    if (spentPct.compareTo(BUDGET_CRITICAL_PCT) >= 0) {
-                        String title = "Budget Exhausted";
-                        String body = "Budget '" + b.getName() + "' has been fully spent ("
-                                + spentPct + "% used). No further expenses should be charged.";
-                        notificationService.notifyOrgAdmins(b.getOrganisation(),
-                                NotificationType.BUDGET_THRESHOLD,
-                                title, body, b.getId(), null);
-                        log.warn("[LifecycleAlert] Budget {} exhausted ({}%)", b.getId(), spentPct);
-                    } else if (spentPct.compareTo(BUDGET_WARNING_PCT) >= 0) {
-                        String title = "Budget Warning: " + spentPct + "% Used";
-                        String body = "Budget '" + b.getName() + "' is " + spentPct
-                                + "% spent. Consider reviewing upcoming expenses.";
-                        notificationService.notifyOrgAdmins(b.getOrganisation(),
-                                NotificationType.BUDGET_THRESHOLD,
-                                title, body, b.getId(), null);
-                        log.warn("[LifecycleAlert] Budget {} at {}%", b.getId(), spentPct);
-                    }
-                });
+    private void checkLeaseExpiry() {
+        LocalDate today = LocalDate.now();
+        for (int days : EXPIRY_THRESHOLDS) {
+            LocalDate milestone = today.plusDays(days);
+            forEachPage(
+                    pageable -> leaseRecordRepository.findActiveExpiringOn(milestone, pageable),
+                    lease -> {
+                        String assetName = lease.getAsset() == null ? "Unlinked asset" : lease.getAsset().getName();
+                        String lessorName = lease.getLessor() == null ? "Unknown lessor" : lease.getLessor().getName();
+                        String title = "Lease Expiring in " + days + " Day(s)";
+                        String body = "Lease for asset '" + assetName + "' with lessor '"
+                                + lessorName + "' expires on " + milestone + ".";
+                        notificationService.notifyOrgAdminsOnce(
+                                lease.getOrganisation(), NotificationType.LEASE_EXPIRY,
+                                title, body, lease.getId(), "/leases",
+                                "lifecycle:lease:" + lease.getId() + ":" + milestone);
+                    });
+        }
     }
 
-    // ── Inactive Assets ───────────────────────────────────────────────────────
+    private void checkBudgetThresholds() {
+        forEachPage(budgetRepository::findActiveWithSpend, budget -> {
+            BigDecimal spentPct = budget.getSpentAmount()
+                    .multiply(new BigDecimal("100"))
+                    .divide(budget.getTotalAmount(), 2, RoundingMode.HALF_UP);
+
+            if (spentPct.compareTo(BUDGET_CRITICAL_PCT) >= 0) {
+                notificationService.notifyOrgAdminsOnce(
+                        budget.getOrganisation(), NotificationType.BUDGET_THRESHOLD,
+                        "Budget Exhausted",
+                        "Budget '" + budget.getName() + "' has been fully spent ("
+                                + spentPct + "% used). No further expenses should be charged.",
+                        budget.getId(), "/budgets",
+                        "lifecycle:budget:" + budget.getId() + ":100");
+            } else if (spentPct.compareTo(BUDGET_WARNING_PCT) >= 0) {
+                notificationService.notifyOrgAdminsOnce(
+                        budget.getOrganisation(), NotificationType.BUDGET_THRESHOLD,
+                        "Budget Warning: " + spentPct + "% Used",
+                        "Budget '" + budget.getName() + "' is " + spentPct
+                                + "% spent. Consider reviewing upcoming expenses.",
+                        budget.getId(), "/budgets",
+                        "lifecycle:budget:" + budget.getId() + ":80");
+            }
+        });
+    }
 
     private void checkInactiveAssets() {
         Instant cutoff = Instant.now().minus(INACTIVE_DAYS, ChronoUnit.DAYS);
+        forEachPage(pageable -> assetRepository.findInactiveInStock(cutoff, pageable), asset -> {
+            String lastScan = asset.getLastScannedAt() == null ? "never" : asset.getLastScannedAt().toString();
+            String body = "Asset '" + asset.getName() + "' (tag: " + asset.getAssetTag()
+                    + ") has been inactive in stock for over " + INACTIVE_DAYS
+                    + " days (last scan: " + lastScan + ").";
+            notificationService.notifyOrgAdminsOnce(
+                    asset.getOrganisation(), NotificationType.SYSTEM,
+                    "Inactive Asset Detected", body, asset.getId(), "/assets/" + asset.getId(),
+                    "lifecycle:inactive:" + asset.getId() + ":" + lastScan);
+        });
+    }
 
-        assetRepository.findAllByDeletedAtIsNull().stream()
-                .filter(a -> a.getStatus() == AssetStatus.IN_STOCK)
-                .filter(a -> {
-                    // Consider inactive if it was never scanned or was last scanned before cutoff
-                    return a.getLastScannedAt() == null || a.getLastScannedAt().isBefore(cutoff);
-                })
-                .forEach(a -> {
-                    String lastScan = a.getLastScannedAt() == null ? "never"
-                            : a.getLastScannedAt().toString();
-                    String title = "Inactive Asset Detected";
-                    String body = "Asset '" + a.getName() + "' (tag: " + a.getAssetTag()
-                            + ") has been inactive in stock for over " + INACTIVE_DAYS
-                            + " days (last scan: " + lastScan + ").";
-                    notificationService.notifyOrgAdmins(a.getOrganisation(), NotificationType.SYSTEM,
-                            title, body, a.getId(), "/api/v1/assets/" + a.getId());
-                    log.info("[LifecycleAlert] Inactive asset: {}", a.getId());
-                });
+    private void notifyOnce(Asset asset, NotificationType type, String title,
+                            String body, String event, LocalDate milestone) {
+        notificationService.notifyOrgAdminsOnce(
+                asset.getOrganisation(), type, title, body, asset.getId(),
+                "/assets/" + asset.getId(),
+                "lifecycle:" + event + ":" + asset.getId() + ":" + milestone);
+    }
+
+    private <T> void forEachPage(Function<Pageable, Page<T>> query, Consumer<T> consumer) {
+        Pageable pageable = PageRequest.of(0, BATCH_SIZE, Sort.by("id").ascending());
+        Page<T> page;
+        do {
+            page = query.apply(pageable);
+            page.getContent().forEach(consumer);
+            pageable = page.nextPageable();
+        } while (page.hasNext());
     }
 }

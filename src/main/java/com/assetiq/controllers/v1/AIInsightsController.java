@@ -4,6 +4,7 @@ import com.assetiq.dto.AiChatRequest;
 import com.assetiq.dto.AiChatResponse;
 import com.assetiq.dto.PredictiveInsightDto;
 import com.assetiq.services.AiChatService;
+import com.assetiq.services.FeatureFlagGate;
 import com.assetiq.services.PredictiveMaintenanceService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -20,6 +21,7 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/v1/ai")
 @PreAuthorize("isAuthenticated()")
+@FeatureFlagGate("commercial.governed-ai")
 public class AIInsightsController {
 
     private final PredictiveMaintenanceService predictiveService;

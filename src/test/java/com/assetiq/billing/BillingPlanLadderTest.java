@@ -60,6 +60,19 @@ class BillingPlanLadderTest {
     }
 
     @Test
+    @DisplayName("paid tiers never reduce audit retention")
+    void auditRetentionIncreasesAcrossTheLadder() {
+        SubscriptionPlan freemium = plan("FREEMIUM");
+        SubscriptionPlan basic = plan("BASIC");
+        SubscriptionPlan business = plan("BUSINESS");
+        SubscriptionPlan enterprise = plan("ENTERPRISE");
+
+        assertThat(basic.getAuditRetentionDays()).isGreaterThan(freemium.getAuditRetentionDays());
+        assertThat(business.getAuditRetentionDays()).isGreaterThan(basic.getAuditRetentionDays());
+        assertThat(enterprise.getAuditRetentionDays()).isGreaterThan(business.getAuditRetentionDays());
+    }
+
+    @Test
     @DisplayName("the annual plan is cheaper than paying monthly for a year")
     void annualUndercutsTwelveMonths() {
         long monthly = plan("BUSINESS").getAmountMinor();

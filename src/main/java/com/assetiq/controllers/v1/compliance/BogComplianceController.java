@@ -6,6 +6,7 @@ import com.assetiq.models.compliance.ControlStatus;
 import com.assetiq.repositories.OrganisationRepository;
 import com.assetiq.repositories.compliance.BogControlRepository;
 import com.assetiq.services.BogComplianceReportService;
+import com.assetiq.services.FeatureFlagGate;
 import com.assetiq.services.TenantAwareService;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
@@ -41,7 +42,8 @@ import java.util.UUID;
  */
 @RestController
 @RequestMapping("/api/v1/compliance/bog")
-@PreAuthorize("isAuthenticated()")
+@PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','VIEW_COMPLIANCE')")
+@FeatureFlagGate("compliance.bog-2026")
 public class BogComplianceController extends TenantAwareService {
 
     private final BogComplianceReportService reportService;

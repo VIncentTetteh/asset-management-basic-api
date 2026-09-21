@@ -18,6 +18,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -74,11 +75,14 @@ public class PurchaseOrderServiceImpl extends TenantAwareService implements Purc
         po.setPoNumber(poDto.getPoNumber());
         po.setTotalAmount(poDto.getTotalAmount());
         po.setCurrency(currencyResolver.resolveOrDefault(poDto.getCurrency()));
-        po.setStatus(poDto.getStatus() != null ? poDto.getStatus() : POStatus.DRAFT);
+        // Approval state is server-owned. Creation can never mint an approved,
+        // delivered, rejected or cancelled order from a client-supplied status.
+        po.setStatus(POStatus.DRAFT);
         po.setRemarks(poDto.getRemarks());
         po.setOrganisation(org);
         po.setDepartment(department);
         po.setSupplier(supplier);
+        po.setRequestedBy(resolveCurrentUser(org));
 
         if (poDto.getLinkedBudgetId() != null) {
             budgetRepository.findByIdAndOrganisationAndDeletedAtIsNull(poDto.getLinkedBudgetId(), org)
@@ -90,7 +94,7 @@ public class PurchaseOrderServiceImpl extends TenantAwareService implements Purc
         notificationService.notifyOrgAdmins(org, NotificationType.PURCHASE_ORDER,
                 "Purchase Order Created",
                 "Purchase Order '" + saved.getPoNumber() + "' has been created for " + supplier.getName() + ".",
-                saved.getId(), "/api/v1/purchase-orders/" + saved.getId());
+                saved.getId(), "/purchase-orders");
         return mapToDto(saved);
     }
 
@@ -157,7 +161,7 @@ public class PurchaseOrderServiceImpl extends TenantAwareService implements Purc
 
         po.setPoNumber(poDto.getPoNumber());
         po.setTotalAmount(poDto.getTotalAmount());
-        po.setCurrency(poDto.getCurrency());
+        po.setCurrency(currencyResolver.resolveOrDefault(poDto.getCurrency()));
         po.setRemarks(poDto.getRemarks());
 
         return mapToDto(poRepository.save(po));
@@ -180,7 +184,7 @@ public class PurchaseOrderServiceImpl extends TenantAwareService implements Purc
             po.setTotalAmount(poDto.getTotalAmount());
         }
         if (poDto.getCurrency() != null) {
-            po.setCurrency(poDto.getCurrency());
+            po.setCurrency(currencyResolver.resolveOrDefault(poDto.getCurrency()));
         }
         if (poDto.getRemarks() != null) {
             po.setRemarks(poDto.getRemarks());
@@ -216,23 +220,25 @@ public class PurchaseOrderServiceImpl extends TenantAwareService implements Purc
             throw new IllegalStateException("Cannot approve a rejected purchase order. Create a new one instead.");
         }
 
-        // C4 fix: resolve approver from authenticated user
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth != null && auth.getName() != null) {
-            User approver = userRepository.findByEmailAndOrganisationId(auth.getName(), org.getId())
-                    .orElse(null);
-            if (approver != null) {
-                po.setApprovedBy(approver);
-                logger.info("Purchase Order {} approved by user {}", id, approver.getEmail());
-            }
+        User approver = resolveCurrentUser(org);
+        if (po.getRequestedBy() != null && po.getRequestedBy().getId().equals(approver.getId())) {
+            throw new IllegalStateException("A purchase order requester cannot approve their own order");
         }
+        po.setApprovedBy(approver);
+        logger.info("Purchase Order {} approved by user {}", id, approver.getEmail());
         po.setStatus(POStatus.APPROVED);
         po.setApprovedAt(Instant.now());
 
         // Auto-deduct from linked budget when PO is approved
         if (po.getLinkedBudget() != null && po.getTotalAmount() != null) {
             Budget budget = po.getLinkedBudget();
-            budget.setSpentAmount(budget.getSpentAmount().add(po.getTotalAmount()));
+            if (budget.getCurrency() == null || po.getCurrency() == null
+                    || !budget.getCurrency().equalsIgnoreCase(po.getCurrency())) {
+                throw new IllegalStateException("Purchase order and linked budget currencies must match");
+            }
+            java.math.BigDecimal alreadySpent = budget.getSpentAmount() == null
+                    ? java.math.BigDecimal.ZERO : budget.getSpentAmount();
+            budget.setSpentAmount(alreadySpent.add(po.getTotalAmount()));
             budgetRepository.save(budget);
             logger.info("Auto-deducted {} {} from budget {} for approved PO {}",
                     po.getTotalAmount(), po.getCurrency(), budget.getId(), po.getId());
@@ -242,7 +248,7 @@ public class PurchaseOrderServiceImpl extends TenantAwareService implements Purc
         notificationService.notifyOrgAdmins(org, NotificationType.APPROVAL,
                 "Purchase Order Approved",
                 "Purchase Order '" + approved.getPoNumber() + "' has been approved.",
-                approved.getId(), "/api/v1/purchase-orders/" + approved.getId());
+                approved.getId(), "/purchase-orders");
         return mapToDto(approved);
     }
 
@@ -261,13 +267,19 @@ public class PurchaseOrderServiceImpl extends TenantAwareService implements Purc
             return mapToDto(po);
         }
 
+        User rejector = resolveCurrentUser(org);
+        if (po.getRequestedBy() != null && po.getRequestedBy().getId().equals(rejector.getId())) {
+            throw new IllegalStateException("A purchase order requester cannot reject their own order");
+        }
         po.setStatus(POStatus.REJECTED);
-        logger.info("Purchase Order {} rejected", id);
+        po.setRejectedBy(rejector);
+        po.setRejectedAt(Instant.now());
+        logger.info("Purchase Order {} rejected by user {}", id, rejector.getEmail());
         PurchaseOrder rejected = poRepository.save(po);
         notificationService.notifyOrgAdmins(org, NotificationType.APPROVAL,
                 "Purchase Order Rejected",
                 "Purchase Order '" + rejected.getPoNumber() + "' has been rejected.",
-                rejected.getId(), "/api/v1/purchase-orders/" + rejected.getId());
+                rejected.getId(), "/purchase-orders");
         return mapToDto(rejected);
     }
 
@@ -291,6 +303,14 @@ public class PurchaseOrderServiceImpl extends TenantAwareService implements Purc
         if (po.getApprovedBy() != null) {
             dto.setApprovedById(po.getApprovedBy().getId());
         }
+        if (po.getRequestedBy() != null) {
+            dto.setRequestedById(po.getRequestedBy().getId());
+        }
+        if (po.getRejectedBy() != null) {
+            dto.setRejectedById(po.getRejectedBy().getId());
+        }
+        dto.setApprovedAt(po.getApprovedAt());
+        dto.setRejectedAt(po.getRejectedAt());
         dto.setRemarks(po.getRemarks());
         dto.setOrganisationId(po.getOrganisation().getId());
         dto.setDepartmentId(po.getDepartment().getId());
@@ -301,5 +321,15 @@ public class PurchaseOrderServiceImpl extends TenantAwareService implements Purc
         dto.setCreatedAt(po.getCreatedAt());
         dto.setUpdatedAt(po.getUpdatedAt());
         return dto;
+    }
+
+    private User resolveCurrentUser(Organisation org) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || auth.getName() == null || !auth.isAuthenticated()) {
+            throw new AccessDeniedException("Authenticated user is required");
+        }
+        return userRepository.findByEmailAndOrganisationId(auth.getName(), org.getId())
+                .orElseThrow(() -> new AccessDeniedException(
+                        "Authenticated user is not an active member of this organisation"));
     }
 }

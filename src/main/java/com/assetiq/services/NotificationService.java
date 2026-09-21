@@ -40,4 +40,9 @@ public interface NotificationService {
      */
     void notifyOrgAdmins(Organisation org, NotificationType type,
                          String title, String message, UUID entityId, String actionUrl);
+
+    /** Deliver a retryable event at most once per administrator and key. */
+    void notifyOrgAdminsOnce(Organisation org, NotificationType type,
+                             String title, String message, UUID entityId,
+                             String actionUrl, String deduplicationKey);
 }

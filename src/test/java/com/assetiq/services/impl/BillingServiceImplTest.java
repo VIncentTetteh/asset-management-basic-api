@@ -16,6 +16,7 @@ import com.assetiq.repositories.OrganisationRepository;
 import com.assetiq.repositories.OrganisationSubscriptionRepository;
 import com.assetiq.repositories.SubscriptionPlanRepository;
 import com.assetiq.repositories.UserRepository;
+import com.assetiq.security.SecretCryptoService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
@@ -65,6 +66,7 @@ class BillingServiceImplTest {
     @Mock private UserRepository userRepository;
     @Mock private AssetRepository assetRepository;
     @Mock private PaystackGatewayService paystackGatewayService;
+    @Mock private SecretCryptoService secretCryptoService;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -81,7 +83,8 @@ class BillingServiceImplTest {
                 userRepository,
                 assetRepository,
                 paystackGatewayService,
-                objectMapper);
+                objectMapper,
+                secretCryptoService);
         ReflectionTestUtils.setField(billingService, "paystackChannelsCsv", "card,mobile_money,bank,ussd");
         ReflectionTestUtils.setField(billingService, "defaultCallbackUrl", "https://portal.assetiq.io/callback");
 

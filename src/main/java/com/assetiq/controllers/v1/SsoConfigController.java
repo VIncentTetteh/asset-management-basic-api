@@ -2,6 +2,7 @@ package com.assetiq.controllers.v1;
 
 import com.assetiq.dto.OrgSsoConfigDto;
 import com.assetiq.services.SsoConfigService;
+import com.assetiq.security.annotation.RequireFreshMfa;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -52,6 +53,7 @@ public class SsoConfigController {
      */
     @Operation(summary = "Configure OAuth2 SSO for an organisation")
     @PutMapping("/oauth2")
+    @RequireFreshMfa
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_SECURITY_SETTINGS','MANAGE_ORGANIZATION_SETTINGS')")
     public ResponseEntity<OrgSsoConfigDto> saveOAuth2Config(
             @PathVariable UUID orgId,
@@ -66,6 +68,7 @@ public class SsoConfigController {
      */
     @Operation(summary = "Configure SAML SSO for an organisation")
     @PutMapping("/saml")
+    @RequireFreshMfa
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_SECURITY_SETTINGS','MANAGE_ORGANIZATION_SETTINGS')")
     public ResponseEntity<OrgSsoConfigDto> saveSamlConfig(
             @PathVariable UUID orgId,
@@ -80,6 +83,7 @@ public class SsoConfigController {
      */
     @Operation(summary = "Enable or disable SSO for an organisation")
     @PatchMapping("/toggle")
+    @RequireFreshMfa
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_SECURITY_SETTINGS','MANAGE_ORGANIZATION_SETTINGS')")
     public ResponseEntity<OrgSsoConfigDto> toggleSso(
             @PathVariable UUID orgId,

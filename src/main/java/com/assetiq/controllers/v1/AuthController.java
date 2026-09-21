@@ -11,12 +11,17 @@ import com.assetiq.security.JwtUtil;
 import com.assetiq.security.PermissionCacheService;
 import com.assetiq.services.EmailService;
 import com.assetiq.services.EmailVerificationService;
+import com.assetiq.services.RefreshSessionService;
+import com.assetiq.services.SessionRevocationService;
 import com.assetiq.enums.UserStatus;
+import com.assetiq.multitenancy.TenantContext;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.annotation.*;
 
 import jakarta.servlet.http.HttpServletResponse;
@@ -61,6 +66,8 @@ public class AuthController {
     private final EmailService emailService;
     private final PermissionCacheService permissionCacheService;
     private final EmailVerificationService emailVerificationService;
+    private final RefreshSessionService refreshSessionService;
+    private final SessionRevocationService sessionRevocationService;
 
     @Value("${app.jwt.expiration:86400000}")
     private long jwtExpirationMillis;
@@ -85,7 +92,9 @@ public class AuthController {
             RoleRepository roleRepository, PasswordEncoder passwordEncoder, JwtUtil jwtUtil,
             JwtBlacklist jwtBlacklist, EmailService emailService,
             PermissionCacheService permissionCacheService,
-            EmailVerificationService emailVerificationService) {
+            EmailVerificationService emailVerificationService,
+            RefreshSessionService refreshSessionService,
+            SessionRevocationService sessionRevocationService) {
         this.userRepository = userRepository;
         this.organisationRepository = organisationRepository;
         this.roleRepository = roleRepository;
@@ -95,12 +104,15 @@ public class AuthController {
         this.emailService = emailService;
         this.permissionCacheService = permissionCacheService;
         this.emailVerificationService = emailVerificationService;
+        this.refreshSessionService = refreshSessionService;
+        this.sessionRevocationService = sessionRevocationService;
     }
 
     /**
      * Register a new user
      */
     @PostMapping("/register")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_USERS')")
     public ResponseEntity<?> register(@Valid @RequestBody RegisterRequest request) {
         // Validate input
         if (!request.getEmail().matches("^[A-Za-z0-9+_.-]+@(.+)$")) {
@@ -111,25 +123,33 @@ public class AuthController {
             return ResponseEntity.badRequest().body(Map.of("error", "Password must be at least 8 characters"));
         }
 
-        // Check if email already exists in organization
+        UUID tenantId = TenantContext.getOrganisationId();
+        if (tenantId == null) {
+            throw new AccessDeniedException("An authenticated organisation context is required");
+        }
+        if (request.getOrganisationId() != null && !tenantId.equals(request.getOrganisationId())) {
+            throw new AccessDeniedException("Users can only be created in the authenticated organisation");
+        }
+
+        // Check if email already exists in the authenticated organisation
         var existingUser = userRepository.findByEmailAndOrganisationId(
-                request.getEmail(), request.getOrganisationId());
+                request.getEmail(), tenantId);
         if (existingUser.isPresent()) {
             return ResponseEntity.badRequest().body(Map.of("error", "Email already registered in this organization"));
         }
 
         // Validate organization exists
-        var organisation = organisationRepository.findById(request.getOrganisationId())
+        var organisation = organisationRepository.findById(tenantId)
                 .orElseThrow(() -> new IllegalArgumentException("Organization not found"));
 
         // Get default role or specified role
         Role role = null;
         if (request.getRoleId() != null) {
-            role = roleRepository.findById(request.getRoleId())
-                    .orElseThrow(() -> new IllegalArgumentException("Role not found"));
+            role = roleRepository.findByIdAndOrganisationAndDeletedAtIsNull(request.getRoleId(), organisation)
+                    .orElseThrow(() -> new IllegalArgumentException("Role not found in your organisation"));
         } else {
             // Try to find a default USER role
-            role = roleRepository.findByNameAndOrganisationId("USER", request.getOrganisationId())
+            role = roleRepository.findByNameAndOrganisationId("USER", tenantId)
                     .orElse(null);
         }
 
@@ -141,18 +161,27 @@ public class AuthController {
         newUser.setPhone(request.getPhone());
         newUser.setPasswordHash(passwordEncoder.encode(request.getPassword()));
         newUser.setJobTitle(request.getJobTitle());
+        newUser.setEmployeeId("USR-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(Locale.ROOT));
         newUser.setRole(role);
         newUser.setStatus(UserStatus.ACTIVE);
         newUser.setOrganisation(organisation);
 
         User savedUser = userRepository.save(newUser);
+        if (requireEmailVerification) {
+            emailVerificationService.sendVerificationEmail(savedUser);
+        } else {
+            savedUser.setEmailVerifiedAt(Instant.now());
+            userRepository.save(savedUser);
+        }
 
         return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
                 "id", savedUser.getId(),
                 "email", savedUser.getEmail(),
                 "firstName", savedUser.getFirstName(),
                 "lastName", savedUser.getLastName(),
-                "message", "User registered successfully"));
+                "message", requireEmailVerification
+                        ? "User created. They must verify their email before signing in."
+                        : "User registered successfully"));
     }
 
     /**
@@ -244,6 +273,7 @@ public class AuthController {
             Map<String, Object> challengeClaims = new HashMap<>();
             challengeClaims.put("mfaChallenge", true);
             challengeClaims.put("userId", user.getId().toString());
+            challengeClaims.put("sessionVersion", user.getSessionVersion());
             if (user.getOrganisation() != null) {
                 challengeClaims.put("organisationId", user.getOrganisation().getId().toString());
             }
@@ -270,6 +300,7 @@ public class AuthController {
         claims.put("email", user.getEmail());
         claims.put("firstName", user.getFirstName());
         claims.put("lastName", user.getLastName());
+        claims.put("sessionVersion", user.getSessionVersion());
 
         if (user.getRole() != null) {
             String roleName = user.getRole().getName();
@@ -286,16 +317,20 @@ public class AuthController {
         }
 
         String token = jwtUtil.generateToken(user.getEmail(), claims, jwtExpirationMillis);
+        RefreshSessionService.IssuedRefreshToken refresh = refreshSessionService.issue(user);
 
         // F-1: set the JWT as an HttpOnly cookie so JavaScript cannot read it.
         // The Authorization: Bearer header path is preserved for API clients and
         // the desktop app — both paths are accepted by JwtAuthenticationFilter.
         setAuthCookie(servletResponse, token, jwtExpirationMillis / 1000);
+        setRefreshCookie(servletResponse, refresh.token(), refresh.expiresAt());
 
         return ResponseEntity.ok(Map.of(
                 // token is still returned in the body for clients that need it
                 // (e.g. desktop app, Postman). The browser will use the cookie.
                 "token", token,
+                "refreshToken", refresh.token(),
+                "tokenType", "Bearer",
                 "user", Map.of(
                         "id", user.getId(),
                         "email", user.getEmail(),
@@ -310,48 +345,27 @@ public class AuthController {
      */
     @PostMapping("/refresh")
     public ResponseEntity<?> refreshToken(
-            @RequestHeader(value = "Authorization", required = false) String authHeader,
-            @CookieValue(value = AUTH_COOKIE_NAME, required = false) String authCookie,
+            @RequestHeader(value = "X-Refresh-Token", required = false) String refreshHeader,
+            @CookieValue(value = REFRESH_COOKIE_NAME, required = false) String refreshCookie,
             HttpServletResponse servletResponse) {
-        // Accept token from Bearer header OR from the HttpOnly cookie (F-1)
-        String token = resolveToken(authHeader, authCookie);
-        if (token == null) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("error", "Missing or invalid authorization"));
-        }
-        io.jsonwebtoken.Claims parsedClaims;
+        String rawRefreshToken = firstNonBlank(refreshHeader, refreshCookie);
+        final RefreshSessionService.RotatedRefreshToken rotated;
         try {
-            parsedClaims = jwtUtil.parseToken(token);
-        } catch (Exception e) {
+            rotated = refreshSessionService.rotate(rawRefreshToken);
+        } catch (org.springframework.security.access.AccessDeniedException rejected) {
+            clearAuthCookies(servletResponse);
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("error", "Invalid or expired token"));
-        }
-        String email = parsedClaims.getSubject();
-        String orgIdStr = parsedClaims.get("organisationId", String.class);
-
-        Optional<User> userOpt;
-        if (orgIdStr != null && !orgIdStr.isBlank()) {
-            try {
-                userOpt = userRepository.findByEmailAndOrganisationId(
-                        email, UUID.fromString(orgIdStr));
-            } catch (IllegalArgumentException e) {
-                userOpt = Optional.empty();
-            }
-        } else {
-            userOpt = userRepository.findByEmail(email);
-        }
-        if (userOpt.isEmpty()) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("error", "User not found"));
+                    .body(Map.of("error", rejected.getMessage()));
         }
 
-        User user = userOpt.get();
+        User user = rotated.user();
 
         // Build new token — permissions intentionally excluded (B-6)
         Map<String, Object> claims = new HashMap<>();
         claims.put("email", user.getEmail());
         claims.put("firstName", user.getFirstName());
         claims.put("lastName", user.getLastName());
+        claims.put("sessionVersion", user.getSessionVersion());
 
         if (user.getRole() != null) {
             String roleName = user.getRole().getName();
@@ -364,13 +378,16 @@ public class AuthController {
             claims.put("departmentId", user.getDepartment().getId().toString());
         }
 
-        String newToken = jwtUtil.generateToken(email, claims, jwtExpirationMillis);
+        String newToken = jwtUtil.generateToken(user.getEmail(), claims, jwtExpirationMillis);
 
         // F-1: refresh also re-issues the HttpOnly cookie
         setAuthCookie(servletResponse, newToken, jwtExpirationMillis / 1000);
+        setRefreshCookie(servletResponse, rotated.token(), rotated.expiresAt());
 
         return ResponseEntity.ok(Map.of(
                 "token", newToken,
+                "refreshToken", rotated.token(),
+                "tokenType", "Bearer",
                 "expiresIn", jwtExpirationMillis / 1000));
     }
 
@@ -487,6 +504,7 @@ public class AuthController {
         user.setResetPasswordTokenExpiry(null);
         user.setResetPasswordTokenUsed(true);
         userRepository.save(user);
+        sessionRevocationService.revokeAll(user);
 
         log.info("[AUTH] Password reset successful for user {}", user.getId());
         return ResponseEntity.ok(Map.of("message", "Password has been successfully reset"));
@@ -570,6 +588,8 @@ public class AuthController {
     public ResponseEntity<?> logout(
             @RequestHeader(value = "Authorization", required = false) String authHeader,
             @CookieValue(value = AUTH_COOKIE_NAME, required = false) String authCookie,
+            @RequestHeader(value = "X-Refresh-Token", required = false) String refreshHeader,
+            @CookieValue(value = REFRESH_COOKIE_NAME, required = false) String refreshCookie,
             HttpServletResponse servletResponse) {
         // F-1: resolve token from Bearer header OR cookie, then blacklist it
         String token = resolveToken(authHeader, authCookie);
@@ -584,9 +604,28 @@ public class AuthController {
                 // Token may already be expired or invalid — still clear the cookie
             }
         }
+        refreshSessionService.revoke(firstNonBlank(refreshHeader, refreshCookie));
         // F-1: clear the HttpOnly cookie regardless of header presence
-        clearAuthCookie(servletResponse);
+        clearAuthCookies(servletResponse);
         return ResponseEntity.ok(Map.of("message", "Logout successful."));
+    }
+
+    /** Revoke every device/session for the authenticated account. */
+    @PostMapping("/logout-all")
+    public ResponseEntity<?> logoutAll(
+            org.springframework.security.core.Authentication authentication,
+            HttpServletResponse servletResponse) {
+        UUID organisationId = TenantContext.getOrganisationId();
+        if (authentication == null || organisationId == null) {
+            clearAuthCookies(servletResponse);
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", "Authenticated account is required"));
+        }
+        User user = userRepository.findByEmailAndOrganisationId(authentication.getName(), organisationId)
+                .orElseThrow(() -> new AccessDeniedException("Authenticated account no longer exists"));
+        sessionRevocationService.revokeAll(user);
+        clearAuthCookies(servletResponse);
+        return ResponseEntity.ok(Map.of("message", "All sessions have been revoked."));
     }
 
     // Request/Response classes
@@ -745,6 +784,7 @@ public class AuthController {
 
     /** Name of the HttpOnly cookie that carries the JWT for browser clients. */
     static final String AUTH_COOKIE_NAME = "access_token";
+    static final String REFRESH_COOKIE_NAME = "refresh_token";
 
     /**
      * Sets the JWT as an HttpOnly, Secure, SameSite=Strict cookie.
@@ -762,8 +802,20 @@ public class AuthController {
         response.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
     }
 
+    private void setRefreshCookie(HttpServletResponse response, String token, Instant expiresAt) {
+        long maxAge = Math.max(0, Duration.between(Instant.now(), expiresAt).toSeconds());
+        ResponseCookie cookie = ResponseCookie.from(REFRESH_COOKIE_NAME, token)
+                .httpOnly(true)
+                .secure(authCookieSecure)
+                .sameSite("Strict")
+                .path("/api/v1/auth")
+                .maxAge(maxAge)
+                .build();
+        response.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
+    }
+
     /** Clears the auth cookie on logout. */
-    private void clearAuthCookie(HttpServletResponse response) {
+    private void clearAuthCookies(HttpServletResponse response) {
         ResponseCookie clear = ResponseCookie.from(AUTH_COOKIE_NAME, "")
                 .httpOnly(true)
                 .secure(authCookieSecure)
@@ -772,6 +824,20 @@ public class AuthController {
                 .maxAge(0)
                 .build();
         response.addHeader(HttpHeaders.SET_COOKIE, clear.toString());
+        ResponseCookie clearRefresh = ResponseCookie.from(REFRESH_COOKIE_NAME, "")
+                .httpOnly(true)
+                .secure(authCookieSecure)
+                .sameSite("Strict")
+                .path("/api/v1/auth")
+                .maxAge(0)
+                .build();
+        response.addHeader(HttpHeaders.SET_COOKIE, clearRefresh.toString());
+    }
+
+    private static String firstNonBlank(String first, String second) {
+        if (first != null && !first.isBlank()) return first.trim();
+        if (second != null && !second.isBlank()) return second.trim();
+        return null;
     }
 
     /**

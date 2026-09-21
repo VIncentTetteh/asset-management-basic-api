@@ -37,13 +37,6 @@ public class SoftwareLicenseServiceImpl extends TenantAwareService implements So
     public SoftwareLicenseDto create(SoftwareLicenseDto dto) {
         Organisation org = requireTenantOrg();
 
-        if (dto.getLicenseKey() != null && !dto.getLicenseKey().isBlank()) {
-            if (licenseRepository.existsByLicenseKeyAndOrganisationIdAndDeletedAtIsNull(
-                    dto.getLicenseKey(), org.getId())) {
-                throw new IllegalArgumentException("A license with this key already exists in your organisation");
-            }
-        }
-
         SoftwareLicense license = new SoftwareLicense();
         applyDto(license, dto, org);
         license.setOrganisation(org);
@@ -96,7 +89,6 @@ public class SoftwareLicenseServiceImpl extends TenantAwareService implements So
         SoftwareLicense license = findOrThrow(id, org);
         if (dto.getName() != null) license.setName(dto.getName());
         if (dto.getVendor() != null) license.setVendor(dto.getVendor());
-        if (dto.getLicenseKey() != null) license.setLicenseKey(dto.getLicenseKey());
         if (dto.getProductName() != null) license.setProductName(dto.getProductName());
         if (dto.getVersion() != null) license.setVersion(dto.getVersion());
         if (dto.getLicenseType() != null) license.setLicenseType(dto.getLicenseType());
@@ -172,7 +164,6 @@ public class SoftwareLicenseServiceImpl extends TenantAwareService implements So
     private void applyDto(SoftwareLicense license, SoftwareLicenseDto dto, Organisation org) {
         license.setName(dto.getName());
         license.setVendor(dto.getVendor());
-        license.setLicenseKey(dto.getLicenseKey());
         license.setProductName(dto.getProductName());
         license.setVersion(dto.getVersion());
         license.setLicenseType(dto.getLicenseType());
@@ -199,7 +190,6 @@ public class SoftwareLicenseServiceImpl extends TenantAwareService implements So
         dto.setId(l.getId());
         dto.setName(l.getName());
         dto.setVendor(l.getVendor());
-        dto.setLicenseKey(l.getLicenseKey());
         dto.setProductName(l.getProductName());
         dto.setVersion(l.getVersion());
         dto.setLicenseType(l.getLicenseType());

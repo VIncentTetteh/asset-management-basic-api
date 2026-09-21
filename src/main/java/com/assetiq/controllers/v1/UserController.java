@@ -2,6 +2,7 @@ package com.assetiq.controllers.v1;
 
 import com.assetiq.dto.UserDto;
 import com.assetiq.services.UserService;
+import com.assetiq.security.annotation.RequireFreshMfa;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -94,12 +95,14 @@ public class UserController {
     }
 
     @PutMapping("/{id}/deactivate")
+    @RequireFreshMfa
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_USERS','EDIT_USER','DELETE_USER')")
     public ResponseEntity<UserDto> deactivateUser(@PathVariable UUID id) {
         return ResponseEntity.ok(userService.deactivateUser(id));
     }
 
     @PutMapping("/{id}/role")
+    @RequireFreshMfa
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_USERS','EDIT_USER','DELETE_USER')")
     public ResponseEntity<UserDto> assignRole(@PathVariable UUID id,
             @RequestParam UUID roleId) {

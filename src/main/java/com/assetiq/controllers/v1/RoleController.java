@@ -3,6 +3,7 @@ package com.assetiq.controllers.v1;
 import com.assetiq.dto.RoleDto;
 import com.assetiq.enums.Permission;
 import com.assetiq.security.annotation.EnforceTenant;
+import com.assetiq.security.annotation.RequireFreshMfa;
 import com.assetiq.services.RoleService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -27,6 +28,7 @@ public class RoleController {
     }
 
     @PostMapping
+    @RequireFreshMfa
     @PreAuthorize("hasAnyAuthority('SYSTEM_ADMIN','MANAGE_ROLES','MANAGE_ORGANIZATION_SETTINGS')")
     @EnforceTenant
     public ResponseEntity<RoleDto> createRole(@Valid @RequestBody RoleDto roleDto,
@@ -49,6 +51,7 @@ public class RoleController {
     }
 
     @PutMapping("/{id}")
+    @RequireFreshMfa
     @PreAuthorize("hasAnyAuthority('SYSTEM_ADMIN','MANAGE_ROLES','MANAGE_ORGANIZATION_SETTINGS')")
     public ResponseEntity<RoleDto> updateRole(@PathVariable UUID id,
                                               @Valid @RequestBody RoleDto roleDto) {
@@ -56,6 +59,7 @@ public class RoleController {
     }
 
     @PatchMapping("/{id}")
+    @RequireFreshMfa
     @PreAuthorize("hasAnyAuthority('SYSTEM_ADMIN','MANAGE_ROLES','MANAGE_ORGANIZATION_SETTINGS')")
     public ResponseEntity<RoleDto> patchRole(@PathVariable UUID id,
                                              @RequestBody RoleDto roleDto) {
@@ -63,6 +67,7 @@ public class RoleController {
     }
 
     @DeleteMapping("/{id}")
+    @RequireFreshMfa
     @PreAuthorize("hasAnyAuthority('SYSTEM_ADMIN','MANAGE_ROLES','MANAGE_ORGANIZATION_SETTINGS')")
     public ResponseEntity<Void> deleteRole(@PathVariable UUID id) {
         roleService.deleteRole(id);

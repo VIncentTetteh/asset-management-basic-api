@@ -18,6 +18,7 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
+import com.assetiq.security.SpreadsheetUploadPolicy;
 
 import java.io.IOException;
 import java.io.ByteArrayInputStream;
@@ -134,10 +135,10 @@ public class AssetImportServiceImpl extends com.assetiq.services.TenantAwareServ
 
         String filename = file.getOriginalFilename();
         String contentType = file.getContentType();
-        if (filename == null || (!filename.endsWith(".xlsx") && !filename.endsWith(".xls"))) {
+        if (filename == null || !filename.toLowerCase(java.util.Locale.ROOT).endsWith(".xlsx")) {
             AssetImportResultDto result = new AssetImportResultDto();
             result.setDryRun(dryRun);
-            result.getErrors().add(new RowError(0, "Only .xlsx and .xls files are supported"));
+            result.getErrors().add(new RowError(0, "Only macro-free .xlsx files are supported"));
             return result;
         }
 
@@ -173,10 +174,13 @@ public class AssetImportServiceImpl extends com.assetiq.services.TenantAwareServ
             result.getErrors().add(new RowError(0, "Uploaded file is empty"));
             return result;
         }
-        if (filename == null || (!filename.endsWith(".xlsx") && !filename.endsWith(".xls"))) {
-            result.getErrors().add(new RowError(0, "Only .xlsx and .xls files are supported"));
+        try {
+            SpreadsheetUploadPolicy.validate(filename, fileBytes);
+        } catch (IllegalArgumentException rejected) {
+            result.getErrors().add(new RowError(0, rejected.getMessage()));
             return result;
         }
+        contentType = SpreadsheetUploadPolicy.XLSX_CONTENT_TYPE;
 
         Organisation org;
         try {
@@ -189,7 +193,7 @@ public class AssetImportServiceImpl extends com.assetiq.services.TenantAwareServ
         LookupCache cache = buildCache(org);
 
         if (storeArtifact) {
-            String cleanName = filename.replaceAll("[^A-Za-z0-9._-]", "_");
+            String cleanName = SpreadsheetUploadPolicy.sanitiseFilename(filename);
             String key = importPrefix + "/" + org.getId() + "/" + UUID.randomUUID() + "/" + cleanName;
             storageService.store(key, fileBytes, contentType, cleanName, Map.of(
                     "organisationId", org.getId().toString(),

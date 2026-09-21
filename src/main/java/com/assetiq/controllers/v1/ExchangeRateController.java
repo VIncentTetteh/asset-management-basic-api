@@ -24,13 +24,13 @@ public class ExchangeRateController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','MANAGE_EXCHANGE_RATES','VIEW_BUDGETS')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','MANAGE_EXCHANGE_RATES')")
     public ResponseEntity<ExchangeRateDto> create(@Valid @RequestBody ExchangeRateDto dto) {
         return ResponseEntity.ok(exchangeRateService.create(dto));
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','ROLE_USER')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','ROLE_USER','MANAGE_EXCHANGE_RATES')")
     public ResponseEntity<ExchangeRateDto> getById(@PathVariable UUID id) {
         try {
             return ResponseEntity.ok(exchangeRateService.getById(id));
@@ -40,7 +40,7 @@ public class ExchangeRateController {
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','ROLE_USER')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','ROLE_USER','MANAGE_EXCHANGE_RATES')")
     public ResponseEntity<List<ExchangeRateDto>> listAll() {
         return ResponseEntity.ok(exchangeRateService.listAll());
     }
@@ -50,7 +50,7 @@ public class ExchangeRateController {
      * Example: GET /api/v1/exchange-rates/convert?amount=100&from=USD&to=EUR&asOf=2024-01-15
      */
     @GetMapping("/convert")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','ROLE_USER')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','ROLE_USER','MANAGE_EXCHANGE_RATES')")
     public ResponseEntity<BigDecimal> convert(
             @RequestParam BigDecimal amount,
             @RequestParam String from,
@@ -61,7 +61,7 @@ public class ExchangeRateController {
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','MANAGE_EXCHANGE_RATES','VIEW_BUDGETS')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','MANAGE_EXCHANGE_RATES')")
     public ResponseEntity<Void> delete(@PathVariable UUID id) {
         exchangeRateService.delete(id);
         return ResponseEntity.noContent().build();

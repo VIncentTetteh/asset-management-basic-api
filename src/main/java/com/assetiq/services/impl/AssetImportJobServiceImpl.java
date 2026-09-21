@@ -21,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.multipart.MultipartFile;
+import com.assetiq.security.SpreadsheetUploadPolicy;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -68,25 +69,23 @@ public class AssetImportJobServiceImpl extends com.assetiq.services.TenantAwareS
         }
 
         String filename = file.getOriginalFilename();
-        if (filename == null || (!filename.endsWith(".xlsx") && !filename.endsWith(".xls"))) {
-            throw new IllegalArgumentException("Only .xlsx and .xls files are supported");
-        }
-
         byte[] fileBytes;
         try {
             fileBytes = file.getBytes();
         } catch (Exception e) {
             throw new IllegalArgumentException("Failed to read uploaded file");
         }
+        SpreadsheetUploadPolicy.validate(filename, fileBytes);
 
-        String cleanName = filename.replaceAll("[^A-Za-z0-9._-]", "_");
+        String cleanName = SpreadsheetUploadPolicy.sanitiseFilename(filename);
+        String contentType = SpreadsheetUploadPolicy.XLSX_CONTENT_TYPE;
 
         String operation = "import-jobs/assets";
         String trimmedIdempotencyKey = idempotencyKey == null ? null : idempotencyKey.trim();
         String requestHash = null;
 
         if (trimmedIdempotencyKey != null && !trimmedIdempotencyKey.isBlank()) {
-            requestHash = computeRequestHash(fileBytes, dryRun, cleanName, file.getContentType());
+            requestHash = computeRequestHash(fileBytes, dryRun, cleanName, contentType);
             var existing = idempotencyRecordRepository.findByOrganisationAndOperationAndIdempotencyKeyAndDeletedAtIsNull(
                     org, operation, trimmedIdempotencyKey
             );
@@ -101,7 +100,7 @@ public class AssetImportJobServiceImpl extends com.assetiq.services.TenantAwareS
         UUID jobId = UUID.randomUUID();
         String key = importPrefix + "/jobs/" + org.getId() + "/" + jobId + "/" + cleanName;
 
-        storageService.store(key, fileBytes, file.getContentType(), cleanName, Map.of(
+        storageService.store(key, fileBytes, contentType, cleanName, Map.of(
                 "organisationId", org.getId().toString(),
                 "jobId", jobId.toString(),
                 "originalFilename", cleanName
@@ -114,7 +113,7 @@ public class AssetImportJobServiceImpl extends com.assetiq.services.TenantAwareS
         job.setStatus(ImportJobStatus.QUEUED);
         job.setStorageKey(key);
         job.setFilename(cleanName);
-        job.setContentType(file.getContentType());
+        job.setContentType(contentType);
         jobRepository.save(job);
 
         // Persist idempotency mapping (key -> job) so retries return the same job.
@@ -224,4 +223,3 @@ public class AssetImportJobServiceImpl extends com.assetiq.services.TenantAwareS
 
     // Worker moved to AssetImportJobProcessor (so @Async works via Spring proxy)
 }
-

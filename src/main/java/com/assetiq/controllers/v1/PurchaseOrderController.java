@@ -7,6 +7,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
+import com.assetiq.security.annotation.RequireFreshMfa;
 
 import jakarta.validation.Valid;
 import java.util.Set;
@@ -72,6 +73,7 @@ public class PurchaseOrderController {
     }
 
     @PostMapping("/{id}/approve")
+    @RequireFreshMfa
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_EXPENSES','APPROVE_PROCUREMENT','APPROVE_REQUESTS')")
     // C4 fix: approver resolved from SecurityContext in service — no approvedById
     // param
@@ -81,6 +83,7 @@ public class PurchaseOrderController {
     }
 
     @PostMapping("/{id}/reject")
+    @RequireFreshMfa
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_EXPENSES','APPROVE_PROCUREMENT','REJECT_REQUESTS')")
     public ResponseEntity<PurchaseOrderDto> rejectPurchaseOrder(@PathVariable UUID id) {
         PurchaseOrderDto rejectedPo = poService.rejectPurchaseOrder(id);

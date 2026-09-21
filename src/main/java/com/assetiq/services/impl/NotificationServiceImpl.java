@@ -181,10 +181,34 @@ public class NotificationServiceImpl implements NotificationService {
     @Override
     public void notifyOrgAdmins(Organisation org, NotificationType type,
                                 String title, String message, UUID entityId, String actionUrl) {
+        notifyOrgAdminsInternal(org, type, title, message, entityId, actionUrl, null);
+    }
+
+    @Override
+    public void notifyOrgAdminsOnce(Organisation org, NotificationType type,
+                                    String title, String message, UUID entityId,
+                                    String actionUrl, String deduplicationKey) {
+        if (deduplicationKey == null || deduplicationKey.isBlank()) {
+            throw new IllegalArgumentException("deduplicationKey is required");
+        }
+        if (deduplicationKey.length() > 255) {
+            throw new IllegalArgumentException("deduplicationKey must be at most 255 characters");
+        }
+        notifyOrgAdminsInternal(org, type, title, message, entityId, actionUrl, deduplicationKey);
+    }
+
+    private void notifyOrgAdminsInternal(Organisation org, NotificationType type,
+                                         String title, String message, UUID entityId,
+                                         String actionUrl, String deduplicationKey) {
         // Notify both ORG_ADMIN and ADMIN users within the organisation
         List<User> admins = userRepository
                 .findByOrganisationAndRole_NameContainingIgnoreCaseAndDeletedAtIsNull(org, "ADMIN");
         for (User admin : admins) {
+            if (deduplicationKey != null
+                    && notificationRepository.existsByUserAndOrganisationAndDeduplicationKey(
+                            admin, org, deduplicationKey)) {
+                continue;
+            }
             Notification n = new Notification();
             n.setUser(admin);
             n.setOrganisation(org);
@@ -193,6 +217,7 @@ public class NotificationServiceImpl implements NotificationService {
             n.setMessage(message);
             n.setEntityId(entityId);
             n.setActionUrl(actionUrl);
+            n.setDeduplicationKey(deduplicationKey);
             notificationRepository.save(n);
 
             if (admin.getEmail() != null && isEmailEnabled(admin, type)) {

@@ -8,6 +8,7 @@ import com.assetiq.models.WebhookDelivery;
 import com.assetiq.repositories.OrganisationRepository;
 import com.assetiq.repositories.WebhookDeliveryRepository;
 import com.assetiq.repositories.WebhookRepository;
+import com.assetiq.security.SecretCryptoService;
 import com.assetiq.services.TenantAwareService;
 import com.assetiq.services.WebhookService;
 import org.slf4j.Logger;
@@ -20,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.net.URI;
+import java.net.InetAddress;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -45,6 +47,7 @@ public class WebhookServiceImpl extends TenantAwareService implements WebhookSer
     private final WebhookDeliveryRepository deliveryRepository;
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
+    private final SecretCryptoService secretCryptoService;
 
     @org.springframework.beans.factory.annotation.Value("${app.webhook.delivery.max-attempts:3}")
     private int maxDeliveryAttempts;
@@ -52,10 +55,17 @@ public class WebhookServiceImpl extends TenantAwareService implements WebhookSer
     @org.springframework.beans.factory.annotation.Value("${app.webhook.delivery.backoff-millis:250}")
     private long baseBackoffMillis;
 
+    @org.springframework.beans.factory.annotation.Value("${app.webhook.allow-local-test-endpoints:false}")
+    private boolean allowLocalTestEndpoints;
+
+    @org.springframework.beans.factory.annotation.Value("${spring.profiles.active:}")
+    private String activeProfiles;
+
     public WebhookServiceImpl(OrganisationRepository organisationRepository,
                               WebhookRepository webhookRepository,
                               WebhookDeliveryRepository deliveryRepository,
-                              ObjectMapper objectMapper) {
+                              ObjectMapper objectMapper,
+                              SecretCryptoService secretCryptoService) {
         super(organisationRepository);
         this.webhookRepository = webhookRepository;
         this.deliveryRepository = deliveryRepository;
@@ -63,22 +73,27 @@ public class WebhookServiceImpl extends TenantAwareService implements WebhookSer
                 .connectTimeout(Duration.ofSeconds(5))
                 .build();
         this.objectMapper = objectMapper;
+        this.secretCryptoService = secretCryptoService;
     }
 
     @Override
     public WebhookDto create(WebhookDto dto) {
         Organisation org = requireTenantOrg();
+        assertSafeEndpoint(dto.getUrl());
         Webhook wh = new Webhook();
         wh.setName(dto.getName());
         wh.setUrl(dto.getUrl());
         wh.setEvents(dto.getEvents() != null ? String.join(",", dto.getEvents()) : "");
         wh.setActive(dto.isActive());
-        wh.setSecret(dto.getSecret() != null ? dto.getSecret() : UUID.randomUUID().toString().replace("-", ""));
+        String rawSecret = dto.getSecret() != null
+                ? dto.getSecret()
+                : UUID.randomUUID().toString().replace("-", "");
+        wh.setSecret(secretCryptoService.encrypt(rawSecret));
         wh.setOrganisation(org);
         Webhook saved = webhookRepository.save(wh);
         WebhookDto result = toDto(saved);
         // Return secret only on creation
-        result.setSecret(saved.getSecret());
+        result.setSecret(rawSecret);
         return result;
     }
 
@@ -103,7 +118,10 @@ public class WebhookServiceImpl extends TenantAwareService implements WebhookSer
         Organisation org = requireTenantOrg();
         Webhook wh = requireWebhook(id, org);
         if (dto.getName() != null) wh.setName(dto.getName());
-        if (dto.getUrl() != null) wh.setUrl(dto.getUrl());
+        if (dto.getUrl() != null) {
+            assertSafeEndpoint(dto.getUrl());
+            wh.setUrl(dto.getUrl());
+        }
         if (dto.getEvents() != null) wh.setEvents(String.join(",", dto.getEvents()));
         wh.setActive(dto.isActive());
         return toDto(webhookRepository.save(wh));
@@ -119,14 +137,16 @@ public class WebhookServiceImpl extends TenantAwareService implements WebhookSer
 
     @Override
     @Async
-    public void dispatch(String eventName, Map<String, Object> data) {
-        // Dispatched async — no TenantContext here; operate globally
-        // For each org's active webhooks that subscribe to this event
-        webhookRepository.findAll().stream()
-                .filter(wh -> wh.getDeletedAt() == null
-                        && wh.isActive()
-                        && subscribesTo(wh, eventName))
-                .forEach(wh -> fireAndRecord(wh, eventName, buildPayload(eventName, data)));
+    public void dispatch(UUID organisationId, String eventName, Map<String, Object> data) {
+        if (organisationId == null) {
+            throw new IllegalArgumentException("organisationId is required for webhook dispatch");
+        }
+        Organisation org = organisationRepository.findByIdAndDeletedAtIsNull(organisationId)
+                .orElseThrow(() -> new IllegalArgumentException("Organisation not found"));
+        String payload = buildPayload(organisationId, eventName, data);
+        webhookRepository.findByOrganisationAndActiveTrueAndDeletedAtIsNull(org).stream()
+                .filter(wh -> subscribesTo(wh, eventName))
+                .forEach(wh -> fireAndRecord(wh, eventName, payload));
     }
 
     @Override
@@ -134,7 +154,7 @@ public class WebhookServiceImpl extends TenantAwareService implements WebhookSer
         Organisation org = requireTenantOrg();
         Webhook wh = requireWebhook(webhookId, org);
 
-        String payload = buildPayload("test.webhook", Map.of("test", true, "webhookId", webhookId.toString()));
+        String payload = buildPayload(org.getId(), "test.webhook", Map.of("test", true, "webhookId", webhookId.toString()));
         WebhookDelivery delivery = fireAndRecord(wh, "test.webhook", payload);
         return toDeliveryDto(delivery);
     }
@@ -172,9 +192,12 @@ public class WebhookServiceImpl extends TenantAwareService implements WebhookSer
         return Arrays.asList(wh.getEvents().split(",")).contains(eventName);
     }
 
-    private String buildPayload(String eventName, Map<String, Object> data) {
+    private String buildPayload(UUID organisationId, String eventName, Map<String, Object> data) {
         Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("version", "1");
+        payload.put("eventId", UUID.randomUUID().toString());
         payload.put("event", eventName);
+        payload.put("organisationId", organisationId.toString());
         payload.put("timestamp", Instant.now().toString());
         payload.put("data", data == null ? Map.of() : data);
         try {
@@ -204,6 +227,7 @@ public class WebhookServiceImpl extends TenantAwareService implements WebhookSer
             attempts = attempt;
             long start = System.currentTimeMillis();
             try {
+                assertSafeEndpoint(wh.getUrl());
                 HttpRequest.Builder req = HttpRequest.newBuilder()
                         .uri(URI.create(wh.getUrl()))
                         .timeout(Duration.ofSeconds(10))
@@ -212,7 +236,7 @@ public class WebhookServiceImpl extends TenantAwareService implements WebhookSer
                         .header("X-Webhook-Id", wh.getId().toString())
                         .POST(HttpRequest.BodyPublishers.ofString(payload, StandardCharsets.UTF_8));
 
-                String signature = computeWebhookSignature(payload, wh.getSecret());
+                String signature = computeWebhookSignature(payload, secretCryptoService.decrypt(wh.getSecret()));
                 if (signature != null && !signature.isBlank()) {
                     req.header("X-Webhook-Signature", signature);
                 }
@@ -293,6 +317,38 @@ public class WebhookServiceImpl extends TenantAwareService implements WebhookSer
             hex[i * 2 + 1] = digits[v & 0x0F];
         }
         return new String(hex);
+    }
+
+    private void assertSafeEndpoint(String value) {
+        try {
+            URI uri = URI.create(value);
+            boolean testOnlyLocalEndpoint = allowLocalTestEndpoints
+                    && Arrays.stream(activeProfiles.split(","))
+                            .map(String::trim)
+                            .anyMatch("test"::equalsIgnoreCase)
+                    && "http".equalsIgnoreCase(uri.getScheme())
+                    && uri.getHost() != null
+                    && ("localhost".equalsIgnoreCase(uri.getHost())
+                            || InetAddress.getByName(uri.getHost()).isLoopbackAddress());
+            if (testOnlyLocalEndpoint) {
+                return;
+            }
+            if (!"https".equalsIgnoreCase(uri.getScheme()) || uri.getHost() == null
+                    || uri.getUserInfo() != null || uri.getPort() == 0) {
+                throw new IllegalArgumentException("Webhook URL must be a valid HTTPS endpoint");
+            }
+            for (InetAddress address : InetAddress.getAllByName(uri.getHost())) {
+                if (address.isAnyLocalAddress() || address.isLoopbackAddress()
+                        || address.isLinkLocalAddress() || address.isSiteLocalAddress()
+                        || address.isMulticastAddress()) {
+                    throw new IllegalArgumentException("Webhook URL resolves to a private or local address");
+                }
+            }
+        } catch (IllegalArgumentException rejected) {
+            throw rejected;
+        } catch (Exception invalid) {
+            throw new IllegalArgumentException("Webhook URL could not be safely resolved", invalid);
+        }
     }
 
     // ── DTOs ──────────────────────────────────────────────────────────────────

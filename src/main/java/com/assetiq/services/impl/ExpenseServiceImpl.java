@@ -6,6 +6,7 @@ import com.assetiq.dto.PagedResponseDto;
 import com.assetiq.enums.BudgetStatus;
 import com.assetiq.enums.ExpenseStatus;
 import com.assetiq.enums.NotificationType;
+import com.assetiq.enums.UserStatus;
 import com.assetiq.models.*;
 import com.assetiq.repositories.*;
 import com.assetiq.services.CurrencyResolver;
@@ -17,6 +18,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -135,6 +137,9 @@ public class ExpenseServiceImpl extends TenantAwareService implements ExpenseSer
         }
 
         User approver = resolveCurrentUser(org);
+        if (expense.getSubmittedBy() != null && expense.getSubmittedBy().getId().equals(approver.getId())) {
+            throw new AccessDeniedException("Expenses require approval by a different user");
+        }
         expense.setApprovedBy(approver);
         expense.setApprovedAt(Instant.now());
         expense.setStatus(ExpenseStatus.APPROVED);
@@ -313,9 +318,13 @@ public class ExpenseServiceImpl extends TenantAwareService implements ExpenseSer
     private User resolveCurrentUser(Organisation org) {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         if (auth != null && auth.getName() != null) {
-            return userRepository.findByEmailAndOrganisationId(auth.getName(), org.getId())
+            User user = userRepository.findByEmailAndOrganisationId(auth.getName(), org.getId())
                     .orElseThrow(() -> new org.springframework.security.access.AccessDeniedException(
                             "Authenticated user not found in organisation"));
+            if (user.getDeletedAt() != null || user.getStatus() != UserStatus.ACTIVE || user.isLockedOut()) {
+                throw new AccessDeniedException("Authenticated user account is not active");
+            }
+            return user;
         }
         throw new org.springframework.security.access.AccessDeniedException(
                 "No authenticated user in security context");
