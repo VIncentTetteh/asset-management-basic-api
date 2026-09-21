@@ -51,6 +51,19 @@ public class RbacAuditService {
         this.userRepository         = userRepository;
     }
 
+    // ── Organisation settings events ──────────────────────────────────────────
+
+    /**
+     * Records a change of the organisation's base (reporting) currency. Written in
+     * the caller's transaction so the change cannot commit without its evidence.
+     */
+    @Transactional
+    public void recordBaseCurrencyChanged(UUID organisationId, String oldCurrency, String newCurrency) {
+        persist(AuditEventType.BASE_CURRENCY_CHANGED,
+                organisationId.toString(), oldCurrency, newCurrency,
+                "PUT", "/api/v1/currency/settings");
+    }
+
     // ── Role events ───────────────────────────────────────────────────────────
 
     /**
