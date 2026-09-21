@@ -4,6 +4,9 @@ import com.assetiq.enums.*;
 import com.assetiq.models.*;
 import com.assetiq.repositories.*;
 import com.assetiq.services.DashboardService;
+import com.assetiq.services.money.CurrencyConversion;
+import com.assetiq.services.money.MoneyAccumulator;
+import com.assetiq.services.money.MoneyAggregator;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -15,6 +18,12 @@ import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.stream.Collectors;
 
+/**
+ * Dashboard aggregates. Every money figure is converted into the tenant base
+ * currency through {@link MoneyAggregator}; responses carry {@code currency},
+ * {@code complete} and {@code missingRates} so callers can tell when an amount
+ * was excluded for lack of an exchange rate.
+ */
 @Service
 @Transactional(readOnly = true)
 public class DashboardServiceImpl implements DashboardService {
@@ -25,19 +34,22 @@ public class DashboardServiceImpl implements DashboardService {
     private final UserRepository userRepository;
     private final WebhookRepository webhookRepository;
     private final SoftwareLicenseRepository softwareLicenseRepository;
+    private final MoneyAggregator moneyAggregator;
 
     public DashboardServiceImpl(AssetRepository assetRepository,
                                 PurchaseOrderRepository purchaseOrderRepository,
                                 MaintenanceRecordRepository maintenanceRecordRepository,
                                 UserRepository userRepository,
                                 WebhookRepository webhookRepository,
-                                SoftwareLicenseRepository softwareLicenseRepository) {
+                                SoftwareLicenseRepository softwareLicenseRepository,
+                                MoneyAggregator moneyAggregator) {
         this.assetRepository = assetRepository;
         this.purchaseOrderRepository = purchaseOrderRepository;
         this.maintenanceRecordRepository = maintenanceRecordRepository;
         this.userRepository = userRepository;
         this.webhookRepository = webhookRepository;
         this.softwareLicenseRepository = softwareLicenseRepository;
+        this.moneyAggregator = moneyAggregator;
     }
 
     @Override
@@ -67,8 +79,9 @@ public class DashboardServiceImpl implements DashboardService {
                           || a.getStatus() == AssetStatus.RETIRED)
                 .count();
 
-        // Total asset value (sum of purchase costs)
-        BigDecimal totalAssetValue = sumValue(assets);
+        // Total asset value (sum of purchase costs, converted to the base currency)
+        CurrencyConversion fx = moneyAggregator.begin(org);
+        BigDecimal totalAssetValue = sumValue(fx, assets).amount();
 
         // Purchase order counts
         long pendingApprovals = pos.stream()
@@ -111,7 +124,8 @@ public class DashboardServiceImpl implements DashboardService {
         summary.put("activeAssets", activeAssets);
         summary.put("inMaintenanceAssets", inMaintenanceAssets);
         summary.put("disposedAssets", disposedAssets);
-        summary.put("totalAssetValue", totalAssetValue.setScale(2, RoundingMode.HALF_UP));
+        summary.put("totalAssetValue", totalAssetValue);
+        fx.putMetadata(summary);
 
         // Organisation / user metrics
         summary.put("totalOrganisations", 1);
@@ -143,6 +157,7 @@ public class DashboardServiceImpl implements DashboardService {
     @Override
     public Map<String, Object> getAssetsByStatus(Organisation org) {
         List<Asset> assets = assetRepository.findAllByOrganisationAndDeletedAtIsNull(org);
+        CurrencyConversion fx = moneyAggregator.begin(org);
         Map<AssetStatus, List<Asset>> grouped = assets.stream()
                 .filter(a -> a.getStatus() != null)
                 .collect(Collectors.groupingBy(Asset::getStatus));
@@ -152,7 +167,7 @@ public class DashboardServiceImpl implements DashboardService {
             m.put("status", e.getKey().name());
             m.put("name", e.getKey().name());
             m.put("count", e.getValue().size());
-            m.put("value", sumValue(e.getValue()).setScale(2, RoundingMode.HALF_UP));
+            m.put("value", sumValue(fx, e.getValue()).amount());
             m.put("percentage", assets.isEmpty() ? 0 : Math.round((double) e.getValue().size() / assets.size() * 10000.0) / 100.0);
             return m;
         }).collect(Collectors.toList());
@@ -166,13 +181,15 @@ public class DashboardServiceImpl implements DashboardService {
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("data", data);
         response.put("total", assets.size());
-        response.put("totalValue", sumValue(assets).setScale(2, RoundingMode.HALF_UP));
+        response.put("totalValue", sumValue(fx, assets).amount());
+        fx.putMetadata(response);
         return response;
     }
 
     @Override
     public Map<String, Object> getAssetsByDepartment(Organisation org) {
         List<Asset> assets = assetRepository.findAllByOrganisationAndDeletedAtIsNull(org);
+        CurrencyConversion fx = moneyAggregator.begin(org);
         Map<String, List<Asset>> grouped = assets.stream()
                 .collect(Collectors.groupingBy(a ->
                         a.getDepartment() != null ? a.getDepartment().getName() : "Unassigned"));
@@ -181,7 +198,7 @@ public class DashboardServiceImpl implements DashboardService {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("departmentName", e.getKey());
             m.put("count", e.getValue().size());
-            m.put("value", sumValue(e.getValue()).setScale(2, RoundingMode.HALF_UP));
+            m.put("value", sumValue(fx, e.getValue()).amount());
             m.put("percentage", assets.isEmpty() ? 0 : Math.round((double) e.getValue().size() / assets.size() * 10000.0) / 100.0);
             return m;
         }).collect(Collectors.toList());
@@ -195,7 +212,8 @@ public class DashboardServiceImpl implements DashboardService {
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("data", data);
         response.put("total", assets.size());
-        response.put("totalValue", sumValue(assets).setScale(2, RoundingMode.HALF_UP));
+        response.put("totalValue", sumValue(fx, assets).amount());
+        fx.putMetadata(response);
         return response;
     }
 
@@ -251,29 +269,31 @@ public class DashboardServiceImpl implements DashboardService {
     @Override
     public Map<String, Object> getDepreciationSummary(Organisation org) {
         List<Asset> assets = assetRepository.findAllByOrganisationAndDeletedAtIsNull(org);
-        BigDecimal totalAssetValue = sumValue(assets);
-        BigDecimal netBookValue = assets.stream()
-                .map(this::calculateDynamicNBV)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal totalDepreciation = totalAssetValue.subtract(netBookValue);
+        CurrencyConversion fx = moneyAggregator.begin(org);
+        // Each per-asset figure is computed in the asset's own currency and only
+        // then converted, so an asset lacking a rate drops out of every total alike.
+        MoneyAccumulator totalAssetValue = sumValue(fx, assets);
+        MoneyAccumulator netBookValue = fx.newAccumulator();
+        assets.forEach(a -> netBookValue.add(calculateDynamicNBV(a), a.getCurrency()));
+        BigDecimal totalDepreciation = totalAssetValue.rawSum().subtract(netBookValue.rawSum());
         if (totalDepreciation.signum() < 0) totalDepreciation = BigDecimal.ZERO;
 
         Map<String, Object> response = new LinkedHashMap<>();
-        response.put("totalAssetValue", totalAssetValue.setScale(2, RoundingMode.HALF_UP));
-        response.put("totalDepreciation", totalDepreciation.setScale(2, RoundingMode.HALF_UP));
-        response.put("netBookValue", netBookValue.setScale(2, RoundingMode.HALF_UP));
-        response.put("monthlyDepreciation", calculateMonthlyDepreciation(assets).setScale(2, RoundingMode.HALF_UP));
+        response.put("totalAssetValue", totalAssetValue.amount());
+        response.put("totalDepreciation", CurrencyConversion.round(totalDepreciation));
+        response.put("netBookValue", netBookValue.amount());
+        response.put("monthlyDepreciation", calculateMonthlyDepreciation(fx, assets).amount());
         response.put("assetsFullyDepreciated", assets.stream().filter(this::isFullyDepreciated).count());
+        fx.putMetadata(response);
 
         return response;
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
-    private BigDecimal sumValue(List<Asset> assets) {
-        return assets.stream()
-                .map(a -> a.getPurchaseCost() != null ? a.getPurchaseCost() : BigDecimal.ZERO)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
+    /** Sum of purchase costs in the base currency; assets without a rate are excluded. */
+    private MoneyAccumulator sumValue(CurrencyConversion fx, List<Asset> assets) {
+        return fx.sum(assets, Asset::getPurchaseCost, Asset::getCurrency);
     }
 
     private BigDecimal calculateDynamicNBV(Asset asset) {
@@ -291,16 +311,19 @@ public class DashboardServiceImpl implements DashboardService {
         return asset.getPurchaseCost().subtract(accumulatedDep).max(residual);
     }
 
-    private BigDecimal calculateMonthlyDepreciation(List<Asset> assets) {
-        return assets.stream()
+    private MoneyAccumulator calculateMonthlyDepreciation(CurrencyConversion fx, List<Asset> assets) {
+        MoneyAccumulator acc = fx.newAccumulator();
+        assets.stream()
                 .filter(a -> a.getPurchaseCost() != null && a.getUsefulLifeMonths() != null && a.getUsefulLifeMonths() > 0)
-                .map(a -> {
+                .forEach(a -> {
                     BigDecimal dep = a.getPurchaseCost().subtract(
                             a.getResidualValue() != null ? a.getResidualValue() : BigDecimal.ZERO);
-                    if (dep.signum() <= 0) return BigDecimal.ZERO;
-                    return dep.divide(BigDecimal.valueOf(a.getUsefulLifeMonths()), 2, RoundingMode.HALF_UP);
-                })
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
+                    if (dep.signum() > 0) {
+                        acc.add(dep.divide(BigDecimal.valueOf(a.getUsefulLifeMonths()), 2, RoundingMode.HALF_UP),
+                                a.getCurrency());
+                    }
+                });
+        return acc;
     }
 
     private boolean isFullyDepreciated(Asset a) {

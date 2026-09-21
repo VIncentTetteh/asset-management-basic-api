@@ -9,6 +9,12 @@ import java.util.List;
 
 @Data @Builder @NoArgsConstructor @AllArgsConstructor
 public class BudgetSummaryDto {
+    /** ISO-4217 code every amount in this summary is expressed in (tenant base currency). */
+    private String currency;
+    /** False when at least one budget was excluded because no exchange rate exists. */
+    private boolean complete;
+    /** Sorted {@code "FROM->TO"} currency pairs that lacked an exchange rate. */
+    private List<String> missingRates;
     private BigDecimal totalAllocated;
     private BigDecimal totalSpent;
     private BigDecimal totalCommitted;

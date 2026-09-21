@@ -10,6 +10,9 @@ import com.assetiq.repositories.compliance.ComplianceControlRepository;
 import com.assetiq.repositories.compliance.RiskRegisterRepository;
 import com.assetiq.services.AiChatService;
 import com.assetiq.services.TenantAwareService;
+import com.assetiq.services.money.CurrencyConversion;
+import com.assetiq.services.money.MoneyAccumulator;
+import com.assetiq.services.money.MoneyAggregator;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -79,6 +82,7 @@ public class AiChatServiceImpl extends TenantAwareService implements AiChatServi
     private final LocationRepository          locationRepo;
     private final ComplianceControlRepository complianceRepo;
     private final RiskRegisterRepository      riskRepo;
+    private final MoneyAggregator             moneyAggregator;
 
     private final HttpClient   httpClient;
     private final ObjectMapper objectMapper;
@@ -123,7 +127,8 @@ public class AiChatServiceImpl extends TenantAwareService implements AiChatServi
             LocationRepository locationRepo,
             ComplianceControlRepository complianceRepo,
             RiskRegisterRepository riskRepo,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            MoneyAggregator moneyAggregator) {
         super(organisationRepository);
         this.assetRepo       = assetRepo;
         this.maintenanceRepo = maintenanceRepo;
@@ -135,6 +140,7 @@ public class AiChatServiceImpl extends TenantAwareService implements AiChatServi
         this.complianceRepo  = complianceRepo;
         this.riskRepo        = riskRepo;
         this.objectMapper    = objectMapper;
+        this.moneyAggregator = moneyAggregator;
         this.httpClient      = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
                 .build();
@@ -202,12 +208,17 @@ public class AiChatServiceImpl extends TenantAwareService implements AiChatServi
             List<RiskRegister> risks) {
 
         String today = LocalDate.now().toString();
+        // All totals are converted into the tenant base currency; amounts lacking a
+        // rate are excluded and called out so the model never reports a mixed sum.
+        CurrencyConversion fx = moneyAggregator.begin(org);
 
         // ── Asset aggregates ─────────────────────────────────────────────────
         Map<String, Long> byStatus    = groupByName(assets,    a -> a.getStatus()    != null ? a.getStatus().name()    : "UNKNOWN");
         Map<String, Long> byCondition = groupByName(assets,    a -> a.getCondition() != null ? a.getCondition().name() : "UNKNOWN");
-        BigDecimal totalPurchaseCost  = sumDecimal(assets,     a -> a.getPurchaseCost());
-        BigDecimal totalBookValue     = sumDecimal(assets,     a -> a.getCurrentBookValue() != null ? a.getCurrentBookValue() : a.getPurchaseCost());
+        MoneyAccumulator totalPurchaseCost = fx.sum(assets, Asset::getPurchaseCost, Asset::getCurrency);
+        MoneyAccumulator totalBookValue    = fx.sum(assets,
+                a -> a.getCurrentBookValue() != null ? a.getCurrentBookValue() : a.getPurchaseCost(),
+                Asset::getCurrency);
 
         List<Map<String, Object>> assetSample = assets.stream().limit(MAX_ASSET_SAMPLE).map(a -> {
             Map<String, Object> m = new LinkedHashMap<>();
@@ -218,6 +229,7 @@ public class AiChatServiceImpl extends TenantAwareService implements AiChatServi
             m.put("manufacturer",     a.getManufacturer());
             m.put("model",            a.getModel());
             m.put("purchaseCost",     a.getPurchaseCost());
+            m.put("currency",         a.getCurrency());
             m.put("currentBookValue", a.getCurrentBookValue());
             m.put("warrantyExpiry",   a.getWarrantyExpiryDate());
             m.put("department",       a.getDepartment()    != null ? a.getDepartment().getName() : null);
@@ -239,7 +251,9 @@ public class AiChatServiceImpl extends TenantAwareService implements AiChatServi
                 m.getStatus() != null && !m.getStatus().name().equals("COMPLETED") && !m.getStatus().name().equals("CANCELLED")).count();
         long upcomingCount  = maintenance.stream().filter(m ->
                 m.getScheduledDate() != null && !m.getScheduledDate().isBefore(now) && m.getScheduledDate().isBefore(in7Days)).count();
-        BigDecimal totalMaintCost = sumDecimal(maintenance, m -> m.getCost());
+        // Maintenance records have no currency column: cost is in the asset's currency.
+        MoneyAccumulator totalMaintCost = fx.sum(maintenance, MaintenanceRecord::getCost,
+                m -> m.getAsset() != null ? m.getAsset().getCurrency() : null);
 
         List<Map<String, Object>> maintSample = maintenance.stream().limit(MAX_MAINT_SAMPLE).map(m -> {
             Map<String, Object> r = new LinkedHashMap<>();
@@ -268,11 +282,11 @@ public class AiChatServiceImpl extends TenantAwareService implements AiChatServi
         }).collect(Collectors.toList());
 
         // ── Budgets ───────────────────────────────────────────────────────────
-        BigDecimal totalAllocated = sumDecimal(budgets, b -> b.getTotalAmount());
-        BigDecimal totalSpent     = sumDecimal(budgets, b -> b.getSpentAmount());
-        int utilizationPct = totalAllocated.compareTo(BigDecimal.ZERO) > 0
-                ? totalSpent.multiply(BigDecimal.valueOf(100))
-                        .divide(totalAllocated, 0, java.math.RoundingMode.HALF_UP).intValue()
+        MoneyAccumulator totalAllocated = fx.sum(budgets, Budget::getTotalAmount, Budget::getCurrency);
+        MoneyAccumulator totalSpent     = fx.sum(budgets, Budget::getSpentAmount, Budget::getCurrency);
+        int utilizationPct = totalAllocated.rawSum().compareTo(BigDecimal.ZERO) > 0
+                ? totalSpent.rawSum().multiply(BigDecimal.valueOf(100))
+                        .divide(totalAllocated.rawSum(), 0, java.math.RoundingMode.HALF_UP).intValue()
                 : 0;
 
         List<Map<String, Object>> budgetSummary = budgets.stream().map(b -> {
@@ -392,6 +406,7 @@ Do NOT fabricate numbers or asset details.
 
 ━━━ ORGANISATION ━━━
 Name: %s | Industry: %s | Country: %s
+Reporting currency: %s (all totals below are converted into it)%s
 
 ━━━ ASSETS (%d total) ━━━
 By Status: %s
@@ -435,15 +450,17 @@ By Severity: %s
 %s""",
                 org.getName(), today,
                 org.getName(), nvl(org.getIndustry()), nvl(org.getCountry()),
+                fx.baseCurrency(), fx.isComplete() ? ""
+                        : "\nNOTE: totals exclude amounts with no exchange rate for " + String.join(", ", fx.missingRates()),
                 assets.size(), toJson(byStatus), toJson(byCondition),
-                totalPurchaseCost.toPlainString(), totalBookValue.toPlainString(),
+                money(totalPurchaseCost), money(totalBookValue),
                 MAX_ASSET_SAMPLE, toJson(assetSample),
                 maintenance.size(), toJson(byMStatus), overdueCount, upcomingCount,
-                totalMaintCost.toPlainString(), MAX_MAINT_SAMPLE, toJson(maintSample),
+                money(totalMaintCost), MAX_MAINT_SAMPLE, toJson(maintSample),
                 users.size(), activeUsers, toJson(userSummary),
                 departments.size(), toJson(deptSummary),
                 locations.size(), toJson(locationList),
-                budgets.size(), totalAllocated.toPlainString(), totalSpent.toPlainString(),
+                budgets.size(), money(totalAllocated), money(totalSpent),
                 utilizationPct, toJson(budgetSummary),
                 controls.size(), toJson(byFramework), toJson(byCtrlStatus),
                 gapCount, MAX_COMPLIANCE_SAMPLE, toJson(controlSample),
@@ -616,13 +633,9 @@ By Severity: %s
         return result;
     }
 
-    private <T> BigDecimal sumDecimal(Iterable<T> items, java.util.function.Function<T, BigDecimal> valueFn) {
-        BigDecimal sum = BigDecimal.ZERO;
-        for (T item : items) {
-            BigDecimal v = valueFn.apply(item);
-            if (v != null) sum = sum.add(v);
-        }
-        return sum;
+    /** "1234.50 GHS" - converted total with its currency code. */
+    private String money(MoneyAccumulator total) {
+        return total.amount().toPlainString() + " " + total.total().currency();
     }
 
     private String extractError(String body, String dotPath) {

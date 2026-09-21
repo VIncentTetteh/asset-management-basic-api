@@ -13,6 +13,9 @@ import com.assetiq.repositories.OrganisationRepository;
 import com.assetiq.services.CloudAssetService;
 import com.assetiq.services.CurrencyResolver;
 import com.assetiq.services.TenantAwareService;
+import com.assetiq.services.money.CurrencyConversion;
+import com.assetiq.services.money.MoneyAccumulator;
+import com.assetiq.services.money.MoneyAggregator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
@@ -38,17 +41,22 @@ public class CloudAssetServiceImpl extends TenantAwareService implements CloudAs
     private final CloudCostRecordRepository costRepo;
     private final CurrencyResolver currencyResolver;
     private final CloudSyncDispatcher cloudSyncDispatcher;
+    private final MoneyAggregator moneyAggregator;
+
+    private static final int TOP_ASSET_COUNT = 5;
 
     public CloudAssetServiceImpl(OrganisationRepository organisationRepository,
                                  CloudAssetRepository cloudAssetRepo,
                                  CloudCostRecordRepository costRepo,
                                  CurrencyResolver currencyResolver,
-                                 CloudSyncDispatcher cloudSyncDispatcher) {
+                                 CloudSyncDispatcher cloudSyncDispatcher,
+                                 MoneyAggregator moneyAggregator) {
         super(organisationRepository);
         this.cloudAssetRepo = cloudAssetRepo;
         this.costRepo = costRepo;
         this.currencyResolver = currencyResolver;
         this.cloudSyncDispatcher = cloudSyncDispatcher;
+        this.moneyAggregator = moneyAggregator;
     }
 
     @Override
@@ -114,38 +122,53 @@ public class CloudAssetServiceImpl extends TenantAwareService implements CloudAs
         Organisation org = requireTenantOrg();
         List<CloudAsset> assets = cloudAssetRepo.findByOrganisationAndDeletedAtIsNull(org);
 
-        BigDecimal total = assets.stream()
-                .filter(a -> a.getMonthlyCostEstimate() != null)
-                .map(CloudAsset::getMonthlyCostEstimate)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        // Convert every estimate into the tenant base currency before summing or
+        // ranking; assets whose currency has no rate are excluded and reported.
+        CurrencyConversion fx = moneyAggregator.begin(org);
+        MoneyAccumulator total = fx.newAccumulator();
+        Map<CloudProvider, MoneyAccumulator> byProviderAcc = new EnumMap<>(CloudProvider.class);
+        Map<String, MoneyAccumulator> byEnvAcc = new LinkedHashMap<>();
+        List<Map.Entry<CloudAsset, BigDecimal>> converted = new ArrayList<>();
 
-        Map<CloudProvider, BigDecimal> byProvider = assets.stream()
-                .filter(a -> a.getMonthlyCostEstimate() != null)
-                .collect(Collectors.groupingBy(
-                        CloudAsset::getProvider,
-                        Collectors.reducing(BigDecimal.ZERO, CloudAsset::getMonthlyCostEstimate, BigDecimal::add)));
+        for (CloudAsset a : assets) {
+            if (a.getMonthlyCostEstimate() == null) continue;
+            Optional<BigDecimal> inBase = fx.toBase(a.getMonthlyCostEstimate(), a.getCurrency());
+            if (inBase.isEmpty()) continue;
+            converted.add(Map.entry(a, inBase.get()));
+            total.add(a.getMonthlyCostEstimate(), a.getCurrency());
+            if (a.getProvider() != null) {
+                byProviderAcc.computeIfAbsent(a.getProvider(), k -> fx.newAccumulator())
+                        .add(a.getMonthlyCostEstimate(), a.getCurrency());
+            }
+            if (a.getEnvironment() != null) {
+                byEnvAcc.computeIfAbsent(a.getEnvironment().toUpperCase(), k -> fx.newAccumulator())
+                        .add(a.getMonthlyCostEstimate(), a.getCurrency());
+            }
+        }
 
-        Map<String, BigDecimal> byEnv = assets.stream()
-                .filter(a -> a.getMonthlyCostEstimate() != null && a.getEnvironment() != null)
-                .collect(Collectors.groupingBy(
-                        a -> a.getEnvironment().toUpperCase(),
-                        Collectors.reducing(BigDecimal.ZERO, CloudAsset::getMonthlyCostEstimate, BigDecimal::add)));
+        Map<CloudProvider, BigDecimal> byProvider = new EnumMap<>(CloudProvider.class);
+        byProviderAcc.forEach((k, acc) -> byProvider.put(k, acc.amount()));
+        Map<String, BigDecimal> byEnv = new LinkedHashMap<>();
+        byEnvAcc.forEach((k, acc) -> byEnv.put(k, acc.amount()));
 
-        List<CloudAsset> top5 = cloudAssetRepo.findTopByOrganisationOrderByCost(org, PageRequest.of(0, 5));
-        List<CloudCostSummaryDto.CloudAssetCostEntry> topAssets = top5.stream().map(a -> {
-            CloudCostSummaryDto.CloudAssetCostEntry e = new CloudCostSummaryDto.CloudAssetCostEntry();
-            e.setAssetName(a.getName());
-            e.setResourceType(a.getResourceType().name());
-            e.setMonthlyCost(a.getMonthlyCostEstimate());
-            return e;
-        }).collect(Collectors.toList());
-
-        String currency = assets.stream().map(CloudAsset::getCurrency).filter(Objects::nonNull)
-                .findFirst().orElseGet(currencyResolver::defaultForCurrentTenant);
+        List<CloudCostSummaryDto.CloudAssetCostEntry> topAssets = converted.stream()
+                .sorted(Map.Entry.<CloudAsset, BigDecimal>comparingByValue().reversed())
+                .limit(TOP_ASSET_COUNT)
+                .map(entry -> {
+                    CloudAsset a = entry.getKey();
+                    CloudCostSummaryDto.CloudAssetCostEntry e = new CloudCostSummaryDto.CloudAssetCostEntry();
+                    e.setAssetName(a.getName());
+                    e.setResourceType(a.getResourceType() != null ? a.getResourceType().name() : null);
+                    e.setMonthlyCost(CurrencyConversion.round(entry.getValue()));
+                    return e;
+                })
+                .collect(Collectors.toList());
 
         CloudCostSummaryDto summary = new CloudCostSummaryDto();
-        summary.setTotalMonthlyCost(total);
-        summary.setCurrency(currency);
+        summary.setTotalMonthlyCost(total.amount());
+        summary.setCurrency(fx.baseCurrency());
+        summary.setComplete(fx.isComplete());
+        summary.setMissingRates(fx.missingRates());
         summary.setCostByProvider(byProvider);
         summary.setCostByEnvironment(byEnv);
         summary.setTopAssets(topAssets);

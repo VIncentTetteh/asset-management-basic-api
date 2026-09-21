@@ -13,6 +13,9 @@ import com.assetiq.repositories.BudgetRepository;
 import com.assetiq.repositories.DisposalRecordRepository;
 import com.assetiq.repositories.MaintenanceRecordRepository;
 import com.assetiq.repositories.PurchaseOrderRepository;
+import com.assetiq.services.CurrencyResolver;
+import com.assetiq.services.ExchangeRateService;
+import com.assetiq.services.money.MoneyAggregator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -40,6 +43,8 @@ class AnalyticsServiceImplTest {
     @Mock PurchaseOrderRepository purchaseOrderRepository;
     @Mock BudgetRepository budgetRepository;
     @Mock DisposalRecordRepository disposalRecordRepository;
+    @Mock ExchangeRateService exchangeRateService;
+    @Mock CurrencyResolver currencyResolver;
 
     AnalyticsServiceImpl service;
     Organisation org;
@@ -51,11 +56,14 @@ class AnalyticsServiceImplTest {
                 maintenanceRecordRepository,
                 purchaseOrderRepository,
                 budgetRepository,
-                disposalRecordRepository);
+                disposalRecordRepository,
+                new MoneyAggregator(exchangeRateService, currencyResolver));
 
         org = new Organisation();
         org.setId(UUID.randomUUID());
         org.setName("Analytics Test Org");
+        // All fixtures are in the entity default (USD), so no conversion is needed.
+        org.setBillingCurrency("USD");
     }
 
     @Test
