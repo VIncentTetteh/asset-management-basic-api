@@ -11,6 +11,16 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import jakarta.persistence.EntityManagerFactory;
+import org.hibernate.engine.spi.SessionFactoryImplementor;
+import org.springframework.jdbc.core.JdbcTemplate;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -83,6 +93,9 @@ class ValidatesAgainstFlywaySchemaTest {
     @Autowired
     private EntityManagerFactory entityManagerFactory;
 
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
     @Test
     @DisplayName("the persistence unit builds, so every mapping matches a real column")
     void entitiesMatchTheMigratedSchema() {
@@ -91,5 +104,38 @@ class ValidatesAgainstFlywaySchemaTest {
                         + "against the Flyway schema without complaint")
                 .isNotNull();
         assertThat(entityManagerFactory.isOpen()).isTrue();
+    }
+
+    /**
+     * {@code validate} only checks that mapped columns exist. It is blind to the
+     * opposite drift: a legacy V7 column that no entity maps any more but that is
+     * still NOT NULL without a default. Every insert into that table then fails at
+     * runtime (V24 fixed checkout_records.user_id this way; asset_audit.asset_id
+     * broke scheduling audits the same way). This lists every such column in the
+     * tables the entities write to.
+     */
+    @Test
+    @DisplayName("no NOT NULL column without a default is invisible to the entity that inserts into its table")
+    void noOrphanedNotNullColumns() {
+        Map<String, Set<String>> mapped = new HashMap<>();
+        var metamodel = entityManagerFactory.unwrap(SessionFactoryImplementor.class).getMappingMetamodel();
+        metamodel.forEachEntityDescriptor(persister -> persister.forEachSelectable((i, selectable) ->
+                mapped.computeIfAbsent(selectable.getContainingTableExpression().toLowerCase(Locale.ROOT),
+                        t -> new HashSet<>()).add(selectable.getSelectionExpression().toLowerCase(Locale.ROOT))));
+        metamodel.forEachEntityDescriptor(persister ->
+                mapped.computeIfAbsent(persister.getIdentifierTableName().toLowerCase(Locale.ROOT), t -> new HashSet<>())
+                        .add(persister.getIdentifierColumnNames()[0].toLowerCase(Locale.ROOT)));
+
+        List<String> orphans = new ArrayList<>();
+        jdbcTemplate.query("""
+                SELECT table_name, column_name FROM information_schema.columns
+                WHERE table_schema = current_schema() AND is_nullable = 'NO' AND column_default IS NULL
+                """, rs -> {
+            String table = rs.getString(1).toLowerCase(Locale.ROOT);
+            String column = rs.getString(2).toLowerCase(Locale.ROOT);
+            Set<String> columns = mapped.get(table);
+            if (columns != null && !columns.contains(column)) orphans.add(table + "." + column);
+        });
+        assertThat(orphans).describedAs("NOT NULL columns no entity writes").isEmpty();
     }
 }
