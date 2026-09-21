@@ -7,6 +7,7 @@ import com.assetiq.models.SoftwareLicense;
 import com.assetiq.repositories.AssetRepository;
 import com.assetiq.repositories.OrganisationRepository;
 import com.assetiq.repositories.SoftwareLicenseRepository;
+import com.assetiq.services.CurrencyResolver;
 import com.assetiq.services.SoftwareLicenseService;
 import com.assetiq.services.TenantAwareService;
 import org.springframework.stereotype.Service;
@@ -24,13 +25,16 @@ public class SoftwareLicenseServiceImpl extends TenantAwareService implements So
 
     private final SoftwareLicenseRepository licenseRepository;
     private final AssetRepository assetRepository;
+    private final CurrencyResolver currencyResolver;
 
     public SoftwareLicenseServiceImpl(SoftwareLicenseRepository licenseRepository,
                                       AssetRepository assetRepository,
-                                      OrganisationRepository organisationRepository) {
+                                      OrganisationRepository organisationRepository,
+                                      CurrencyResolver currencyResolver) {
         super(organisationRepository);
         this.licenseRepository = licenseRepository;
         this.assetRepository = assetRepository;
+        this.currencyResolver = currencyResolver;
     }
 
     @Override
@@ -38,6 +42,8 @@ public class SoftwareLicenseServiceImpl extends TenantAwareService implements So
         Organisation org = requireTenantOrg();
 
         SoftwareLicense license = new SoftwareLicense();
+        // Fall through to the tenant base currency rather than the entity's USD default.
+        license.setCurrency(currencyResolver.resolveOrDefault(dto.getCurrency()));
         applyDto(license, dto, org);
         license.setOrganisation(org);
         return mapToDto(licenseRepository.save(license));
@@ -97,7 +103,7 @@ public class SoftwareLicenseServiceImpl extends TenantAwareService implements So
         if (dto.getUsedSeats() != null) license.setUsedSeats(dto.getUsedSeats());
         if (dto.getPurchaseCost() != null) license.setPurchaseCost(dto.getPurchaseCost());
         if (dto.getAnnualRenewalCost() != null) license.setAnnualRenewalCost(dto.getAnnualRenewalCost());
-        if (dto.getCurrency() != null) license.setCurrency(dto.getCurrency());
+        if (dto.getCurrency() != null) license.setCurrency(CurrencyResolver.normaliseIsoCode(dto.getCurrency()));
         if (dto.getPurchaseDate() != null) license.setPurchaseDate(dto.getPurchaseDate());
         if (dto.getExpiryDate() != null) license.setExpiryDate(dto.getExpiryDate());
         if (dto.getRenewalDate() != null) license.setRenewalDate(dto.getRenewalDate());
@@ -172,7 +178,8 @@ public class SoftwareLicenseServiceImpl extends TenantAwareService implements So
         if (dto.getUsedSeats() != null) license.setUsedSeats(dto.getUsedSeats());
         license.setPurchaseCost(dto.getPurchaseCost());
         license.setAnnualRenewalCost(dto.getAnnualRenewalCost());
-        if (dto.getCurrency() != null) license.setCurrency(dto.getCurrency());
+        // Omitted currency keeps the current value (set from the tenant default on create).
+        if (dto.getCurrency() != null) license.setCurrency(currencyResolver.resolveOrDefault(dto.getCurrency()));
         license.setPurchaseDate(dto.getPurchaseDate());
         license.setExpiryDate(dto.getExpiryDate());
         license.setRenewalDate(dto.getRenewalDate());

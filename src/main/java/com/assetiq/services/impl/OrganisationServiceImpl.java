@@ -66,7 +66,7 @@ public class OrganisationServiceImpl implements OrganisationService {
 
         // P1-1: Explicit billing currency wins; otherwise derive from country.
         if (dto.getBillingCurrency() != null && !dto.getBillingCurrency().isBlank()) {
-            organisation.setBillingCurrency(dto.getBillingCurrency().trim().toUpperCase());
+            organisation.setBillingCurrency(CurrencyResolver.normaliseIsoCode(dto.getBillingCurrency()));
         } else {
             organisation.setBillingCurrency(CurrencyResolver.currencyForCountry(dto.getCountry()));
         }
@@ -141,7 +141,7 @@ public class OrganisationServiceImpl implements OrganisationService {
         if (dto.getStatus() != null)
             o.setStatus(dto.getStatus());
         if (dto.getBillingCurrency() != null && !dto.getBillingCurrency().isBlank())
-            o.setBillingCurrency(dto.getBillingCurrency().trim().toUpperCase());
+            o.setBillingCurrency(CurrencyResolver.normaliseIsoCode(dto.getBillingCurrency()));
 
         Organisation saved = organisationRepository.save(o);
         return toDto(saved);
