@@ -15,4 +15,10 @@ public interface DisposalService {
     DisposalRecordDto updateDisposalRecord(UUID id, DisposalRecordDto recordDto);
     DisposalRecordDto patchDisposalRecord(UUID id, DisposalRecordDto recordDto);
     void deleteDisposalRecord(UUID id);
+
+    /** Checker step: a user other than the requester approves; the asset is disposed. */
+    DisposalRecordDto approveDisposal(UUID id);
+
+    /** Refuses (or, by the requester, withdraws) a pending disposal. */
+    DisposalRecordDto rejectDisposal(UUID id);
 }

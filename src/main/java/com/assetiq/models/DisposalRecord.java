@@ -1,12 +1,14 @@
 package com.assetiq.models;
 
 import com.assetiq.enums.DisposalMethod;
+import com.assetiq.enums.DisposalStatus;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
 
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDate;
 
 @Entity
@@ -39,9 +41,30 @@ public class DisposalRecord extends BaseEntity {
         return asset != null ? asset.getCurrency() : null;
     }
 
+    /** Null only on rows written before V44, which were all effective at once. */
+    @Enumerated(EnumType.STRING)
+    @Column(length = 20)
+    private DisposalStatus status = DisposalStatus.PENDING_APPROVAL;
+
+    /** The maker; null on rows written before V44. */
     @ManyToOne
-    @JoinColumn(nullable = false)
+    private User requestedBy;
+
+    /** The checker; null until approved. */
+    @ManyToOne
     private User approvedBy;
+
+    private Instant approvedAt;
+
+    @ManyToOne
+    private User rejectedBy;
+
+    private Instant rejectedAt;
+
+    /** True when this disposal actually took the asset off the books. */
+    public boolean isEffective() {
+        return status == null || status == DisposalStatus.APPROVED;
+    }
 
     @Column(columnDefinition = "TEXT")
     private String reason;

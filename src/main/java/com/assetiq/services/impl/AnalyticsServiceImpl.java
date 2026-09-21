@@ -179,7 +179,9 @@ public class AnalyticsServiceImpl implements AnalyticsService {
 
         // Disposal sale value is in the record's currency (legacy rows: the asset's).
         MoneyAccumulator totalDisposal = fx.sum(
-                disposalRecordRepository.findByOrganisationAndDisposalDateBetweenAndDeletedAtIsNull(org, start, end),
+                // Pending/rejected requests have not taken anything off the books.
+                disposalRecordRepository.findByOrganisationAndDisposalDateBetweenAndDeletedAtIsNull(org, start, end)
+                        .stream().filter(DisposalRecord::isEffective).toList(),
                 DisposalRecord::getSaleValue,
                 DisposalRecord::effectiveCurrency);
 

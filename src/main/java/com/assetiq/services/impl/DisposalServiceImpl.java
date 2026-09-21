@@ -6,6 +6,8 @@ import com.assetiq.models.Asset;
 import com.assetiq.models.Organisation;
 import com.assetiq.models.User;
 import com.assetiq.enums.AssetStatus;
+import com.assetiq.enums.DisposalMethod;
+import com.assetiq.enums.DisposalStatus;
 import com.assetiq.enums.UserStatus;
 import com.assetiq.repositories.*;
 import com.assetiq.enums.NotificationType;
@@ -19,8 +21,10 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -46,6 +50,10 @@ public class DisposalServiceImpl extends TenantAwareService implements DisposalS
         this.notificationService = notificationService;
     }
 
+    /**
+     * Maker step: records a disposal request. The asset is not touched until a
+     * different user approves it (see {@link #approveDisposal}).
+     */
     @Override
     public DisposalRecordDto createDisposalRecord(DisposalRecordDto recordDto) {
         Organisation org = requireTenantOrg();
@@ -54,12 +62,18 @@ public class DisposalServiceImpl extends TenantAwareService implements DisposalS
         Asset asset = assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(recordDto.getAssetId(), org)
                 .orElseThrow(() -> new IllegalArgumentException("Asset not found in your organisation"));
 
-        // The executing/approving identity is authoritative server-side. Never trust
-        // a client-supplied user or organisation identifier for a disposal action.
-        User approver = resolveCurrentUser(org);
+        // The requesting identity is authoritative server-side. Never trust a
+        // client-supplied user or organisation identifier for a disposal action.
+        User requester = resolveCurrentUser(org);
 
         if (asset.getStatus() == AssetStatus.DISPOSED) {
-            throw new IllegalArgumentException("Asset has already been disposed");
+            throw new IllegalStateException("Asset has already been disposed");
+        }
+        boolean pending = disposalRepository.findByAssetIdAndDeletedAtIsNull(asset.getId()).stream()
+                .anyMatch(d -> d.getStatus() == DisposalStatus.PENDING_APPROVAL);
+        if (pending) {
+            throw new IllegalStateException("Asset '" + asset.getName()
+                    + "' already has a disposal awaiting approval");
         }
 
         DisposalRecord record = new DisposalRecord();
@@ -68,22 +82,69 @@ public class DisposalServiceImpl extends TenantAwareService implements DisposalS
         record.setDisposalDate(recordDto.getDisposalDate());
         record.setSaleValue(recordDto.getSaleValue());
         record.setCurrency(MaintenanceServiceImpl.recordCurrency(recordDto.getCurrency(), asset));
-        record.setApprovedBy(approver);
+        record.setStatus(DisposalStatus.PENDING_APPROVAL);
+        record.setRequestedBy(requester);
         record.setReason(recordDto.getReason());
         record.setComplianceDocumentUrl(recordDto.getComplianceDocumentUrl());
         record.setOrganisation(org);
+
+        DisposalRecord savedRecord = disposalRepository.save(record);
+        notificationService.notifyOrgAdmins(org, NotificationType.DISPOSAL,
+                "Asset Disposal Requested",
+                "Disposal of asset '" + asset.getName() + "' via " + record.getDisposalMethod()
+                        + " is awaiting approval.",
+                savedRecord.getId(), "/disposals");
+        return mapToDto(savedRecord);
+    }
+
+    @Override
+    public DisposalRecordDto approveDisposal(UUID id) {
+        Organisation org = requireTenantOrg();
+        DisposalRecord record = disposalRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
+                .orElseThrow(() -> new IllegalArgumentException("Disposal record not found"));
+        if (record.getStatus() != DisposalStatus.PENDING_APPROVAL) {
+            throw new IllegalStateException("Only a pending disposal can be approved (this one is "
+                    + record.getStatus() + ")");
+        }
+        User approver = resolveCurrentUser(org);
+        if (record.getRequestedBy() != null && record.getRequestedBy().getId().equals(approver.getId())) {
+            throw new AccessDeniedException("A disposal must be approved by someone other than the requester");
+        }
+        Asset asset = record.getAsset();
+        if (asset.getStatus() == AssetStatus.DISPOSED) {
+            throw new IllegalStateException("Asset has already been disposed");
+        }
+
+        record.setStatus(DisposalStatus.APPROVED);
+        record.setApprovedBy(approver);
+        record.setApprovedAt(Instant.now());
 
         // Mark asset as disposed and release it from any assigned user
         asset.setStatus(AssetStatus.DISPOSED);
         asset.setAssignedUser(null);
         assetRepository.save(asset);
 
-        DisposalRecord savedRecord = disposalRepository.save(record);
+        DisposalRecord saved = disposalRepository.save(record);
         notificationService.notifyOrgAdmins(org, NotificationType.DISPOSAL,
                 "Asset Disposed",
                 "Asset '" + asset.getName() + "' has been disposed via " + record.getDisposalMethod() + ".",
-                savedRecord.getId(), "/api/v1/disposals/" + savedRecord.getId());
-        return mapToDto(savedRecord);
+                saved.getId(), "/disposals");
+        return mapToDto(saved);
+    }
+
+    @Override
+    public DisposalRecordDto rejectDisposal(UUID id) {
+        Organisation org = requireTenantOrg();
+        DisposalRecord record = disposalRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
+                .orElseThrow(() -> new IllegalArgumentException("Disposal record not found"));
+        if (record.getStatus() != DisposalStatus.PENDING_APPROVAL) {
+            throw new IllegalStateException("Only a pending disposal can be rejected (this one is "
+                    + record.getStatus() + ")");
+        }
+        record.setStatus(DisposalStatus.REJECTED);
+        record.setRejectedBy(resolveCurrentUser(org));
+        record.setRejectedAt(Instant.now());
+        return mapToDto(disposalRepository.save(record));
     }
 
     @Override
@@ -142,11 +203,15 @@ public class DisposalServiceImpl extends TenantAwareService implements DisposalS
         Organisation org = requireTenantOrg();
         DisposalRecord record = disposalRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
                 .orElseThrow(() -> new IllegalArgumentException("Disposal record not found"));
+        requireEditable(record);
 
+        String currency = MaintenanceServiceImpl.recordCurrency(recordDto.getCurrency(), record.getAsset());
+        guardLockedTerms(record, recordDto.getDisposalMethod(), recordDto.getDisposalDate(),
+                recordDto.getSaleValue(), currency);
         record.setDisposalMethod(recordDto.getDisposalMethod());
         record.setDisposalDate(recordDto.getDisposalDate());
         record.setSaleValue(recordDto.getSaleValue());
-        record.setCurrency(MaintenanceServiceImpl.recordCurrency(recordDto.getCurrency(), record.getAsset()));
+        record.setCurrency(currency);
         record.setReason(recordDto.getReason());
         record.setComplianceDocumentUrl(recordDto.getComplianceDocumentUrl());
 
@@ -159,19 +224,20 @@ public class DisposalServiceImpl extends TenantAwareService implements DisposalS
         Organisation org = requireTenantOrg();
         DisposalRecord record = disposalRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
                 .orElseThrow(() -> new IllegalArgumentException("Disposal record not found"));
+        requireEditable(record);
 
-        if (recordDto.getDisposalMethod() != null) {
-            record.setDisposalMethod(recordDto.getDisposalMethod());
-        }
-        if (recordDto.getDisposalDate() != null) {
-            record.setDisposalDate(recordDto.getDisposalDate());
-        }
-        if (recordDto.getSaleValue() != null) {
-            record.setSaleValue(recordDto.getSaleValue());
-        }
-        if (recordDto.getCurrency() != null) {
-            record.setCurrency(CurrencyResolver.normaliseIsoCode(recordDto.getCurrency()));
-        }
+        DisposalMethod method = recordDto.getDisposalMethod() != null
+                ? recordDto.getDisposalMethod() : record.getDisposalMethod();
+        LocalDate date = recordDto.getDisposalDate() != null ? recordDto.getDisposalDate() : record.getDisposalDate();
+        BigDecimal saleValue = recordDto.getSaleValue() != null ? recordDto.getSaleValue() : record.getSaleValue();
+        String currency = recordDto.getCurrency() != null
+                ? CurrencyResolver.normaliseIsoCode(recordDto.getCurrency()) : record.getCurrency();
+        guardLockedTerms(record, method, date, saleValue, currency);
+
+        record.setDisposalMethod(method);
+        record.setDisposalDate(date);
+        record.setSaleValue(saleValue);
+        record.setCurrency(currency);
         if (recordDto.getReason() != null) {
             record.setReason(recordDto.getReason());
         }
@@ -183,11 +249,46 @@ public class DisposalServiceImpl extends TenantAwareService implements DisposalS
         return mapToDto(updatedRecord);
     }
 
+    /** A rejected disposal is closed; only pending or approved ones can be edited. */
+    private static void requireEditable(DisposalRecord record) {
+        if (record.getStatus() == DisposalStatus.REJECTED) {
+            throw new IllegalStateException("A rejected disposal cannot be edited; request a new one");
+        }
+    }
+
+    /**
+     * Once approved, the financial terms (method, date, sale value, currency) are
+     * what the approver signed off, so they are locked. Reason and compliance
+     * document stay editable (e.g. attaching the destruction certificate later).
+     */
+    static void guardLockedTerms(DisposalRecord record, DisposalMethod method, LocalDate date,
+                                 BigDecimal saleValue, String currency) {
+        if (!record.isEffective()) return;
+        boolean changed = !Objects.equals(record.getDisposalMethod(), method)
+                || !Objects.equals(record.getDisposalDate(), date)
+                || !sameAmount(record.getSaleValue(), saleValue)
+                || !Objects.equals(record.effectiveCurrency(), currency != null ? currency : record.effectiveCurrency());
+        if (changed) {
+            throw new IllegalStateException(
+                    "An approved disposal's method, date, sale value and currency are locked");
+        }
+    }
+
+    private static boolean sameAmount(BigDecimal a, BigDecimal b) {
+        if (a == null || b == null) return a == b;
+        return a.compareTo(b) == 0;
+    }
+
     @Override
     public void deleteDisposalRecord(UUID id) {
         Organisation org = requireTenantOrg();
         DisposalRecord record = disposalRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
                 .orElseThrow(() -> new IllegalArgumentException("Disposal record not found"));
+        if (record.isEffective()) {
+            // The approved record is the asset's disposal evidence; deleting it
+            // would leave a DISPOSED asset with no trail.
+            throw new IllegalStateException("An approved disposal cannot be deleted");
+        }
         record.setDeletedAt(Instant.now());
         disposalRepository.save(record);
     }
@@ -200,7 +301,18 @@ public class DisposalServiceImpl extends TenantAwareService implements DisposalS
         dto.setDisposalDate(record.getDisposalDate());
         dto.setSaleValue(record.getSaleValue());
         dto.setCurrency(record.effectiveCurrency());
-        dto.setApprovedById(record.getApprovedBy().getId());
+        dto.setStatus(record.getStatus() != null ? record.getStatus() : DisposalStatus.APPROVED);
+        if (record.getRequestedBy() != null) {
+            dto.setRequestedById(record.getRequestedBy().getId());
+        }
+        if (record.getApprovedBy() != null) {
+            dto.setApprovedById(record.getApprovedBy().getId());
+        }
+        dto.setApprovedAt(record.getApprovedAt());
+        if (record.getRejectedBy() != null) {
+            dto.setRejectedById(record.getRejectedBy().getId());
+        }
+        dto.setRejectedAt(record.getRejectedAt());
         dto.setReason(record.getReason());
         dto.setComplianceDocumentUrl(record.getComplianceDocumentUrl());
         dto.setOrganisationId(record.getOrganisation().getId());

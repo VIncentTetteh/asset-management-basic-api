@@ -1,6 +1,7 @@
 package com.assetiq.controllers.v1;
 
 import com.assetiq.dto.DisposalRecordDto;
+import com.assetiq.security.annotation.RequireFreshMfa;
 import com.assetiq.services.DisposalService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -70,6 +71,21 @@ public class DisposalController {
             @RequestBody DisposalRecordDto recordDto) {
         DisposalRecordDto updatedRecord = disposalService.patchDisposalRecord(id, recordDto);
         return ResponseEntity.ok(updatedRecord);
+    }
+
+    /** Checker step: a different user approves; the asset becomes DISPOSED. */
+    @PostMapping("/{id}/approve")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','DISPOSE_ASSET')")
+    @RequireFreshMfa
+    public ResponseEntity<DisposalRecordDto> approveDisposal(@PathVariable UUID id) {
+        return ResponseEntity.ok(disposalService.approveDisposal(id));
+    }
+
+    /** Refuses a pending disposal (the requester may use it to withdraw). */
+    @PostMapping("/{id}/reject")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','DISPOSE_ASSET')")
+    public ResponseEntity<DisposalRecordDto> rejectDisposal(@PathVariable UUID id) {
+        return ResponseEntity.ok(disposalService.rejectDisposal(id));
     }
 
     @DeleteMapping("/{id}")

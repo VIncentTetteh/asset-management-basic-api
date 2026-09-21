@@ -90,6 +90,7 @@ class AnalyticsServiceImplCurrencyTest {
         DisposalRecord disposal = new DisposalRecord();
         disposal.setAsset(eurAsset);
         disposal.setSaleValue(new BigDecimal("10")); // 10 EUR -> 160 GHS
+        disposal.setStatus(com.assetiq.enums.DisposalStatus.APPROVED);
         when(disposalRecordRepository.findByOrganisationAndDisposalDateBetweenAndDeletedAtIsNull(eq(org), any(), any()))
                 .thenReturn(java.util.Set.of(disposal));
         when(budgetRepository.findByOrganisationAndDeletedAtIsNullOrderByPeriodStartDesc(org))

@@ -727,7 +727,8 @@ public class AssetServiceImpl implements AssetService {
                         m.getPerformedDate())));
 
         // 4. Disposal records
-        disposalRecordRepository.findByAssetIdAndDeletedAtIsNull(assetId)
+        disposalRecordRepository.findByAssetIdAndDeletedAtIsNull(assetId).stream()
+                .filter(com.assetiq.models.DisposalRecord::isEffective)
                 .forEach(d -> timeline.add(AssetHistoryEventDto.ofDisposal(
                         d.getId(),
                         d.getCreatedAt() != null ? d.getCreatedAt().atZone(ZoneOffset.UTC).toLocalDateTime() : null,
@@ -796,7 +797,8 @@ public class AssetServiceImpl implements AssetService {
         }
 
         // 5. Disposal/sale recovery
-        BigDecimal disposalRecovery = fx.sum(disposalRecordRepository.findByAssetIdAndDeletedAtIsNull(assetId),
+        BigDecimal disposalRecovery = fx.sum(disposalRecordRepository.findByAssetIdAndDeletedAtIsNull(assetId)
+                        .stream().filter(com.assetiq.models.DisposalRecord::isEffective).toList(),
                 com.assetiq.models.DisposalRecord::getSaleValue,
                 com.assetiq.models.DisposalRecord::effectiveCurrency).amount();
 

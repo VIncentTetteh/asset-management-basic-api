@@ -350,6 +350,7 @@ class AssetServiceImplTest {
             sale.setAsset(asset);
             sale.setSaleValue(new BigDecimal("2"));
             sale.setCurrency("USD");
+            sale.setStatus(com.assetiq.enums.DisposalStatus.APPROVED);
             when(maintenanceRecordRepository.findByAssetIdAndDeletedAtIsNull(asset.getId()))
                     .thenReturn(java.util.Set.of(usd, legacy));
             when(disposalRecordRepository.findByAssetIdAndDeletedAtIsNull(asset.getId()))
