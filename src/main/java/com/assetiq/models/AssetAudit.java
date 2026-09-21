@@ -18,8 +18,8 @@ public class AssetAudit extends BaseEntity {
     @JoinColumn(nullable = false)
     private Organisation organisation;
 
+    /** Null means the audit covers the whole organisation. */
     @ManyToOne
-    @JoinColumn(nullable = false)
     private Department department;
 
     @Column(nullable = false, updatable = false)

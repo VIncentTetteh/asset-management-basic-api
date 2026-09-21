@@ -5,6 +5,8 @@ public enum AuditStatus {
     IN_PROGRESS,
     COMPLETED,
     DISCREPANCY_FOUND,
-    RESOLVED
+    RESOLVED,
+    /** Called off before completion (the web client already offered it). */
+    CANCELLED
 }
 

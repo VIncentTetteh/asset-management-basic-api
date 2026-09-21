@@ -23,7 +23,7 @@ public class AuditController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','CONDUCT_AUDIT','EXPORT_AUDIT_LOGS')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','CONDUCT_AUDIT')")
     public ResponseEntity<AssetAuditDto> createAudit(@Valid @RequestBody AssetAuditDto auditDto) {
         AssetAuditDto createdAudit = auditService.createAudit(auditDto);
         return ResponseEntity.status(HttpStatus.CREATED).body(createdAudit);
@@ -56,7 +56,7 @@ public class AuditController {
     }
 
     @PatchMapping("/{id}/status")
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','CONDUCT_AUDIT','EXPORT_AUDIT_LOGS')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','CONDUCT_AUDIT')")
     public ResponseEntity<AssetAuditDto> updateAuditStatus(@PathVariable UUID id,
             @RequestParam String status) {
         AssetAuditDto updatedAudit = auditService.updateAuditStatus(id, status);
@@ -64,7 +64,7 @@ public class AuditController {
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','CONDUCT_AUDIT','EXPORT_AUDIT_LOGS')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','CONDUCT_AUDIT')")
     public ResponseEntity<Void> deleteAudit(@PathVariable UUID id) {
         auditService.deleteAudit(id);
         return ResponseEntity.noContent().build();
