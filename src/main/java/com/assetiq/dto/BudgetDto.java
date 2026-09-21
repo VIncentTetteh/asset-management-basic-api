@@ -2,6 +2,8 @@ package com.assetiq.dto;
 
 import com.assetiq.enums.BudgetStatus;
 import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 
@@ -26,9 +28,10 @@ public class BudgetDto {
     @DecimalMin("0.01")
     private BigDecimal totalAmount;
 
+    /** Read-only: maintained by the budget ledger, ignored on create/update. */
     private BigDecimal spentAmount;
 
-    /** Pending-approval expenses linked to this budget. */
+    /** Read-only: open purchase-order and expense commitments against this budget. */
     private BigDecimal committedAmount;
 
     /**
@@ -44,6 +47,8 @@ public class BudgetDto {
     private BigDecimal forecastedSpend;
 
     /** Configurable alert threshold (default 80). */
+    @Min(1)
+    @Max(100)
     private Integer alertThresholdPct;
 
     private String currency;

@@ -2,6 +2,7 @@ package com.assetiq.controllers.v1;
 
 import com.assetiq.dto.BudgetAdjustmentRequest;
 import com.assetiq.dto.BudgetDto;
+import com.assetiq.dto.BudgetLedgerEntryDto;
 import com.assetiq.dto.BudgetSummaryDto;
 import com.assetiq.dto.ExpenseDto;
 import com.assetiq.dto.PagedResponseDto;
@@ -93,6 +94,13 @@ public class BudgetController {
             @RequestParam(defaultValue = "0")  int page,
             @RequestParam(defaultValue = "20") int size) {
         return ResponseEntity.ok(budgetService.getExpenses(id, page, size));
+    }
+
+    /** Chronological ledger: commitments, spend, releases, reversals and adjustments. */
+    @GetMapping("/{id}/ledger")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','VIEW_BUDGETS','MANAGE_BUDGETS','APPROVE_BUDGET')")
+    public ResponseEntity<List<BudgetLedgerEntryDto>> getLedger(@PathVariable UUID id) {
+        return ResponseEntity.ok(budgetService.getLedger(id));
     }
 
     @PostMapping("/{id}/adjustment")

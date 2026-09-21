@@ -66,4 +66,28 @@ public class Budget extends BaseEntity {
 
     @Column(name = "fiscal_year")
     private Integer fiscalYear;
+
+    /** Total less spend and open commitments: what can still be committed. */
+    public BigDecimal availableAmount() {
+        BigDecimal spent = spentAmount != null ? spentAmount : BigDecimal.ZERO;
+        BigDecimal committed = committedAmount != null ? committedAmount : BigDecimal.ZERO;
+        return totalAmount.subtract(spent).subtract(committed);
+    }
+
+    /**
+     * Keeps EXCEEDED in step with the figures: an ACTIVE budget whose spend passes
+     * its total becomes EXCEEDED, and an EXCEEDED budget brought back within its
+     * total (a reversal, or a raised allocation) becomes ACTIVE again. DRAFT and
+     * CLOSED are chosen by people and are never changed here.
+     */
+    public void reconcileExceededStatus() {
+        if (totalAmount == null) return;
+        BigDecimal spent = spentAmount != null ? spentAmount : BigDecimal.ZERO;
+        boolean over = spent.compareTo(totalAmount) > 0;
+        if (over && status == BudgetStatus.ACTIVE) {
+            status = BudgetStatus.EXCEEDED;
+        } else if (!over && status == BudgetStatus.EXCEEDED) {
+            status = BudgetStatus.ACTIVE;
+        }
+    }
 }

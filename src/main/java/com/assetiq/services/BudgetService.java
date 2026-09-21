@@ -2,6 +2,7 @@ package com.assetiq.services;
 
 import com.assetiq.dto.BudgetAdjustmentRequest;
 import com.assetiq.dto.BudgetDto;
+import com.assetiq.dto.BudgetLedgerEntryDto;
 import com.assetiq.dto.BudgetSummaryDto;
 import com.assetiq.dto.ExpenseDto;
 import com.assetiq.dto.PagedResponseDto;
@@ -28,6 +29,9 @@ public interface BudgetService {
 
     /** Records a manual budget adjustment with an audit note. */
     BudgetDto recordAdjustment(UUID budgetId, BudgetAdjustmentRequest request);
+
+    /** The budget's ledger (every commitment, spend, release and adjustment), oldest first. */
+    List<BudgetLedgerEntryDto> getLedger(UUID budgetId);
 
     /** Returns a paged list of expenses linked to the given budget. */
     PagedResponseDto<ExpenseDto> getExpenses(UUID budgetId, int page, int size);

@@ -2,6 +2,7 @@ package com.assetiq.services.impl;
 
 import com.assetiq.dto.BudgetAdjustmentRequest;
 import com.assetiq.dto.BudgetDto;
+import com.assetiq.dto.BudgetLedgerEntryDto;
 import com.assetiq.dto.BudgetSummaryDto;
 import com.assetiq.dto.ExpenseDto;
 import com.assetiq.dto.PagedResponseDto;
@@ -16,6 +17,8 @@ import com.assetiq.repositories.OrganisationRepository;
 import com.assetiq.services.BudgetService;
 import com.assetiq.services.CurrencyResolver;
 import com.assetiq.services.TenantAwareService;
+import com.assetiq.services.budget.BudgetLedgerService;
+import com.assetiq.services.budget.BudgetPosting;
 import com.assetiq.services.money.CurrencyConversion;
 import com.assetiq.services.money.MoneyAccumulator;
 import com.assetiq.services.money.MoneyAggregator;
@@ -43,19 +46,22 @@ public class BudgetServiceImpl extends TenantAwareService implements BudgetServi
     private final CurrencyResolver currencyResolver;
     private final ExpenseRepository expenseRepository;
     private final MoneyAggregator moneyAggregator;
+    private final BudgetLedgerService budgetLedger;
 
     public BudgetServiceImpl(OrganisationRepository organisationRepository,
                              BudgetRepository budgetRepository,
                              DepartmentRepository departmentRepository,
                              CurrencyResolver currencyResolver,
                              ExpenseRepository expenseRepository,
-                             MoneyAggregator moneyAggregator) {
+                             MoneyAggregator moneyAggregator,
+                             BudgetLedgerService budgetLedger) {
         super(organisationRepository);
         this.budgetRepository = budgetRepository;
         this.departmentRepository = departmentRepository;
         this.currencyResolver = currencyResolver;
         this.expenseRepository = expenseRepository;
         this.moneyAggregator = moneyAggregator;
+        this.budgetLedger = budgetLedger;
     }
 
     @Override
@@ -63,7 +69,7 @@ public class BudgetServiceImpl extends TenantAwareService implements BudgetServi
     public BudgetDto create(BudgetDto dto) {
         Organisation org = requireTenantOrg();
         Budget budget = new Budget();
-        applyFields(budget, dto, org);
+        applyFields(budget, dto, org, true);
         return toDto(budgetRepository.save(budget));
     }
 
@@ -87,9 +93,10 @@ public class BudgetServiceImpl extends TenantAwareService implements BudgetServi
     @Transactional
     public BudgetDto update(UUID id, BudgetDto dto) {
         Organisation org = requireTenantOrg();
-        Budget budget = budgetRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
-                .orElseThrow(() -> new IllegalArgumentException("Budget not found: " + id));
-        applyFields(budget, dto, org);
+        // Locked: the save writes every column, and must not overwrite a commitment
+        // or spend posted by a concurrent approval.
+        Budget budget = budgetLedger.lockForEdit(id, org);
+        applyFields(budget, dto, org, false);
         return toDto(budgetRepository.save(budget));
     }
 
@@ -97,8 +104,7 @@ public class BudgetServiceImpl extends TenantAwareService implements BudgetServi
     @Transactional
     public BudgetDto patch(UUID id, BudgetDto dto) {
         Organisation org = requireTenantOrg();
-        Budget budget = budgetRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
-                .orElseThrow(() -> new IllegalArgumentException("Budget not found: " + id));
+        Budget budget = budgetLedger.lockForEdit(id, org);
 
         if (dto.getName() != null) budget.setName(dto.getName());
         if (dto.getDescription() != null) budget.setDescription(dto.getDescription());
@@ -108,6 +114,7 @@ public class BudgetServiceImpl extends TenantAwareService implements BudgetServi
         if (dto.getPeriodEnd() != null) budget.setPeriodEnd(dto.getPeriodEnd());
         if (dto.getStatus() != null) budget.setStatus(dto.getStatus());
         if (dto.getFiscalYear() != null) budget.setFiscalYear(dto.getFiscalYear());
+        if (dto.getAlertThresholdPct() != null) budget.setAlertThresholdPct(dto.getAlertThresholdPct());
         if (dto.getDepartmentId() != null) {
             departmentRepository.findAllByOrganisationAndDeletedAtIsNull(
                             organisationRepository.findByIdAndDeletedAtIsNull(org.getId()).orElse(org))
@@ -116,6 +123,8 @@ public class BudgetServiceImpl extends TenantAwareService implements BudgetServi
                     .findFirst()
                     .ifPresent(budget::setDepartment);
         }
+        requireValidPeriod(budget);
+        budget.reconcileExceededStatus();
 
         return toDto(budgetRepository.save(budget));
     }
@@ -131,15 +140,22 @@ public class BudgetServiceImpl extends TenantAwareService implements BudgetServi
     @Transactional
     public BudgetDto recordAdjustment(UUID budgetId, BudgetAdjustmentRequest request) {
         Organisation org = requireTenantOrg();
+        Budget budget = budgetLedger.post(org, budgetId,
+                BudgetPosting.adjustment(request.amount(), request.note()));
+        if (budget == null) {
+            throw new IllegalArgumentException("Budget not found: " + budgetId);
+        }
+        budget.setLastAdjustmentNote(request.note());
+        return toDto(budgetRepository.save(budget));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<BudgetLedgerEntryDto> getLedger(UUID budgetId) {
+        Organisation org = requireTenantOrg();
         Budget budget = budgetRepository.findByIdAndOrganisationAndDeletedAtIsNull(budgetId, org)
                 .orElseThrow(() -> new IllegalArgumentException("Budget not found: " + budgetId));
-        budget.setSpentAmount(budget.getSpentAmount().add(request.amount()));
-        budget.setLastAdjustmentNote(request.note());
-        if (budget.getSpentAmount().compareTo(budget.getTotalAmount()) > 0
-                && budget.getStatus() == BudgetStatus.ACTIVE) {
-            budget.setStatus(BudgetStatus.EXCEEDED);
-        }
-        return toDto(budgetRepository.save(budget));
+        return budgetLedger.entries(budget, org);
     }
 
     @Override
@@ -230,30 +246,62 @@ public class BudgetServiceImpl extends TenantAwareService implements BudgetServi
     @Transactional
     public void delete(UUID id) {
         Organisation org = requireTenantOrg();
-        Budget budget = budgetRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
-                .orElseThrow(() -> new IllegalArgumentException("Budget not found: " + id));
+        Budget budget = budgetLedger.lockForEdit(id, org);
+        if (budget.getCommittedAmount() != null && budget.getCommittedAmount().signum() > 0) {
+            // Deleting now would strand the open purchase orders and expenses: they
+            // could never be received or approved against it.
+            throw new IllegalStateException("Budget '" + budget.getName() + "' has open commitments of "
+                    + budget.getCommittedAmount().toPlainString() + " " + budget.getCurrency()
+                    + "; approve, reject or cancel them before deleting the budget");
+        }
         budget.setDeletedAt(Instant.now());
         budgetRepository.save(budget);
     }
 
-    private void applyFields(Budget budget, BudgetDto dto, Organisation org) {
+    /**
+     * Applies the client-editable fields of a create or full (PUT) update.
+     *
+     * <p>{@code spentAmount} and {@code committedAmount} are deliberately not
+     * client-editable: they are running totals maintained by the budget ledger
+     * (adjustments, purchase orders and expenses). Accepting them from the request
+     * let an edit silently wipe the recorded spend.
+     */
+    private void applyFields(Budget budget, BudgetDto dto, Organisation org, boolean creating) {
         budget.setName(dto.getName());
         budget.setDescription(dto.getDescription());
         budget.setTotalAmount(dto.getTotalAmount());
-        budget.setSpentAmount(dto.getSpentAmount() != null ? dto.getSpentAmount() : BigDecimal.ZERO);
         budget.setCurrency(currencyResolver.resolveOrDefault(dto.getCurrency()));
         budget.setPeriodStart(dto.getPeriodStart());
         budget.setPeriodEnd(dto.getPeriodEnd());
-        budget.setStatus(dto.getStatus() != null ? dto.getStatus() : BudgetStatus.DRAFT);
+        if (dto.getStatus() != null) {
+            budget.setStatus(dto.getStatus());
+        } else if (creating) {
+            // A budget created without an explicit status is open for spend, matching
+            // the web form's default. DRAFT must be chosen deliberately.
+            budget.setStatus(BudgetStatus.ACTIVE);
+        }
+        if (dto.getAlertThresholdPct() != null) {
+            budget.setAlertThresholdPct(dto.getAlertThresholdPct());
+        }
         budget.setFiscalYear(dto.getFiscalYear());
         budget.setOrganisation(org);
 
+        budget.setDepartment(null);
         if (dto.getDepartmentId() != null) {
             departmentRepository.findAllByOrganisationAndDeletedAtIsNull(org)
                     .stream()
                     .filter(d -> d.getId().equals(dto.getDepartmentId()))
                     .findFirst()
                     .ifPresent(budget::setDepartment);
+        }
+        requireValidPeriod(budget);
+        budget.reconcileExceededStatus();
+    }
+
+    private static void requireValidPeriod(Budget budget) {
+        if (budget.getPeriodStart() != null && budget.getPeriodEnd() != null
+                && budget.getPeriodEnd().isBefore(budget.getPeriodStart())) {
+            throw new IllegalArgumentException("Budget period end must not be before period start");
         }
     }
 
@@ -293,7 +341,7 @@ public class BudgetServiceImpl extends TenantAwareService implements BudgetServi
         BigDecimal committed = b.getCommittedAmount() != null ? b.getCommittedAmount() : BigDecimal.ZERO;
         d.setCommittedAmount(committed);
         d.setAlertThresholdPct(b.getAlertThresholdPct() != null ? b.getAlertThresholdPct() : 80);
-        d.setAvailableAmount(b.getTotalAmount().subtract(b.getSpentAmount()).subtract(committed));
+        d.setAvailableAmount(b.availableAmount());
 
         // Linear forecast: (spent / elapsed) * total_days
         LocalDate today = LocalDate.now();

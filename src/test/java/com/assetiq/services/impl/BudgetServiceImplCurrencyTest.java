@@ -11,6 +11,8 @@ import com.assetiq.repositories.DepartmentRepository;
 import com.assetiq.repositories.ExpenseRepository;
 import com.assetiq.repositories.OrganisationRepository;
 import com.assetiq.services.CurrencyResolver;
+import com.assetiq.services.NotificationService;
+import com.assetiq.services.budget.LedgerFixture;
 import com.assetiq.services.money.MoneyTestSupport;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -29,6 +31,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -53,7 +56,9 @@ class BudgetServiceImplCurrencyTest {
     void setUp() {
         service = new BudgetServiceImpl(organisationRepository, budgetRepository, departmentRepository,
                 currencyResolver, expenseRepository,
-                MoneyTestSupport.aggregatorWithRates(Map.of("USD", "15", "EUR", "16")));
+                MoneyTestSupport.aggregatorWithRates(Map.of("USD", "15", "EUR", "16")),
+                new LedgerFixture(budgetRepository,
+                        mock(NotificationService.class)).service);
         org = new Organisation();
         org.setId(UUID.randomUUID());
         org.setBillingCurrency("GHS");
@@ -108,8 +113,7 @@ class BudgetServiceImplCurrencyTest {
     void patch_normalisesAndValidatesCurrency() {
         Budget existing = budget(null, "GHS", "10", "0", "0");
         UUID id = existing.getId();
-        when(budgetRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)).thenReturn(Optional.of(existing));
-        when(budgetRepository.save(any(Budget.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(budgetRepository.findByIdForUpdate(id, org)).thenReturn(Optional.of(existing));
 
         BudgetDto ok = new BudgetDto();
         ok.setCurrency(" usd ");
@@ -128,8 +132,7 @@ class BudgetServiceImplCurrencyTest {
     @DisplayName("an unknown 3-letter code is rejected before anything is saved")
     void patch_rejectsUnknownCode() {
         Budget existing = budget(null, "GHS", "10", "0", "0");
-        when(budgetRepository.findByIdAndOrganisationAndDeletedAtIsNull(existing.getId(), org))
-                .thenReturn(Optional.of(existing));
+        when(budgetRepository.findByIdForUpdate(existing.getId(), org)).thenReturn(Optional.of(existing));
         BudgetDto bad = new BudgetDto();
         bad.setCurrency("ZZZ");
 
