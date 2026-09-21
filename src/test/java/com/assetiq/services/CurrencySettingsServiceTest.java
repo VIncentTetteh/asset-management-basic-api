@@ -75,6 +75,28 @@ class CurrencySettingsServiceTest {
     }
 
     @Test
+    @DisplayName("GET omits currencies no chain of rates reaches from the base")
+    void get_omitsUnreachableCurrencies() {
+        when(organisationRepository.findByIdAndDeletedAtIsNull(tenant.getId())).thenReturn(Optional.of(tenant));
+        // EUR<->CHF is an island: offering either would be a switch that does nothing.
+        when(exchangeRateRepository.findByOrganisationAndDeletedAtIsNull(tenant)).thenReturn(List.of(
+                rate("USD", "GHS"), rate("EUR", "CHF")));
+
+        assertThat(service.get(false).availableCurrencies()).containsExactly("GHS", "USD");
+    }
+
+    @Test
+    @DisplayName("GET ignores rates that only take effect in the future")
+    void get_ignoresFutureDatedRates() {
+        when(organisationRepository.findByIdAndDeletedAtIsNull(tenant.getId())).thenReturn(Optional.of(tenant));
+        ExchangeRate future = rate("USD", "GHS");
+        future.setEffectiveDate(java.time.LocalDate.now().plusDays(3));
+        when(exchangeRateRepository.findByOrganisationAndDeletedAtIsNull(tenant)).thenReturn(List.of(future));
+
+        assertThat(service.get(false).availableCurrencies()).containsExactly("GHS");
+    }
+
+    @Test
     @DisplayName("PUT normalises the code, updates only the current tenant and audits the change")
     void update_changesCurrentTenantOnly() {
         when(organisationRepository.findByIdAndDeletedAtIsNull(tenant.getId())).thenReturn(Optional.of(tenant));

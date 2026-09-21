@@ -14,7 +14,14 @@ import org.springframework.security.core.GrantedAuthority;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
 import java.util.Locale;
 import java.util.Set;
 import java.util.TreeSet;
@@ -91,18 +98,50 @@ public class CurrencySettingsService extends TenantAwareService {
 
     private CurrencySettingsDto toDto(Organisation org, boolean canEdit) {
         String base = moneyAggregator.baseCurrencyOf(org);
-        Set<String> currencies = new TreeSet<>();
-        currencies.add(base);
-        for (ExchangeRate rate : exchangeRateRepository.findByOrganisationAndDeletedAtIsNull(org)) {
-            addIfPresent(currencies, rate.getBaseCurrency());
-            addIfPresent(currencies, rate.getTargetCurrency());
-        }
-        return new CurrencySettingsDto(base, new ArrayList<>(currencies), canEdit);
+        return new CurrencySettingsDto(base,
+                reachableCurrencies(base, exchangeRateRepository.findByOrganisationAndDeletedAtIsNull(org),
+                        LocalDate.now()),
+                canEdit);
     }
 
-    private static void addIfPresent(Set<String> target, String code) {
-        if (code != null && !code.isBlank()) {
-            target.add(code.trim().toUpperCase(Locale.ROOT));
+    /**
+     * Currencies an amount in {@code base} can actually be converted into, through any
+     * chain of rates already in effect. Offering a currency that appears in some rate
+     * but cannot be reached from the base made the display switcher look broken: the
+     * button highlighted and every figure stayed in the original currency.
+     */
+    static List<String> reachableCurrencies(String base, List<ExchangeRate> rates, LocalDate asOf) {
+        Map<String, Set<String>> graph = new HashMap<>();
+        for (ExchangeRate rate : rates) {
+            if (rate.getEffectiveDate() != null && rate.getEffectiveDate().isAfter(asOf)) {
+                continue;
+            }
+            if (rate.getRate() == null || rate.getRate().signum() <= 0) {
+                continue;
+            }
+            String from = normalise(rate.getBaseCurrency());
+            String to = normalise(rate.getTargetCurrency());
+            if (from == null || to == null) {
+                continue;
+            }
+            graph.computeIfAbsent(from, k -> new HashSet<>()).add(to);
+            graph.computeIfAbsent(to, k -> new HashSet<>()).add(from);
         }
+        Set<String> reached = new TreeSet<>();
+        Deque<String> queue = new ArrayDeque<>();
+        reached.add(base);
+        queue.add(base);
+        while (!queue.isEmpty()) {
+            for (String next : graph.getOrDefault(queue.poll(), Set.of())) {
+                if (reached.add(next)) {
+                    queue.add(next);
+                }
+            }
+        }
+        return new ArrayList<>(reached);
+    }
+
+    private static String normalise(String code) {
+        return code == null || code.isBlank() ? null : code.trim().toUpperCase(Locale.ROOT);
     }
 }

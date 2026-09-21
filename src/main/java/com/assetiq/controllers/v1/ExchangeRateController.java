@@ -30,7 +30,11 @@ public class ExchangeRateController {
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','ROLE_USER','MANAGE_EXCHANGE_RATES')")
+    // Reading rates is needed by every user who sees a money figure: the display-
+    // currency switcher converts client-side, and a 403 here silently left every
+    // amount unconverted for all but a few roles. Rows are tenant-scoped; writes
+    // below stay restricted.
+    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<ExchangeRateDto> getById(@PathVariable UUID id) {
         try {
             return ResponseEntity.ok(exchangeRateService.getById(id));
@@ -40,7 +44,7 @@ public class ExchangeRateController {
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','ROLE_USER','MANAGE_EXCHANGE_RATES')")
+    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<List<ExchangeRateDto>> listAll() {
         return ResponseEntity.ok(exchangeRateService.listAll());
     }
@@ -50,7 +54,7 @@ public class ExchangeRateController {
      * Example: GET /api/v1/exchange-rates/convert?amount=100&from=USD&to=EUR&asOf=2024-01-15
      */
     @GetMapping("/convert")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','ROLE_USER','MANAGE_EXCHANGE_RATES')")
+    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<BigDecimal> convert(
             @RequestParam BigDecimal amount,
             @RequestParam String from,
