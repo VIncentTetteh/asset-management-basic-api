@@ -12,6 +12,12 @@ import com.assetiq.models.*;
 import com.assetiq.multitenancy.TenantContext;
 import com.assetiq.repositories.*;
 import com.assetiq.enums.NotificationType;
+import com.assetiq.assets.AssetLabels;
+import com.assetiq.exceptions.ResourceNotFoundException;
+import com.assetiq.services.finance.DepreciationCalculator;
+import com.assetiq.services.money.CurrencyConversion;
+import com.assetiq.services.money.MoneyAccumulator;
+import com.assetiq.services.money.MoneyAggregator;
 import com.assetiq.services.AssetService;
 import com.assetiq.services.CurrencyResolver;
 import com.assetiq.services.EmailService;
@@ -34,6 +40,7 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
@@ -64,6 +71,7 @@ public class AssetServiceImpl implements AssetService {
     private final NotificationService notificationService;
     private final EmailService emailService;
     private final CurrencyResolver currencyResolver;
+    private final MoneyAggregator moneyAggregator;
 
     @Value("${app.email.base-url:http://localhost:3000}")
     private String baseUrl;
@@ -84,7 +92,8 @@ public class AssetServiceImpl implements AssetService {
             DisposalRecordRepository disposalRecordRepository,
             NotificationService notificationService,
             EmailService emailService,
-            CurrencyResolver currencyResolver) {
+            CurrencyResolver currencyResolver,
+            MoneyAggregator moneyAggregator) {
         this.assetRepository = assetRepository;
         this.departmentRepository = departmentRepository;
         this.organisationRepository = organisationRepository;
@@ -102,6 +111,7 @@ public class AssetServiceImpl implements AssetService {
         this.notificationService = notificationService;
         this.emailService = emailService;
         this.currencyResolver = currencyResolver;
+        this.moneyAggregator = moneyAggregator;
     }
 
     // ────────────────────────────────────────────────────
@@ -117,10 +127,40 @@ public class AssetServiceImpl implements AssetService {
                 .orElseThrow(() -> new AccessDeniedException("Organisation not found for current tenant."));
     }
 
-    private boolean isAdmin() {
+    /** Authorities allowed to edit an asset; mirrors {@code AssetController} PUT/PATCH. */
+    static final Set<String> EDIT_AUTHORITIES = Set.of("ROLE_ADMIN", "ROLE_ORG_ADMIN", "EDIT_ASSET");
+    /** Authorities allowed to delete an asset; mirrors {@code AssetController} DELETE. */
+    static final Set<String> DELETE_AUTHORITIES = Set.of("ROLE_ADMIN", "ROLE_ORG_ADMIN", "DELETE_ASSET");
+    /** Authorities allowed to (un)assign an asset to a user; mirrors the assign-user endpoints. */
+    static final Set<String> ASSIGN_AUTHORITIES =
+            Set.of("ROLE_ADMIN", "ROLE_ORG_ADMIN", "EDIT_ASSET", "TRANSFER_ASSET");
+
+    /** Relations an update may clear explicitly through {@link AssetDto#getClearFields()}. */
+    static final Set<String> CLEARABLE_FIELDS =
+            Set.of("departmentId", "locationId", "supplierId", "purchaseOrderId", "assignedUserId");
+
+    private static boolean hasAnyAuthority(Set<String> allowed) {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         return auth != null && auth.getAuthorities().stream()
-                .anyMatch(a -> a.getAuthority().equals("ROLE_ADMIN"));
+                .anyMatch(a -> allowed.contains(a.getAuthority()));
+    }
+
+    /** Recompute and store the book value from the single depreciation engine. */
+    private static void refreshBookValue(Asset asset) {
+        asset.setCurrentBookValue(DepreciationCalculator.forAsset(asset, LocalDate.now()).netBookValue());
+    }
+
+    /** Fill the read-only depreciation fields of {@code d} from a live calculation. */
+    private static void applyDepreciation(AssetDto d, Asset a) {
+        DepreciationCalculator.Result r = DepreciationCalculator.forAsset(a, LocalDate.now());
+        d.setCurrentBookValue(r.netBookValue());
+        d.setAccumulatedDepreciation(r.accumulatedDepreciation());
+        d.setMonthlyDepreciation(r.monthlyDepreciation());
+        d.setDepreciationConfigured(r.configured());
+        d.setFullyDepreciated(r.fullyDepreciated());
+        d.setEffectiveDepreciationMethod(r.method());
+        d.setEffectiveUsefulLifeMonths(r.usefulLifeMonths());
+        d.setEffectiveResidualValue(r.residualValue());
     }
 
     // ────────────────────────────────────────────────────
@@ -212,11 +252,13 @@ public class AssetServiceImpl implements AssetService {
                     .ifPresent(asset::setPurchaseOrder);
         }
 
+        refreshBookValue(asset);
+
         try {
             Asset saved = assetRepository.save(asset);
             notificationService.notifyOrgAdmins(organisation, NotificationType.SYSTEM,
                     "New Asset Created",
-                    "Asset '" + saved.getName() + "' (tag: " + saved.getAssetTag() + ") has been added to the inventory.",
+                    AssetLabels.describe(saved) + " has been added to the inventory.",
                     saved.getId(), "/api/v1/assets/" + saved.getId());
             // Create DTO directly without loading related entities to avoid deep joins
             AssetDto result = new AssetDto();
@@ -251,6 +293,7 @@ public class AssetServiceImpl implements AssetService {
             result.setSupplierId(dto.getSupplierId());
             result.setAssignedUserId(dto.getAssignedUserId());
             result.setPurchaseOrderId(dto.getPurchaseOrderId());
+            applyDepreciation(result, saved);
 
             return result;
         } catch (DataIntegrityViolationException ex) {
@@ -275,6 +318,7 @@ public class AssetServiceImpl implements AssetService {
     }
 
     @Override
+    @Transactional
     public AssetDto assignToDepartment(UUID assetId, UUID departmentId) {
         Organisation org = requireTenantOrg();
         Asset asset = assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(assetId, org)
@@ -294,10 +338,11 @@ public class AssetServiceImpl implements AssetService {
     }
 
     @Override
+    @Transactional
     public AssetDto assignToUser(UUID assetId, UUID userId) {
         Organisation org = requireTenantOrg();
-        if (!isAdmin()) {
-            throw new AccessDeniedException("Only administrators can assign assets to users");
+        if (!hasAnyAuthority(ASSIGN_AUTHORITIES)) {
+            throw new AccessDeniedException("You do not have permission to assign assets to users");
         }
 
         Asset asset = assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(assetId, org)
@@ -347,10 +392,11 @@ public class AssetServiceImpl implements AssetService {
     }
 
     @Override
+    @Transactional
     public AssetDto unassignUser(UUID assetId) {
         Organisation org = requireTenantOrg();
-        if (!isAdmin()) {
-            throw new AccessDeniedException("Only administrators can unassign assets from users");
+        if (!hasAnyAuthority(ASSIGN_AUTHORITIES)) {
+            throw new AccessDeniedException("You do not have permission to unassign assets from users");
         }
 
         Asset asset = assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(assetId, org)
@@ -363,12 +409,12 @@ public class AssetServiceImpl implements AssetService {
     @Transactional
     public AssetDto update(UUID id, AssetDto dto) {
         Organisation org = requireTenantOrg();
-        // ROLE_ADMIN can update any asset in the org; ROLE_USER cannot write
-        if (!isAdmin()) {
-            throw new AccessDeniedException("Only administrators can update assets");
+        if (!hasAnyAuthority(EDIT_AUTHORITIES)) {
+            throw new AccessDeniedException("You do not have permission to edit assets");
         }
         Asset asset = assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
-                .orElseThrow(() -> new IllegalArgumentException("Asset not found"));
+                .orElseThrow(() -> new ResourceNotFoundException("Asset not found"));
+        Set<String> clears = validateClearFields(dto);
 
         if (dto.getName() != null)
             asset.setName(dto.getName());
@@ -442,10 +488,17 @@ public class AssetServiceImpl implements AssetService {
                     .ifPresent(asset::setPurchaseOrder);
         }
 
+        if (clears.contains("departmentId")) asset.setDepartment(null);
+        if (clears.contains("locationId")) asset.setLocation(null);
+        if (clears.contains("supplierId")) asset.setSupplier(null);
+        if (clears.contains("purchaseOrderId")) asset.setPurchaseOrder(null);
+        if (clears.contains("assignedUserId")) asset.setAssignedUser(null);
+
+        refreshBookValue(asset);
         Asset saved = assetRepository.save(asset);
         notificationService.notifyOrgAdmins(org, NotificationType.SYSTEM,
                 "Asset Updated",
-                "Asset '" + saved.getName() + "' has been updated.",
+                AssetLabels.describe(saved) + " has been updated.",
                 saved.getId(), "/api/v1/assets/" + saved.getId());
         return toDto(saved);
     }
@@ -456,23 +509,52 @@ public class AssetServiceImpl implements AssetService {
         return update(id, dto);
     }
 
+    /**
+     * Validates {@link AssetDto#getClearFields()}: every name must be clearable and
+     * must not also carry a value in the same request.
+     */
+    private static Set<String> validateClearFields(AssetDto dto) {
+        if (dto.getClearFields() == null || dto.getClearFields().isEmpty()) {
+            return Set.of();
+        }
+        Set<String> clears = new HashSet<>(dto.getClearFields());
+        for (String field : clears) {
+            if (!CLEARABLE_FIELDS.contains(field)) {
+                throw new IllegalArgumentException("Field cannot be cleared: " + field
+                        + ". Clearable fields: " + new TreeSet<>(CLEARABLE_FIELDS));
+            }
+        }
+        Map<String, Object> provided = new HashMap<>();
+        provided.put("departmentId", dto.getDepartmentId());
+        provided.put("locationId", dto.getLocationId());
+        provided.put("supplierId", dto.getSupplierId());
+        provided.put("purchaseOrderId", dto.getPurchaseOrderId());
+        provided.put("assignedUserId", dto.getAssignedUserId());
+        for (String field : clears) {
+            if (provided.get(field) != null) {
+                throw new IllegalArgumentException("Field is both set and cleared: " + field);
+            }
+        }
+        return clears;
+    }
+
     @Override
     @Transactional
     public void delete(UUID id) {
         Organisation org = requireTenantOrg();
-        // Only admins may delete
-        if (!isAdmin()) {
-            throw new AccessDeniedException("Only administrators can delete assets");
+        if (!hasAnyAuthority(DELETE_AUTHORITIES)) {
+            throw new AccessDeniedException("You do not have permission to delete assets");
         }
         Asset asset = assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
-                .orElseThrow(() -> new IllegalArgumentException("Asset not found"));
+                .orElseThrow(() -> new ResourceNotFoundException("Asset not found"));
         String assetName = asset.getName();
+        String assetTag = asset.getAssetTag();
         UUID assetId = asset.getId();
         asset.setDeletedAt(Instant.now());
         assetRepository.save(asset);
         notificationService.notifyOrgAdmins(org, NotificationType.SYSTEM,
                 "Asset Deleted",
-                "Asset '" + assetName + "' has been removed from the inventory.",
+                AssetLabels.describe(assetName, assetTag) + " has been removed from the inventory.",
                 assetId, "/api/v1/assets");
     }
 
@@ -570,7 +652,6 @@ public class AssetServiceImpl implements AssetService {
         d.setDepreciationMethod(a.getDepreciationMethod());
         d.setUsefulLifeMonths(a.getUsefulLifeMonths());
         d.setResidualValue(a.getResidualValue());
-        d.setCurrentBookValue(a.getCurrentBookValue());
         d.setWarrantyExpiryDate(a.getWarrantyExpiryDate());
         d.setStatus(a.getStatus());
         d.setCondition(a.getCondition());
@@ -594,6 +675,7 @@ public class AssetServiceImpl implements AssetService {
             d.setPurchaseOrderId(a.getPurchaseOrder().getId());
         d.setCreatedAt(a.getCreatedAt());
         d.setUpdatedAt(a.getUpdatedAt());
+        applyDepreciation(d, a);
         return d;
     }
 
@@ -665,6 +747,7 @@ public class AssetServiceImpl implements AssetService {
     // ────────────────────────────────────────────────────
 
     @Override
+    @Transactional
     public TcoDto getTco(UUID assetId) {
         Organisation org = requireTenantOrg();
         Asset asset = assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(assetId, org)
@@ -789,6 +872,17 @@ public class AssetServiceImpl implements AssetService {
         long assigned = assetRepository.countAssigned(org);
         stats.setAssigned(assigned);
         stats.setUnassigned(stats.getTotal() - assigned);
+
+        // Register-wide value (same basis as the dashboard's totalAssetValue).
+        CurrencyConversion fx = moneyAggregator.begin(org);
+        MoneyAccumulator value = fx.newAccumulator();
+        for (Object[] row : assetRepository.sumOnBookPurchaseCostByCurrency(org)) {
+            value.add((BigDecimal) row[1], (String) row[0]);
+        }
+        stats.setTotalValue(value.amount());
+        stats.setCurrency(fx.baseCurrency());
+        stats.setComplete(value.isComplete());
+        stats.setMissingRates(value.missingRates());
         return stats;
     }
 }

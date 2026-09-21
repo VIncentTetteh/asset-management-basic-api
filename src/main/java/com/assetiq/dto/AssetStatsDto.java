@@ -11,6 +11,11 @@ public class AssetStatsDto {
     private long missing;
     private long assigned;
     private long unassigned;
+    /** Register value: purchase cost of every non-disposed asset, in {@link #currency}. */
+    private java.math.BigDecimal totalValue;
+    private String currency;
+    private boolean complete = true;
+    private java.util.List<String> missingRates = java.util.List.of();
 
     public long getTotal()       { return total; }
     public long getInUse()       { return inUse; }
@@ -22,6 +27,10 @@ public class AssetStatsDto {
     public long getMissing()     { return missing; }
     public long getAssigned()    { return assigned; }
     public long getUnassigned()  { return unassigned; }
+    public java.math.BigDecimal getTotalValue() { return totalValue; }
+    public String getCurrency()  { return currency; }
+    public boolean isComplete()  { return complete; }
+    public java.util.List<String> getMissingRates() { return missingRates; }
 
     public void setTotal(long total)             { this.total = total; }
     public void setInUse(long inUse)             { this.inUse = inUse; }
@@ -33,4 +42,8 @@ public class AssetStatsDto {
     public void setMissing(long missing)         { this.missing = missing; }
     public void setAssigned(long assigned)       { this.assigned = assigned; }
     public void setUnassigned(long unassigned)   { this.unassigned = unassigned; }
+    public void setTotalValue(java.math.BigDecimal totalValue) { this.totalValue = totalValue; }
+    public void setCurrency(String currency)     { this.currency = currency; }
+    public void setComplete(boolean complete)    { this.complete = complete; }
+    public void setMissingRates(java.util.List<String> missingRates) { this.missingRates = missingRates; }
 }

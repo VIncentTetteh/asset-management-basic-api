@@ -135,7 +135,7 @@ public class AssetController {
     }
 
     @PostMapping("/{id}/assign-user/{userId}")
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','DELETE_ASSET','EDIT_ASSET','TRANSFER_ASSET','DISPOSE_ASSET')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','EDIT_ASSET','TRANSFER_ASSET')")
     public ResponseEntity<AssetDto> assignUser(@PathVariable UUID id, @PathVariable UUID userId) {
         try {
             AssetDto dto = assetService.assignToUser(id, userId);
@@ -148,7 +148,7 @@ public class AssetController {
     }
 
     @DeleteMapping("/{id}/assign-user")
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','DELETE_ASSET','EDIT_ASSET','TRANSFER_ASSET','DISPOSE_ASSET')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','EDIT_ASSET','TRANSFER_ASSET')")
     public ResponseEntity<AssetDto> unassignUser(@PathVariable UUID id) {
         try {
             AssetDto dto = assetService.unassignUser(id);
@@ -159,29 +159,20 @@ public class AssetController {
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','DELETE_ASSET','EDIT_ASSET','TRANSFER_ASSET','DISPOSE_ASSET')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','EDIT_ASSET')")
     public ResponseEntity<AssetDto> update(@PathVariable UUID id, @Valid @RequestBody AssetDto dto) {
-        try {
-            AssetDto updated = assetService.update(id, dto);
-            return ResponseEntity.ok(updated);
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.notFound().build();
-        }
+        // Unknown asset -> 404 (ResourceNotFoundException); invalid input -> 400.
+        return ResponseEntity.ok(assetService.update(id, dto));
     }
 
     @PatchMapping("/{id}")
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','DELETE_ASSET','EDIT_ASSET','TRANSFER_ASSET','DISPOSE_ASSET')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','EDIT_ASSET')")
     public ResponseEntity<AssetDto> patch(@PathVariable UUID id, @RequestBody AssetDto dto) {
-        try {
-            AssetDto updated = assetService.patch(id, dto);
-            return ResponseEntity.ok(updated);
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.notFound().build();
-        }
+        return ResponseEntity.ok(assetService.patch(id, dto));
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','DELETE_ASSET','EDIT_ASSET','TRANSFER_ASSET','DISPOSE_ASSET')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','DELETE_ASSET')")
     public ResponseEntity<Void> delete(@PathVariable UUID id) {
         assetService.delete(id);
         return ResponseEntity.noContent().build();

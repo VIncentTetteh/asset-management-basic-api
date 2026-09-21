@@ -1,6 +1,7 @@
 package com.assetiq.dto;
 
 import com.assetiq.enums.*;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
@@ -8,6 +9,7 @@ import lombok.Data;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.UUID;
 
 @Data
@@ -76,4 +78,40 @@ public class AssetDto {
     private Instant createdAt;
 
     private Instant updatedAt;
+
+    // ── Depreciation (read-only, computed by DepreciationCalculator as of today) ──
+    // currentBookValue above is also computed live on read.
+
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private BigDecimal accumulatedDepreciation;
+
+    /** Charge for the month of service in progress; zero when fully depreciated or disposed. */
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private BigDecimal monthlyDepreciation;
+
+    /** False when no useful life (asset or category policy) or purchase date is available. */
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private Boolean depreciationConfigured;
+
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private Boolean fullyDepreciated;
+
+    /** Method actually applied (asset field, else category policy, else straight-line). */
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private DepreciationMethod effectiveDepreciationMethod;
+
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private Integer effectiveUsefulLifeMonths;
+
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private BigDecimal effectiveResidualValue;
+
+    /**
+     * Update only: optional relations to clear, by DTO field name. A null field in
+     * an update means "leave unchanged", so clearing needs to be explicit. Allowed:
+     * {@code departmentId}, {@code locationId}, {@code supplierId},
+     * {@code purchaseOrderId}, {@code assignedUserId}.
+     */
+    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
+    private List<String> clearFields;
 }
