@@ -168,6 +168,25 @@ Resources:
         - { Key: Environment, Value: !Ref Environment }
         - { Key: ManagedBy, Value: cloudformation }
 
+  # SMTP settings. Created with an empty host so email stays OFF until the real
+  # values are written out of band (put-secret-value with the full JSON:
+  # host, port, username, password, from, and optionally starttls/ssl).
+  EmailSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "${ProjectName}/${Environment}/email"
+      Description: SMTP settings for AssetIQ transactional email. Empty host = email disabled.
+      KmsKeyId: !Ref SecretsKey
+      GenerateSecretString:
+        SecretStringTemplate: '{"host":"","port":"587","username":"","from":"","starttls":"true","ssl":"false"}'
+        GenerateStringKey: "password"
+        PasswordLength: 32
+        ExcludePunctuation: true
+      Tags:
+        - { Key: Project, Value: !Ref ProjectName }
+        - { Key: Environment, Value: !Ref Environment }
+        - { Key: ManagedBy, Value: cloudformation }
+
   PaystackSecret:
     Type: AWS::SecretsManager::Secret
     Properties:
@@ -406,7 +425,7 @@ Resources:
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
-              # Scoped to exactly four secret ARNs. The instance fetches these at
+              # Scoped to exactly five secret ARNs. The instance fetches these at
               # boot under its own identity; no secret is ever baked into user data,
               # an image, or an environment file on disk.
               - Effect: Allow
@@ -417,6 +436,7 @@ Resources:
                   - !Ref JwtSecret
                   - !Ref PaystackSecret
                   - !Ref DataEncryptionKeySecret
+                  - !Ref EmailSecret
                   - !GetAtt Database.MasterUserSecret.SecretArn
                 Condition:
                   Bool: { "aws:SecureTransport": "true" }
@@ -477,6 +497,9 @@ Outputs:
   DataEncryptionKeySecretArn:
     Value: !Ref DataEncryptionKeySecret
     Export: { Name: !Sub "${AWS::StackName}-DataEncryptionKeySecretArn" }
+  EmailSecretArn:
+    Value: !Ref EmailSecret
+    Export: { Name: !Sub "${AWS::StackName}-EmailSecretArn" }
   PaystackSecretArn:
     Value: !Ref PaystackSecret
     Export: { Name: !Sub "${AWS::StackName}-PaystackSecretArn" }
