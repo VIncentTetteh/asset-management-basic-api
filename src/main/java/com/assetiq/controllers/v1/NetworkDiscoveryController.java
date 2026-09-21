@@ -20,6 +20,8 @@ import java.util.UUID;
  * IT Asset Discovery — network scanning and device management.
  * Base path: /api/v1/discovery
  */
+// Class level: read access. Every mutating endpoint narrows it to
+// MANAGE_NETWORK_DISCOVERY (VIEW_ used to be enough to launch scans).
 @RestController
 @RequestMapping("/api/v1/discovery")
 @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_ORGANIZATION_SETTINGS','VIEW_NETWORK_DISCOVERY','MANAGE_NETWORK_DISCOVERY')")
@@ -37,6 +39,7 @@ public class NetworkDiscoveryController {
      * Body: { cidrRange, ipAddresses, portScan, ports, timeoutMs }
      */
     @PostMapping("/scan")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_NETWORK_DISCOVERY')")
     public ResponseEntity<List<DiscoveredDeviceDto>> scan(@RequestBody NetworkScanRequestDto request) {
         return ResponseEntity.ok(discoveryService.scan(request));
     }
@@ -79,6 +82,7 @@ public class NetworkDiscoveryController {
      * Promote a discovered device to a managed Asset.
      */
     @PostMapping("/devices/{id}/promote")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_NETWORK_DISCOVERY')")
     public ResponseEntity<Map<String, Object>> promote(@PathVariable UUID id) {
         return ResponseEntity.ok(discoveryService.promote(id));
     }
@@ -87,6 +91,7 @@ public class NetworkDiscoveryController {
      * DELETE /api/v1/discovery/devices/{id}
      */
     @DeleteMapping("/devices/{id}")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_NETWORK_DISCOVERY')")
     public ResponseEntity<Void> delete(@PathVariable UUID id) {
         discoveryService.delete(id);
         return ResponseEntity.noContent().build();
