@@ -41,6 +41,18 @@ public class MoneyAggregator {
                 (from, to, date) -> exchangeRateService.findRate(org, from, to, date));
     }
 
+    /**
+     * Start a conversion pass into an arbitrary {@code targetCurrency} (e.g. one
+     * asset's own currency for its TCO), using the tenant's rates as of today.
+     * Falls back to the tenant base currency when {@code targetCurrency} is blank.
+     */
+    public CurrencyConversion beginIn(Organisation org, String targetCurrency) {
+        String target = targetCurrency != null && !targetCurrency.isBlank()
+                ? targetCurrency : baseCurrencyOf(org);
+        return new CurrencyConversion(target, LocalDate.now(),
+                (from, to, date) -> exchangeRateService.findRate(org, from, to, date));
+    }
+
     /** The tenant's base (reporting) currency. */
     public String baseCurrencyOf(Organisation org) {
         if (org != null && org.getBillingCurrency() != null && !org.getBillingCurrency().isBlank()) {

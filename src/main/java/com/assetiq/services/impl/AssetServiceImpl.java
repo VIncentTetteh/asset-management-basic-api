@@ -756,13 +756,17 @@ public class AssetServiceImpl implements AssetService {
         // 1. Acquisition cost
         BigDecimal acquisitionCost = asset.getPurchaseCost() != null ? asset.getPurchaseCost() : BigDecimal.ZERO;
 
+        // TCO is expressed in the asset's own currency. Maintenance costs and
+        // disposal values carry their own currency, so each is converted into the
+        // asset's currency; amounts without a rate are excluded and reported.
+        CurrencyConversion fx = moneyAggregator.beginIn(org, asset.getCurrency());
+
         // 2. Maintenance costs
         Set<com.assetiq.models.MaintenanceRecord> maintenanceRecords =
                 maintenanceRecordRepository.findByAssetIdAndDeletedAtIsNull(assetId);
-        BigDecimal totalMaintenanceCost = maintenanceRecords.stream()
-                .filter(m -> m.getCost() != null)
-                .map(com.assetiq.models.MaintenanceRecord::getCost)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal totalMaintenanceCost = fx.sum(maintenanceRecords,
+                com.assetiq.models.MaintenanceRecord::getCost,
+                com.assetiq.models.MaintenanceRecord::effectiveCurrency).amount();
         int maintenanceRecordCount = maintenanceRecords.size();
 
         // 3. Insurance costs (annual premium * years owned)
@@ -792,19 +796,16 @@ public class AssetServiceImpl implements AssetService {
         }
 
         // 5. Disposal/sale recovery
-        BigDecimal disposalRecovery = disposalRecordRepository.findByAssetIdAndDeletedAtIsNull(assetId)
-                .stream()
-                .filter(d -> d.getSaleValue() != null)
-                .map(com.assetiq.models.DisposalRecord::getSaleValue)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal disposalRecovery = fx.sum(disposalRecordRepository.findByAssetIdAndDeletedAtIsNull(assetId),
+                com.assetiq.models.DisposalRecord::getSaleValue,
+                com.assetiq.models.DisposalRecord::effectiveCurrency).amount();
 
         // 6. Net TCO = acquisition + maintenance + insurance + downtime - recovery
         //
-        // Currency: every component is in the asset's own currency. Maintenance and
-        // disposal records have no currency column and are recorded against this
-        // asset, so they are in the asset's currency by convention; insurance and
-        // downtime rates are asset fields. No cross-currency addition happens here,
-        // and the result is labelled with the asset's currency (not the tenant base).
+        // Currency: every component is in the asset's own currency - maintenance
+        // and disposal amounts were converted above; insurance and downtime rates
+        // are asset fields. The result is labelled with the asset's currency (not
+        // the tenant base), and flags any amount excluded for lack of a rate.
         BigDecimal netTco = acquisitionCost
                 .add(totalMaintenanceCost)
                 .add(totalInsuranceCost)
@@ -821,7 +822,9 @@ public class AssetServiceImpl implements AssetService {
         dto.setTotalDowntimeCost(totalDowntimeCost);
         dto.setDisposalRecovery(disposalRecovery);
         dto.setNetTco(netTco);
-        dto.setCurrency(asset.getCurrency());
+        dto.setCurrency(asset.getCurrency() != null ? asset.getCurrency() : fx.baseCurrency());
+        dto.setComplete(fx.isComplete());
+        dto.setMissingRates(fx.missingRates());
         dto.setCalculatedAt(Instant.now());
         dto.setMaintenanceRecordCount(maintenanceRecordCount);
         dto.setDowntimeDays(downtimeDays);

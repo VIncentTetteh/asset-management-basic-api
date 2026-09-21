@@ -25,6 +25,9 @@ public class DisposalRecordDto {
 
     private BigDecimal saleValue;
 
+    /** ISO-4217 code of {@code saleValue}; defaults to the asset's currency when omitted on create. */
+    private String currency;
+
     @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private UUID approvedById;
 

@@ -9,6 +9,7 @@ import com.assetiq.enums.AssetStatus;
 import com.assetiq.enums.UserStatus;
 import com.assetiq.repositories.*;
 import com.assetiq.enums.NotificationType;
+import com.assetiq.services.CurrencyResolver;
 import com.assetiq.services.DisposalService;
 import com.assetiq.services.NotificationService;
 import com.assetiq.services.TenantAwareService;
@@ -66,6 +67,7 @@ public class DisposalServiceImpl extends TenantAwareService implements DisposalS
         record.setDisposalMethod(recordDto.getDisposalMethod());
         record.setDisposalDate(recordDto.getDisposalDate());
         record.setSaleValue(recordDto.getSaleValue());
+        record.setCurrency(MaintenanceServiceImpl.recordCurrency(recordDto.getCurrency(), asset));
         record.setApprovedBy(approver);
         record.setReason(recordDto.getReason());
         record.setComplianceDocumentUrl(recordDto.getComplianceDocumentUrl());
@@ -144,6 +146,7 @@ public class DisposalServiceImpl extends TenantAwareService implements DisposalS
         record.setDisposalMethod(recordDto.getDisposalMethod());
         record.setDisposalDate(recordDto.getDisposalDate());
         record.setSaleValue(recordDto.getSaleValue());
+        record.setCurrency(MaintenanceServiceImpl.recordCurrency(recordDto.getCurrency(), record.getAsset()));
         record.setReason(recordDto.getReason());
         record.setComplianceDocumentUrl(recordDto.getComplianceDocumentUrl());
 
@@ -165,6 +168,9 @@ public class DisposalServiceImpl extends TenantAwareService implements DisposalS
         }
         if (recordDto.getSaleValue() != null) {
             record.setSaleValue(recordDto.getSaleValue());
+        }
+        if (recordDto.getCurrency() != null) {
+            record.setCurrency(CurrencyResolver.normaliseIsoCode(recordDto.getCurrency()));
         }
         if (recordDto.getReason() != null) {
             record.setReason(recordDto.getReason());
@@ -193,6 +199,7 @@ public class DisposalServiceImpl extends TenantAwareService implements DisposalS
         dto.setDisposalMethod(record.getDisposalMethod());
         dto.setDisposalDate(record.getDisposalDate());
         dto.setSaleValue(record.getSaleValue());
+        dto.setCurrency(record.effectiveCurrency());
         dto.setApprovedById(record.getApprovedBy().getId());
         dto.setReason(record.getReason());
         dto.setComplianceDocumentUrl(record.getComplianceDocumentUrl());

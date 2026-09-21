@@ -30,6 +30,9 @@ public class MaintenanceRecordDto {
 
     private BigDecimal cost;
 
+    /** ISO-4217 code of {@code cost}; defaults to the asset's currency when omitted on create. */
+    private String currency;
+
     private MaintenanceStatus status;
 
     private LocalDate nextDueDate;

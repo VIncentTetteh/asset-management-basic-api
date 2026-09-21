@@ -330,6 +330,59 @@ class AssetServiceImplTest {
         assertThat(stats.getMissingRates()).containsExactly("JPY->GHS");
     }
 
+    @Nested
+    @DisplayName("TCO currency")
+    class TcoCurrency {
+
+        @Test
+        @DisplayName("maintenance and disposal amounts are converted into the asset's currency")
+        void convertsRecordCurrencies() {
+            asset.setCurrency("GHS");
+            asset.setPurchaseCost(new BigDecimal("1000"));
+            com.assetiq.models.MaintenanceRecord usd = new com.assetiq.models.MaintenanceRecord();
+            usd.setAsset(asset);
+            usd.setCost(new BigDecimal("10"));
+            usd.setCurrency("USD");
+            com.assetiq.models.MaintenanceRecord legacy = new com.assetiq.models.MaintenanceRecord();
+            legacy.setAsset(asset);
+            legacy.setCost(new BigDecimal("50")); // no currency: the asset's
+            com.assetiq.models.DisposalRecord sale = new com.assetiq.models.DisposalRecord();
+            sale.setAsset(asset);
+            sale.setSaleValue(new BigDecimal("2"));
+            sale.setCurrency("USD");
+            when(maintenanceRecordRepository.findByAssetIdAndDeletedAtIsNull(asset.getId()))
+                    .thenReturn(java.util.Set.of(usd, legacy));
+            when(disposalRecordRepository.findByAssetIdAndDeletedAtIsNull(asset.getId()))
+                    .thenReturn(java.util.Set.of(sale));
+
+            var tco = service.getTco(asset.getId());
+
+            assertThat(tco.getCurrency()).isEqualTo("GHS");
+            assertThat(tco.getTotalMaintenanceCost()).isEqualByComparingTo("200.00"); // 10 USD x 15 + 50
+            assertThat(tco.getDisposalRecovery()).isEqualByComparingTo("30.00");
+            assertThat(tco.getNetTco()).isEqualByComparingTo("1170.00");
+            assertThat(tco.getComplete()).isTrue();
+        }
+
+        @Test
+        @DisplayName("an amount without a rate is excluded and reported")
+        void flagsMissingRate() {
+            asset.setCurrency("GHS");
+            com.assetiq.models.MaintenanceRecord eur = new com.assetiq.models.MaintenanceRecord();
+            eur.setAsset(asset);
+            eur.setCost(new BigDecimal("10"));
+            eur.setCurrency("EUR");
+            when(maintenanceRecordRepository.findByAssetIdAndDeletedAtIsNull(asset.getId()))
+                    .thenReturn(java.util.Set.of(eur));
+
+            var tco = service.getTco(asset.getId());
+
+            assertThat(tco.getTotalMaintenanceCost()).isEqualByComparingTo("0");
+            assertThat(tco.getComplete()).isFalse();
+            assertThat(tco.getMissingRates()).containsExactly("EUR->GHS");
+        }
+    }
+
     private static AssetDto rename(String name) {
         AssetDto dto = new AssetDto();
         dto.setName(name);

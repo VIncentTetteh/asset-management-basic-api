@@ -11,6 +11,7 @@ import com.assetiq.repositories.AssetRepository;
 import com.assetiq.repositories.OrganisationRepository;
 import com.assetiq.repositories.SupplierRepository;
 import com.assetiq.enums.NotificationType;
+import com.assetiq.services.CurrencyResolver;
 import com.assetiq.services.MaintenanceService;
 import com.assetiq.services.NotificationService;
 import com.assetiq.services.TenantAwareService;
@@ -59,6 +60,7 @@ public class MaintenanceServiceImpl extends TenantAwareService implements Mainte
         record.setScheduledDate(recordDto.getScheduledDate());
         record.setPerformedDate(recordDto.getPerformedDate());
         record.setCost(recordDto.getCost());
+        record.setCurrency(recordCurrency(recordDto.getCurrency(), asset));
         record.setStatus(recordDto.getStatus() != null ? recordDto.getStatus() : MaintenanceStatus.SCHEDULED);
         record.setNextDueDate(recordDto.getNextDueDate());
 
@@ -151,6 +153,7 @@ public class MaintenanceServiceImpl extends TenantAwareService implements Mainte
         record.setScheduledDate(recordDto.getScheduledDate());
         record.setPerformedDate(recordDto.getPerformedDate());
         record.setCost(recordDto.getCost());
+        record.setCurrency(recordCurrency(recordDto.getCurrency(), record.getAsset()));
         record.setStatus(recordDto.getStatus());
         record.setNextDueDate(recordDto.getNextDueDate());
 
@@ -181,6 +184,9 @@ public class MaintenanceServiceImpl extends TenantAwareService implements Mainte
         }
         if (recordDto.getCost() != null) {
             record.setCost(recordDto.getCost());
+        }
+        if (recordDto.getCurrency() != null) {
+            record.setCurrency(CurrencyResolver.normaliseIsoCode(recordDto.getCurrency()));
         }
         if (recordDto.getStatus() != null) {
             record.setStatus(recordDto.getStatus());
@@ -230,6 +236,17 @@ public class MaintenanceServiceImpl extends TenantAwareService implements Mainte
         recordRepository.save(record);
     }
 
+    /**
+     * The currency to store for a maintenance cost or disposal value: the supplied
+     * ISO code when given (validated), otherwise the asset's own currency.
+     */
+    static String recordCurrency(String supplied, Asset asset) {
+        if (supplied != null && !supplied.isBlank()) {
+            return CurrencyResolver.normaliseIsoCode(supplied);
+        }
+        return asset != null ? asset.getCurrency() : null;
+    }
+
     private MaintenanceRecordDto mapToDto(MaintenanceRecord record) {
         MaintenanceRecordDto dto = new MaintenanceRecordDto();
         dto.setId(record.getId());
@@ -242,6 +259,7 @@ public class MaintenanceServiceImpl extends TenantAwareService implements Mainte
             dto.setVendorId(record.getVendor().getId());
         }
         dto.setCost(record.getCost());
+        dto.setCurrency(record.effectiveCurrency());
         dto.setStatus(record.getStatus());
         dto.setNextDueDate(record.getNextDueDate());
         return dto;

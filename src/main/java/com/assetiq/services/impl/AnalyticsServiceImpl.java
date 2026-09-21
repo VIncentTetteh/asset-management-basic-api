@@ -40,9 +40,9 @@ import java.util.stream.Collectors;
  * currency through {@link MoneyAggregator}; every response carries
  * {@code currency}, {@code complete} and {@code missingRates}.
  *
- * <p>Maintenance and disposal records have no currency column of their own: a
- * maintenance cost and a disposal sale value are treated as being in the related
- * asset's currency (base currency when the record has no asset).
+ * <p>Maintenance costs and disposal sale values carry their own currency (V42);
+ * legacy rows without one are in the related asset's currency (base currency
+ * when the record has no asset).
  */
 @Service
 @Transactional(readOnly = true)
@@ -148,7 +148,7 @@ public class AnalyticsServiceImpl implements AnalyticsService {
         // asset's currency, then are converted.
         PortfolioValuation portfolio = PortfolioValuation.of(fx, onBooks, end);
 
-        // Maintenance cost has no currency column: it is in the related asset's currency.
+        // Maintenance cost is in the record's currency (legacy rows: the asset's).
         MoneyAccumulator totalMaintenanceCost = fx.sum(records, MaintenanceRecord::getCost, this::maintenanceCurrency);
 
         double averageAgeMonths = onBooks.stream()
@@ -177,11 +177,11 @@ public class AnalyticsServiceImpl implements AnalyticsService {
 
         MoneyAccumulator totalAcquisition = sumPurchaseCost(fx, acquired);
 
-        // Disposal sale value has no currency column: it is in the disposed asset's currency.
+        // Disposal sale value is in the record's currency (legacy rows: the asset's).
         MoneyAccumulator totalDisposal = fx.sum(
                 disposalRecordRepository.findByOrganisationAndDisposalDateBetweenAndDeletedAtIsNull(org, start, end),
                 DisposalRecord::getSaleValue,
-                d -> d.getAsset() != null ? d.getAsset().getCurrency() : null);
+                DisposalRecord::effectiveCurrency);
 
         // Budget Consolidation
         List<Budget> budgets = budgetRepository.findByOrganisationAndDeletedAtIsNullOrderByPeriodStartDesc(org);
@@ -303,7 +303,7 @@ public class AnalyticsServiceImpl implements AnalyticsService {
                 .distinct().count();
 
         CurrencyConversion fx = moneyAggregator.begin(org);
-        // Maintenance cost is in the related asset's currency (no currency column).
+        // Maintenance cost is in the record's currency (legacy rows: the asset's).
         // Records without a cost count as zero in the average, as before; records
         // whose currency has no rate are excluded from both total and average.
         BigDecimal totalCost = BigDecimal.ZERO;
@@ -439,9 +439,9 @@ public class AnalyticsServiceImpl implements AnalyticsService {
         return fx.sum(assets, Asset::getPurchaseCost, Asset::getCurrency);
     }
 
-    /** Maintenance records have no currency column; their cost is in the asset's currency. */
+    /** A maintenance cost's currency: the record's own, else (legacy rows) the asset's. */
     private String maintenanceCurrency(MaintenanceRecord record) {
-        return record.getAsset() != null ? record.getAsset().getCurrency() : null;
+        return record.effectiveCurrency();
     }
 
     private List<Map<String, Object>> buildGroups(CurrencyConversion fx, Map<String, List<Asset>> grouped, long total) {

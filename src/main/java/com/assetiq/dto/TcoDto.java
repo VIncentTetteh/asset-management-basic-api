@@ -28,6 +28,10 @@ public class TcoDto {
     private BigDecimal disposalRecovery;
     private BigDecimal netTco;
     private String currency;
+    /** False when a maintenance or disposal amount was excluded for lack of an exchange rate. */
+    private Boolean complete;
+    /** Sorted {@code "FROM->TO"} pairs that had no rate. */
+    private java.util.List<String> missingRates;
     private Instant calculatedAt;
     private Integer maintenanceRecordCount;
     private Long downtimeDays;
