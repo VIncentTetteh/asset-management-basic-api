@@ -754,15 +754,8 @@ public class AssetServiceImpl implements AssetService {
         if (payload == null || payload.isBlank()) {
             throw new IllegalArgumentException("QR payload is required");
         }
-        // Payload format: "asset:<uuid>"
-        String trimmed = payload.trim();
-        UUID assetId;
-        try {
-            String uuidStr = trimmed.startsWith("asset:") ? trimmed.substring(6) : trimmed;
-            assetId = UUID.fromString(uuidStr);
-        } catch (IllegalArgumentException e) {
-            throw new IllegalArgumentException("Invalid QR payload: " + payload);
-        }
+        UUID assetId = com.assetiq.assets.AssetQrCodes.parse(payload)
+                .orElseThrow(() -> new IllegalArgumentException("Invalid QR payload: " + payload));
         AssetDto result = get(assetId);
         if (result == null) {
             throw new IllegalArgumentException("Asset not found for QR payload: " + payload);

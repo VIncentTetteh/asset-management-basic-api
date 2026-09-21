@@ -17,8 +17,12 @@ import com.assetiq.repositories.IdempotencyRecordRepository;
 import com.assetiq.repositories.OrganisationRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
+import com.assetiq.assets.AssetQrCodes;
 import com.google.zxing.BarcodeFormat;
+import com.google.zxing.EncodeHintType;
+import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel;
 import com.google.zxing.WriterException;
 import com.google.zxing.client.j2se.MatrixToImageWriter;
 import com.google.zxing.common.BitMatrix;
@@ -38,6 +42,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @RestController
@@ -45,6 +50,10 @@ import java.util.UUID;
 public class AssetController {
 
     private final AssetService assetService;
+
+    /** Origin of the web app; asset QR labels link to its scan page. */
+    @Value("${app.public-base-url:${app.email.base-url:http://localhost:3000}}")
+    private String publicBaseUrl;
     private final AssetImportService assetImportService;
     private final TenantAuthorizationService tenantAuthorizationService;
     private final IdempotencyRecordRepository idempotencyRecordRepository;
@@ -190,9 +199,11 @@ public class AssetController {
         if (asset == null) return ResponseEntity.notFound().build();
 
         try {
-            String payload = "asset:" + id;
+            String payload = AssetQrCodes.link(publicBaseUrl, id);
             QRCodeWriter writer = new QRCodeWriter();
-            BitMatrix matrix = writer.encode(payload, BarcodeFormat.QR_CODE, 300, 300);
+            // Medium error correction and a quiet zone: printed labels get scuffed.
+            BitMatrix matrix = writer.encode(payload, BarcodeFormat.QR_CODE, 300, 300,
+                    Map.of(EncodeHintType.ERROR_CORRECTION, ErrorCorrectionLevel.M, EncodeHintType.MARGIN, 2));
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             MatrixToImageWriter.writeToStream(matrix, "PNG", out);
 
@@ -265,6 +276,7 @@ public class AssetController {
         payload.put("assetTag", asset.getAssetTag());
         payload.put("name", asset.getName());
         payload.put("orgId", asset.getOrganisationId() != null ? asset.getOrganisationId().toString() : null);
+        payload.put("url", AssetQrCodes.link(publicBaseUrl, id));
         return ResponseEntity.ok(payload);
     }
 
