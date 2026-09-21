@@ -1,6 +1,7 @@
 package com.assetiq.controllers.v1;
 
 import com.assetiq.dto.AssetTransferDto;
+import com.assetiq.security.annotation.RequireFreshMfa;
 import com.assetiq.services.AssetTransferService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -22,7 +23,7 @@ public class AssetTransferController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','TRANSFER_ASSET','VIEW_ASSETS')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','TRANSFER_ASSET')")
     public ResponseEntity<AssetTransferDto> createTransferRequest(
             @Valid @RequestBody AssetTransferDto transferDto) {
         AssetTransferDto createdTransfer = transferService.createTransferRequest(transferDto);
@@ -59,6 +60,7 @@ public class AssetTransferController {
 
     @PostMapping("/{id}/approve")
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','TRANSFER_ASSET')")
+    @RequireFreshMfa
     // C4 fix: approver identity derived from SecurityContext in service — no
     // approvedById param
     public ResponseEntity<AssetTransferDto> approveTransfer(@PathVariable UUID id) {
@@ -75,6 +77,7 @@ public class AssetTransferController {
 
     @PostMapping("/{id}/complete")
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','TRANSFER_ASSET')")
+    @RequireFreshMfa
     public ResponseEntity<AssetTransferDto> completeTransfer(@PathVariable UUID id) {
         AssetTransferDto completedTransfer = transferService.completeTransfer(id);
         return ResponseEntity.ok(completedTransfer);

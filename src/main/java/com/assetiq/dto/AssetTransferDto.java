@@ -3,6 +3,7 @@ package com.assetiq.dto;
 import com.assetiq.enums.TransferStatus;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 import lombok.Data;
 
 
@@ -32,9 +33,19 @@ public class AssetTransferDto {
     @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private UUID approvedById;
 
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private UUID completedById;
+
+    /** When the transfer was requested. */
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private java.time.Instant createdAt;
+
     private LocalDate transferDate;
 
+    /** Read-only: the workflow endpoints own the status. */
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private TransferStatus status;
 
+    @Size(max = 2000)
     private String reason;
 }

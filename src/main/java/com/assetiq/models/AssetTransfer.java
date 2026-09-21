@@ -40,6 +40,10 @@ public class AssetTransfer extends BaseEntity {
     @ManyToOne
     private User approvedBy;
 
+    /** Who completed the move; null for transfers completed before V43. */
+    @ManyToOne
+    private User completedBy;
+
     private LocalDate transferDate;
 
     @Enumerated(EnumType.STRING)

@@ -1,6 +1,7 @@
 package com.assetiq.services.impl;
 
 import com.assetiq.dto.AssetTransferDto;
+import com.assetiq.enums.AssetStatus;
 import com.assetiq.enums.TransferStatus;
 import com.assetiq.enums.UserStatus;
 import com.assetiq.models.AssetTransfer;
@@ -22,6 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.EnumSet;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -29,6 +31,10 @@ import java.util.stream.Collectors;
 @Service
 @Transactional
 public class AssetTransferServiceImpl extends TenantAwareService implements AssetTransferService {
+
+    /** Transfers that still block another request for the same asset. */
+    private static final Set<TransferStatus> OPEN = EnumSet.of(TransferStatus.REQUESTED, TransferStatus.APPROVED,
+            TransferStatus.IN_TRANSIT);
 
     private final AssetTransferRepository transferRepository;
     private final AssetRepository assetRepository;
@@ -68,6 +74,20 @@ public class AssetTransferServiceImpl extends TenantAwareService implements Asse
                 transferDto.getToDepartmentId(), org)
                 .orElseThrow(() -> new IllegalArgumentException("To-department not found in your organisation"));
 
+        if (fromDept.getId().equals(toDept.getId())) {
+            throw new IllegalArgumentException("The destination department must differ from the source department");
+        }
+        if (asset.getStatus() == AssetStatus.DISPOSED || asset.getStatus() == AssetStatus.RETIRED) {
+            throw new IllegalStateException("Asset '" + asset.getName() + "' is " + asset.getStatus()
+                    + " and cannot be transferred");
+        }
+        boolean openTransfer = transferRepository.findByAssetIdAndDeletedAtIsNull(asset.getId()).stream()
+                .anyMatch(t -> OPEN.contains(t.getStatus()));
+        if (openTransfer) {
+            throw new IllegalStateException("Asset '" + asset.getName()
+                    + "' already has an open transfer; complete or reject it first");
+        }
+
         User requester = resolveCurrentUser(org);
 
         AssetTransfer transfer = new AssetTransfer();
@@ -98,7 +118,7 @@ public class AssetTransferServiceImpl extends TenantAwareService implements Asse
                 "Asset Transfer Requested",
                 "A transfer request has been submitted for asset '" + asset.getName() + "' from "
                         + fromDept.getName() + " to " + toDept.getName() + ".",
-                savedTransfer.getId(), "/api/v1/transfers/" + savedTransfer.getId());
+                savedTransfer.getId(), "/transfers");
         return mapToDto(savedTransfer);
     }
 
@@ -175,6 +195,7 @@ public class AssetTransferServiceImpl extends TenantAwareService implements Asse
         if (!transfer.getOrganisation().getId().equals(org.getId())) {
             throw new IllegalArgumentException("Transfer not found");
         }
+        requireStatus(transfer, "approved", TransferStatus.REQUESTED);
         User approver = resolveCurrentUser(org);
         if (transfer.getRequestedBy().getId().equals(approver.getId())) {
             throw new AccessDeniedException("Transfer requests require approval by a different user");
@@ -189,10 +210,13 @@ public class AssetTransferServiceImpl extends TenantAwareService implements Asse
         Organisation org = requireTenantOrg();
         AssetTransfer transfer = transferRepository.findByIdAndDeletedAtIsNull(id)
                 .orElseThrow(() -> new IllegalArgumentException("Transfer not found"));
-        if (!transfer.getAsset().getOrganisation().getId().equals(org.getId())) {
+        if (!transfer.getOrganisation().getId().equals(org.getId())) {
             throw new IllegalArgumentException("Transfer not found");
         }
-        transfer.setStatus(TransferStatus.CANCELLED);
+        // An approved transfer can still be stopped before the asset moves.
+        requireStatus(transfer, "rejected", TransferStatus.REQUESTED, TransferStatus.APPROVED);
+        // REJECTED, not CANCELLED: the UI and reports distinguish a refused request.
+        transfer.setStatus(TransferStatus.REJECTED);
         return mapToDto(transferRepository.save(transfer));
     }
 
@@ -201,14 +225,20 @@ public class AssetTransferServiceImpl extends TenantAwareService implements Asse
         Organisation org = requireTenantOrg();
         AssetTransfer transfer = transferRepository.findByIdAndDeletedAtIsNull(id)
                 .orElseThrow(() -> new IllegalArgumentException("Transfer not found"));
-        if (!transfer.getAsset().getOrganisation().getId().equals(org.getId())) {
+        if (!transfer.getOrganisation().getId().equals(org.getId())) {
             throw new IllegalArgumentException("Transfer not found");
         }
         if (transfer.getStatus() != TransferStatus.APPROVED) {
-            throw new IllegalStateException("Transfer must be approved before completion");
+            throw new IllegalStateException("Transfer must be approved before completion (it is "
+                    + transfer.getStatus() + ")");
         }
+        User completer = resolveCurrentUser(org);
 
         Asset asset = transfer.getAsset();
+        if (asset.getStatus() == AssetStatus.DISPOSED || asset.getStatus() == AssetStatus.RETIRED) {
+            throw new IllegalStateException("Asset '" + asset.getName() + "' is " + asset.getStatus()
+                    + " and cannot be transferred");
+        }
         asset.setDepartment(transfer.getToDepartment());
         if (transfer.getToLocation() != null) {
             asset.setLocation(transfer.getToLocation());
@@ -217,6 +247,7 @@ public class AssetTransferServiceImpl extends TenantAwareService implements Asse
 
         transfer.setStatus(TransferStatus.COMPLETED);
         transfer.setTransferDate(LocalDate.now());
+        transfer.setCompletedBy(completer);
 
         return mapToDto(transferRepository.save(transfer));
     }
@@ -230,8 +261,19 @@ public class AssetTransferServiceImpl extends TenantAwareService implements Asse
         if (!transfer.getOrganisation().getId().equals(org.getId())) {
             throw new IllegalArgumentException("Transfer not found");
         }
+        if (transfer.getStatus() == TransferStatus.COMPLETED) {
+            // The completed transfer is the audit trail for the asset's move.
+            throw new IllegalStateException("Completed transfers cannot be deleted");
+        }
         transfer.setDeletedAt(Instant.now());
         transferRepository.save(transfer);
+    }
+
+    private static void requireStatus(AssetTransfer transfer, String action, TransferStatus... allowed) {
+        for (TransferStatus status : allowed) {
+            if (transfer.getStatus() == status) return;
+        }
+        throw new IllegalStateException("A " + transfer.getStatus() + " transfer cannot be " + action);
     }
 
     private AssetTransferDto mapToDto(AssetTransfer transfer) {
@@ -250,7 +292,11 @@ public class AssetTransferServiceImpl extends TenantAwareService implements Asse
         if (transfer.getApprovedBy() != null) {
             dto.setApprovedById(transfer.getApprovedBy().getId());
         }
+        if (transfer.getCompletedBy() != null) {
+            dto.setCompletedById(transfer.getCompletedBy().getId());
+        }
         dto.setTransferDate(transfer.getTransferDate());
+        dto.setCreatedAt(transfer.getCreatedAt());
         dto.setStatus(transfer.getStatus());
         dto.setReason(transfer.getReason());
         return dto;
