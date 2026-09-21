@@ -52,6 +52,10 @@ public class MaintenanceServiceImpl extends TenantAwareService implements Mainte
         // Asset must belong to the tenant org
         Asset asset = assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(recordDto.getAssetId(), org)
                 .orElseThrow(() -> new IllegalArgumentException("Asset not found in your organisation"));
+        if (asset.getStatus() == AssetStatus.DISPOSED || asset.getStatus() == AssetStatus.RETIRED) {
+            throw new IllegalStateException("Asset '" + asset.getName() + "' is " + asset.getStatus()
+                    + "; maintenance cannot be scheduled for it.");
+        }
 
         MaintenanceRecord record = new MaintenanceRecord();
         record.setAsset(asset);
@@ -72,9 +76,12 @@ public class MaintenanceServiceImpl extends TenantAwareService implements Mainte
         record.setOrganisation(org);
         MaintenanceRecord savedRecord = recordRepository.save(record);
 
-        // M6: update asset status to MAINTENANCE when record is created
-        asset.setStatus(AssetStatus.MAINTENANCE);
-        assetRepository.save(asset);
+        // M6: an open record takes the asset into MAINTENANCE. A record logged as
+        // already COMPLETED/CANCELLED (history) leaves the asset alone.
+        if (isOpen(savedRecord.getStatus())) {
+            asset.setStatus(AssetStatus.MAINTENANCE);
+            assetRepository.save(asset);
+        }
 
         notificationService.notifyOrgAdmins(org, NotificationType.MAINTENANCE,
                 "Maintenance Record Created",
@@ -148,14 +155,23 @@ public class MaintenanceServiceImpl extends TenantAwareService implements Mainte
             throw new IllegalArgumentException("Maintenance record not found");
         }
 
+        MaintenanceStatus before = record.getStatus();
+        // PUT replaces every editable field, so an omitted optional field is cleared
+        // (vendor included). Status is the exception: omitted means unchanged.
         record.setMaintenanceType(recordDto.getMaintenanceType());
         record.setDescription(recordDto.getDescription());
         record.setScheduledDate(recordDto.getScheduledDate());
         record.setPerformedDate(recordDto.getPerformedDate());
         record.setCost(recordDto.getCost());
         record.setCurrency(recordCurrency(recordDto.getCurrency(), record.getAsset()));
-        record.setStatus(recordDto.getStatus());
+        if (recordDto.getStatus() != null) {
+            record.setStatus(recordDto.getStatus());
+        }
         record.setNextDueDate(recordDto.getNextDueDate());
+        record.setVendor(recordDto.getVendorId() == null ? null
+                : supplierRepository.findByIdAndOrganisationAndDeletedAtIsNull(recordDto.getVendorId(), org)
+                        .orElseThrow(() -> new IllegalArgumentException("Vendor not found in your organisation")));
+        onStatusChange(record, before);
 
         MaintenanceRecord updatedRecord = recordRepository.save(record);
         return mapToDto(updatedRecord);
@@ -188,9 +204,11 @@ public class MaintenanceServiceImpl extends TenantAwareService implements Mainte
         if (recordDto.getCurrency() != null) {
             record.setCurrency(CurrencyResolver.normaliseIsoCode(recordDto.getCurrency()));
         }
+        MaintenanceStatus before = record.getStatus();
         if (recordDto.getStatus() != null) {
             record.setStatus(recordDto.getStatus());
         }
+        onStatusChange(record, before);
         if (recordDto.getNextDueDate() != null) {
             record.setNextDueDate(recordDto.getNextDueDate());
         }
@@ -212,14 +230,17 @@ public class MaintenanceServiceImpl extends TenantAwareService implements Mainte
             throw new IllegalArgumentException("Maintenance record not found");
         }
 
+        if (!isOpen(record.getStatus())) {
+            throw new IllegalStateException("Only scheduled or in-progress maintenance can be completed (this one is "
+                    + record.getStatus() + ").");
+        }
+        MaintenanceStatus before = record.getStatus();
         record.setStatus(MaintenanceStatus.COMPLETED);
-        record.setPerformedDate(LocalDate.now());
+        if (record.getPerformedDate() == null) {
+            record.setPerformedDate(LocalDate.now());
+        }
+        onStatusChange(record, before);
         recordRepository.save(record);
-
-        // M6: update asset status back to IN_USE when maintenance is completed
-        Asset asset = record.getAsset();
-        asset.setStatus(AssetStatus.IN_USE);
-        assetRepository.save(asset);
 
         return mapToDto(record);
     }
@@ -234,6 +255,47 @@ public class MaintenanceServiceImpl extends TenantAwareService implements Mainte
         }
         record.setDeletedAt(Instant.now());
         recordRepository.save(record);
+        // Deleting an open ticket must not strand the asset in MAINTENANCE.
+        if (isOpen(record.getStatus())) {
+            releaseAssetIfNoOpenWork(record);
+        }
+    }
+
+    static boolean isOpen(MaintenanceStatus status) {
+        return status == null || status == MaintenanceStatus.SCHEDULED || status == MaintenanceStatus.IN_PROGRESS;
+    }
+
+    /**
+     * Keeps the asset's status in step with its maintenance: closing (completing or
+     * cancelling) the last open record returns the asset to service; re-opening a
+     * record puts it back into MAINTENANCE. Previously only the /complete endpoint
+     * did this, and it always forced IN_USE — even for an unassigned asset.
+     */
+    private void onStatusChange(MaintenanceRecord record, MaintenanceStatus before) {
+        boolean wasOpen = isOpen(before);
+        boolean nowOpen = isOpen(record.getStatus());
+        if (wasOpen && !nowOpen) {
+            if (record.getStatus() == MaintenanceStatus.COMPLETED && record.getPerformedDate() == null) {
+                record.setPerformedDate(LocalDate.now());
+            }
+            releaseAssetIfNoOpenWork(record);
+        } else if (!wasOpen && nowOpen) {
+            Asset asset = record.getAsset();
+            if (asset.getStatus() != AssetStatus.DISPOSED && asset.getStatus() != AssetStatus.RETIRED) {
+                asset.setStatus(AssetStatus.MAINTENANCE);
+                assetRepository.save(asset);
+            }
+        }
+    }
+
+    private void releaseAssetIfNoOpenWork(MaintenanceRecord closed) {
+        Asset asset = closed.getAsset();
+        if (asset.getStatus() != AssetStatus.MAINTENANCE) return;
+        boolean otherOpen = recordRepository.findByAssetIdAndDeletedAtIsNull(asset.getId()).stream()
+                .anyMatch(r -> !r.getId().equals(closed.getId()) && isOpen(r.getStatus()));
+        if (otherOpen) return;
+        asset.setStatus(asset.getAssignedUser() != null ? AssetStatus.IN_USE : AssetStatus.IN_STOCK);
+        assetRepository.save(asset);
     }
 
     /**
