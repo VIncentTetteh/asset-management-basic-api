@@ -45,7 +45,7 @@ public class BillingPayment extends BaseEntity {
 
     private Long paystackTransactionId;
 
-    @Column(length = 120)
+    @Column(length = 512)
     private String paystackAuthorizationCode;
 
     @Column(length = 120)
@@ -54,7 +54,7 @@ public class BillingPayment extends BaseEntity {
     @Column(length = 120)
     private String paystackSubscriptionCode;
 
-    @Column(length = 120)
+    @Column(length = 512)
     private String paystackEmailToken;
 
     private Instant paidAt;
@@ -68,4 +68,3 @@ public class BillingPayment extends BaseEntity {
     @Column(columnDefinition = "TEXT")
     private String rawGatewayPayload;
 }
-

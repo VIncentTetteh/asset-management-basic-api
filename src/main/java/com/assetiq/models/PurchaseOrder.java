@@ -34,6 +34,16 @@ public class PurchaseOrder extends BaseEntity {
 
     private Instant approvedAt;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "requested_by_id")
+    private User requestedBy;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "rejected_by_id")
+    private User rejectedBy;
+
+    private Instant rejectedAt;
+
     @Column(columnDefinition = "TEXT")
     private String remarks;
 

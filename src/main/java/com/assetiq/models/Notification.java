@@ -12,6 +12,9 @@ import java.util.UUID;
 @Table(name = "notification", indexes = {
         @Index(name = "idx_notification_user_org", columnList = "user_id, organisation_id"),
         @Index(name = "idx_notification_read", columnList = "read, deleted_at")
+}, uniqueConstraints = {
+        @UniqueConstraint(name = "uq_notification_dedup",
+                columnNames = {"organisation_id", "user_id", "deduplication_key"})
 })
 @Data
 @EqualsAndHashCode(callSuper = true, onlyExplicitlyIncluded = true)
@@ -42,6 +45,10 @@ public class Notification extends BaseEntity {
     /** Relative API path for frontend deep-linking, e.g. /api/v1/assets/{id} */
     @Column(name = "action_url")
     private String actionUrl;
+
+    /** Stable event key used to make scheduled and retryable delivery idempotent. */
+    @Column(name = "deduplication_key", length = 255)
+    private String deduplicationKey;
 
     @Column(nullable = false)
     private boolean read = false;

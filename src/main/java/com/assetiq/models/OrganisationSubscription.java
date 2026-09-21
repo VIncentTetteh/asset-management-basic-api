@@ -57,7 +57,6 @@ public class OrganisationSubscription extends BaseEntity {
     @Column(length = 120)
     private String paystackSubscriptionCode;
 
-    @Column(length = 120)
+    @Column(length = 512)
     private String paystackEmailToken;
 }
-

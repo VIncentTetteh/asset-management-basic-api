@@ -1,6 +1,8 @@
 package com.assetiq.models;
 
+import com.assetiq.multitenancy.TenantContext;
 import jakarta.persistence.*;
+import org.springframework.security.access.AccessDeniedException;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -50,6 +52,7 @@ public abstract class BaseEntity {
 
     @PrePersist
     protected void onCreate() {
+        enforceTenantBoundary();
         Instant now = Instant.now();
         this.createdAt = now;
         this.updatedAt = now;
@@ -57,11 +60,49 @@ public abstract class BaseEntity {
 
     @PreUpdate
     protected void onUpdate() {
+        enforceTenantBoundary();
         this.updatedAt = Instant.now();
+    }
+
+    /**
+     * Defense in depth for every entity declaring an {@code organisation} owner.
+     * A missed repository predicate therefore fails at the ORM boundary before a
+     * cross-tenant entity can be returned, changed, or deleted.
+     */
+    @PostLoad
+    @PreRemove
+    protected void enforceTenantBoundary() {
+        UUID currentTenant = TenantContext.getOrganisationId();
+        if (currentTenant == null) return; // approved system/background operation
+
+        java.lang.reflect.Field organisationField = findOrganisationField(getClass());
+        if (organisationField == null) return; // shared/global reference data
+        try {
+            organisationField.setAccessible(true);
+            Object owner = organisationField.get(this);
+            if (!(owner instanceof Organisation organisation)
+                || organisation.getId() == null
+                || !currentTenant.equals(organisation.getId())) {
+                throw new AccessDeniedException("Tenant boundary violation for " + getClass().getSimpleName());
+            }
+        } catch (IllegalAccessException inaccessible) {
+            throw new AccessDeniedException("Unable to verify tenant ownership", inaccessible);
+        }
+    }
+
+    private static java.lang.reflect.Field findOrganisationField(Class<?> type) {
+        Class<?> cursor = type;
+        while (cursor != null && cursor != Object.class) {
+            try {
+                return cursor.getDeclaredField("organisation");
+            } catch (NoSuchFieldException ignored) {
+                cursor = cursor.getSuperclass();
+            }
+        }
+        return null;
     }
 
     public boolean isDeleted() {
         return this.deletedAt != null;
     }
 }
-

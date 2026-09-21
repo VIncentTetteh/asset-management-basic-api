@@ -28,8 +28,8 @@ public class Webhook extends BaseEntity {
     @Column(nullable = false)
     private boolean active = true;
 
-    /** HMAC-SHA256 signing secret (stored plain; encrypt at rest in prod). */
-    @Column(name = "secret", length = 200)
+    /** HMAC-SHA256 signing secret protected by {@code SecretCryptoService}. */
+    @Column(name = "secret", length = 512)
     private String secret;
 
     @Column(name = "delivery_count")

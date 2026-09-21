@@ -4,6 +4,7 @@ import com.assetiq.enums.AuditEventType;
 import com.assetiq.models.AuditEvent;
 import com.assetiq.models.Organisation;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -16,7 +17,13 @@ import java.util.UUID;
 import java.time.Instant;
 
 @Repository
-public interface AuditEventRepository extends JpaRepository<AuditEvent, UUID> {
+public interface AuditEventRepository extends JpaRepository<AuditEvent, UUID>, JpaSpecificationExecutor<AuditEvent> {
+    interface AuditMetrics {
+        long getTotalRequests();
+        long getSuccessfulRequests();
+        Double getAverageLatency();
+    }
+
     Optional<AuditEvent> findByIdAndOrganisationAndDeletedAtIsNull(UUID id, Organisation organisation);
 
     /** @deprecated Use {@link #findFiltered} instead — avoids full table scan. */
@@ -65,5 +72,16 @@ public interface AuditEventRepository extends JpaRepository<AuditEvent, UUID> {
            "AND LOWER(e.path) LIKE LOWER(CONCAT('%', :assetId, '%')) " +
            "AND e.deletedAt IS NULL ORDER BY e.createdAt DESC")
     List<AuditEvent> findByOrganisationAndAssetIdInPath(@Param("org") Organisation org, @Param("assetId") String assetId);
-}
 
+    @Query("""
+            SELECT COUNT(e) AS totalRequests,
+                   COALESCE(SUM(CASE WHEN e.success = true THEN 1 ELSE 0 END), 0) AS successfulRequests,
+                   AVG(e.responseTimeMs) AS averageLatency
+              FROM AuditEvent e
+             WHERE e.organisation.id = :organisationId
+               AND e.deletedAt IS NULL
+               AND e.createdAt >= :since
+            """)
+    AuditMetrics aggregateMetricsSince(@Param("organisationId") UUID organisationId,
+                                       @Param("since") Instant since);
+}

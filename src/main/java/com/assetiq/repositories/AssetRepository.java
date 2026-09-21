@@ -9,7 +9,10 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
@@ -80,7 +83,30 @@ public interface AssetRepository extends JpaRepository<Asset, UUID>, JpaSpecific
         @Query("SELECT a FROM Asset a WHERE a.deletedAt IS NULL AND a.warrantyExpiryDate IS NOT NULL AND a.warrantyExpiryDate <= :cutoff AND a.status <> 'DISPOSED'")
         List<Asset> findWarrantyExpiringSoon(@Param("cutoff") LocalDate cutoff);
 
+        @Query("SELECT a FROM Asset a WHERE a.deletedAt IS NULL " +
+                        "AND a.warrantyExpiryDate = :expiryDate " +
+                        "AND a.status NOT IN ('DISPOSED','RETIRED')")
+        Page<Asset> findWarrantyExpiringOn(
+                        @Param("expiryDate") LocalDate expiryDate, Pageable pageable);
+
         /** Active assets with purchaseDate + usefulLifeMonths set — caller filters for EOL in Java. */
         @Query("SELECT a FROM Asset a WHERE a.deletedAt IS NULL AND a.purchaseDate IS NOT NULL AND a.usefulLifeMonths IS NOT NULL AND a.status <> 'DISPOSED'")
         List<Asset> findActiveAssetsWithUsefulLife();
+
+        @Query("SELECT a FROM Asset a WHERE a.deletedAt IS NULL " +
+                        "AND a.purchaseDate IS NOT NULL AND a.usefulLifeMonths IS NOT NULL " +
+                        "AND a.status NOT IN ('DISPOSED','RETIRED')")
+        Page<Asset> findActiveAssetsWithUsefulLife(Pageable pageable);
+
+        @Query("SELECT a FROM Asset a WHERE a.deletedAt IS NULL " +
+                        "AND a.insurancePolicyExpiry = :expiryDate " +
+                        "AND a.status NOT IN ('DISPOSED','RETIRED')")
+        Page<Asset> findInsuranceExpiringOn(
+                        @Param("expiryDate") LocalDate expiryDate, Pageable pageable);
+
+        @Query("SELECT a FROM Asset a WHERE a.deletedAt IS NULL " +
+                        "AND a.status = 'IN_STOCK' " +
+                        "AND (a.lastScannedAt IS NULL OR a.lastScannedAt <= :cutoff)")
+        Page<Asset> findInactiveInStock(
+                        @Param("cutoff") Instant cutoff, Pageable pageable);
 }

@@ -109,8 +109,12 @@ public class User extends BaseEntity {
     @Column(name = "mfa_enabled", columnDefinition = "boolean default false")
     private Boolean mfaEnabled = false;
 
+    /** Incremented whenever every existing session must become invalid immediately. */
+    @Column(name = "session_version", nullable = false)
+    private long sessionVersion = 0;
+
     /** Base32-encoded TOTP secret (stored encrypted in production via column-level encryption). */
-    @Column(name = "mfa_secret", length = 100)
+    @Column(name = "mfa_secret", length = 512)
     private String mfaSecret;
 
     // ── Account lockout (brute-force protection) ──────────────────────────────
