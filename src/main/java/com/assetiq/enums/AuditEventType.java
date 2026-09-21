@@ -54,4 +54,9 @@ public enum AuditEventType {
 
     /** A user account was deleted or deactivated. */
     USER_DELETED,
+
+    // ── Organisation settings events ──────────────────────────────────────────
+
+    /** The organisation's base (reporting) currency was changed. */
+    BASE_CURRENCY_CHANGED,
 }

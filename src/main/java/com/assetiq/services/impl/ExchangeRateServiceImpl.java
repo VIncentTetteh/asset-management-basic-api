@@ -18,6 +18,8 @@ import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Locale;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -26,6 +28,9 @@ import java.util.stream.Collectors;
 public class ExchangeRateServiceImpl extends TenantAwareService implements ExchangeRateService {
 
     private static final Logger log = LoggerFactory.getLogger(ExchangeRateServiceImpl.class);
+
+    /** Precision used when inverting a stored rate (16 significant digits). */
+    private static final MathContext RECIPROCAL_PRECISION = MathContext.DECIMAL64;
 
     private final ExchangeRateRepository exchangeRateRepository;
 
@@ -91,34 +96,48 @@ public class ExchangeRateServiceImpl extends TenantAwareService implements Excha
             throw new IllegalArgumentException("Source and target currency are required");
         }
 
-        String from = fromCurrency.toUpperCase();
-        String to   = toCurrency.toUpperCase();
+        String from = fromCurrency.trim().toUpperCase(Locale.ROOT);
+        String to   = toCurrency.trim().toUpperCase(Locale.ROOT);
 
         if (from.equals(to)) return amount;
 
-        Organisation org = requireTenantOrg();
-        LocalDate date   = asOf != null ? asOf : LocalDate.now();
+        LocalDate date = asOf != null ? asOf : LocalDate.now();
+        BigDecimal rate = findRate(requireTenantOrg(), from, to, date)
+                .orElseThrow(() -> {
+                    log.warn("No exchange rate found for {}->{} as of {}", from, to, date);
+                    return new IllegalStateException(
+                            "No approved exchange rate is available for " + from + " to " + to + " as of " + date);
+                });
+        return amount.multiply(rate).setScale(4, RoundingMode.HALF_UP);
+    }
 
-        // Try direct rate first
-        List<ExchangeRate> direct = exchangeRateRepository.findRateAsOf(org, from, to, date);
-        if (!direct.isEmpty()) {
-            BigDecimal rate = direct.get(0).getRate();
-            return amount.multiply(rate).setScale(4, RoundingMode.HALF_UP);
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<BigDecimal> findRate(Organisation organisation, String fromCurrency, String toCurrency,
+                                         LocalDate asOf) {
+        if (organisation == null || fromCurrency == null || toCurrency == null) {
+            return Optional.empty();
+        }
+        String from = fromCurrency.trim().toUpperCase(Locale.ROOT);
+        String to   = toCurrency.trim().toUpperCase(Locale.ROOT);
+        if (from.equals(to)) return Optional.of(BigDecimal.ONE);
+
+        LocalDate date = asOf != null ? asOf : LocalDate.now();
+
+        // Direct rate first: one unit of FROM = rate units of TO.
+        List<ExchangeRate> direct = exchangeRateRepository.findRateAsOf(organisation, from, to, date);
+        if (!direct.isEmpty() && direct.get(0).getRate() != null
+                && direct.get(0).getRate().signum() > 0) {
+            return Optional.of(direct.get(0).getRate());
         }
 
-        // Try reverse rate (to→from) and take reciprocal
-        List<ExchangeRate> reverse = exchangeRateRepository.findRateAsOf(org, to, from, date);
-        if (!reverse.isEmpty()) {
-            BigDecimal reverseRate = reverse.get(0).getRate();
-            if (reverseRate.compareTo(BigDecimal.ZERO) != 0) {
-                BigDecimal rate = BigDecimal.ONE.divide(reverseRate, new MathContext(10, RoundingMode.HALF_UP));
-                return amount.multiply(rate).setScale(4, RoundingMode.HALF_UP);
-            }
+        // Otherwise the reciprocal of the reverse (TO->FROM) rate.
+        List<ExchangeRate> reverse = exchangeRateRepository.findRateAsOf(organisation, to, from, date);
+        if (!reverse.isEmpty() && reverse.get(0).getRate() != null
+                && reverse.get(0).getRate().signum() > 0) {
+            return Optional.of(BigDecimal.ONE.divide(reverse.get(0).getRate(), RECIPROCAL_PRECISION));
         }
-
-        log.warn("No exchange rate found for {}->{} as of {}", from, to, date);
-        throw new IllegalStateException(
-                "No approved exchange rate is available for " + from + " to " + to + " as of " + date);
+        return Optional.empty();
     }
 
     // ── Mapper ────────────────────────────────────────────────────────────────

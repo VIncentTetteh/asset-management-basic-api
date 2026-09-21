@@ -94,6 +94,14 @@ public class ExpenseServiceImpl extends TenantAwareService implements ExpenseSer
             departmentRepository.findByIdAndOrganisationAndDeletedAtIsNull(dto.getDepartmentId(), org)
                     .ifPresent(expense::setDepartment);
         }
+        if (expense.getLinkedBudget() != null && !sameCurrency(expense, expense.getLinkedBudget())) {
+            // Reject rather than convert: a budget's committed/spent figures must stay
+            // in the budget's own currency (same rule as purchase-order approval).
+            throw new IllegalArgumentException("Expense currency " + expense.getCurrency()
+                    + " does not match linked budget currency " + expense.getLinkedBudget().getCurrency()
+                    + "; submit the expense in the budget's currency or link a budget in "
+                    + expense.getCurrency());
+        }
 
         Expense saved = expenseRepository.save(expense);
 
@@ -147,6 +155,10 @@ public class ExpenseServiceImpl extends TenantAwareService implements ExpenseSer
         // Move amount from committedAmount → spentAmount; check EXCEEDED and fire threshold alert
         if (expense.getLinkedBudget() != null) {
             Budget b = expense.getLinkedBudget();
+            // Guards expenses linked before the submit-time check existed.
+            if (!sameCurrency(expense, b)) {
+                throw new IllegalStateException("Expense and linked budget currencies must match");
+            }
 
             // Decrement committed (was reserved at submit time)
             BigDecimal comm = b.getCommittedAmount() != null ? b.getCommittedAmount() : BigDecimal.ZERO;
@@ -363,5 +375,10 @@ public class ExpenseServiceImpl extends TenantAwareService implements ExpenseSer
             dto.setDepartmentId(e.getDepartment().getId());
         }
         return dto;
+    }
+
+    private static boolean sameCurrency(Expense expense, Budget budget) {
+        return expense.getCurrency() != null && budget.getCurrency() != null
+                && expense.getCurrency().equalsIgnoreCase(budget.getCurrency());
     }
 }

@@ -111,9 +111,33 @@ public class CurrencyResolver {
      */
     public String resolveOrDefault(String supplied) {
         if (supplied != null && !supplied.isBlank()) {
-            return supplied.trim().toUpperCase(Locale.ROOT);
+            return normaliseIsoCode(supplied);
         }
         return defaultForCurrentTenant();
+    }
+
+    /**
+     * Normalise a caller-supplied currency code (trim + upper-case) and verify it
+     * is a real ISO-4217 code known to the JDK.
+     *
+     * @throws IllegalArgumentException (mapped to HTTP 400) when the code is blank
+     *         or not a recognised ISO-4217 currency
+     */
+    public static String normaliseIsoCode(String code) {
+        if (code == null || code.isBlank()) {
+            throw new IllegalArgumentException("Currency code is required");
+        }
+        String normalised = code.trim().toUpperCase(Locale.ROOT);
+        if (normalised.length() != 3) {
+            throw new IllegalArgumentException(
+                    "Invalid currency code '" + code.trim() + "': expected a 3-letter ISO-4217 code");
+        }
+        try {
+            return Currency.getInstance(normalised).getCurrencyCode();
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException(
+                    "Invalid currency code '" + normalised + "': not a recognised ISO-4217 currency", e);
+        }
     }
 
     /**

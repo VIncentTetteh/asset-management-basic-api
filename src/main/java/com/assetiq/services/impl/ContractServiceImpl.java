@@ -97,7 +97,7 @@ public class ContractServiceImpl extends TenantAwareService implements ContractS
         if (dto.getEndDate() != null) contract.setEndDate(dto.getEndDate());
         if (dto.getAlertDaysBefore() != null) contract.setAlertDaysBefore(dto.getAlertDaysBefore());
         if (dto.getValue() != null) contract.setValue(dto.getValue());
-        if (dto.getCurrency() != null) contract.setCurrency(dto.getCurrency());
+        if (dto.getCurrency() != null) contract.setCurrency(CurrencyResolver.normaliseIsoCode(dto.getCurrency()));
         if (dto.getDocumentUrl() != null) contract.setDocumentUrl(dto.getDocumentUrl());
         if (dto.getNotes() != null) contract.setNotes(dto.getNotes());
         contract.setAutoRenew(dto.isAutoRenew());

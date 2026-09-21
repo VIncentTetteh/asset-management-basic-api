@@ -16,6 +16,9 @@ import com.assetiq.repositories.OrganisationRepository;
 import com.assetiq.services.BudgetService;
 import com.assetiq.services.CurrencyResolver;
 import com.assetiq.services.TenantAwareService;
+import com.assetiq.services.money.CurrencyConversion;
+import com.assetiq.services.money.MoneyAccumulator;
+import com.assetiq.services.money.MoneyAggregator;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
@@ -39,17 +42,20 @@ public class BudgetServiceImpl extends TenantAwareService implements BudgetServi
     private final DepartmentRepository departmentRepository;
     private final CurrencyResolver currencyResolver;
     private final ExpenseRepository expenseRepository;
+    private final MoneyAggregator moneyAggregator;
 
     public BudgetServiceImpl(OrganisationRepository organisationRepository,
                              BudgetRepository budgetRepository,
                              DepartmentRepository departmentRepository,
                              CurrencyResolver currencyResolver,
-                             ExpenseRepository expenseRepository) {
+                             ExpenseRepository expenseRepository,
+                             MoneyAggregator moneyAggregator) {
         super(organisationRepository);
         this.budgetRepository = budgetRepository;
         this.departmentRepository = departmentRepository;
         this.currencyResolver = currencyResolver;
         this.expenseRepository = expenseRepository;
+        this.moneyAggregator = moneyAggregator;
     }
 
     @Override
@@ -97,7 +103,7 @@ public class BudgetServiceImpl extends TenantAwareService implements BudgetServi
         if (dto.getName() != null) budget.setName(dto.getName());
         if (dto.getDescription() != null) budget.setDescription(dto.getDescription());
         if (dto.getTotalAmount() != null) budget.setTotalAmount(dto.getTotalAmount());
-        if (dto.getCurrency() != null) budget.setCurrency(dto.getCurrency());
+        if (dto.getCurrency() != null) budget.setCurrency(CurrencyResolver.normaliseIsoCode(dto.getCurrency()));
         if (dto.getPeriodStart() != null) budget.setPeriodStart(dto.getPeriodStart());
         if (dto.getPeriodEnd() != null) budget.setPeriodEnd(dto.getPeriodEnd());
         if (dto.getStatus() != null) budget.setStatus(dto.getStatus());
@@ -162,39 +168,62 @@ public class BudgetServiceImpl extends TenantAwareService implements BudgetServi
         Organisation org = requireTenantOrg();
         List<Budget> budgets = budgetRepository
                 .findByOrganisationAndDeletedAtIsNullOrderByPeriodStartDesc(org);
-        BigDecimal totalAllocated = BigDecimal.ZERO;
-        BigDecimal totalSpent = BigDecimal.ZERO;
-        BigDecimal totalCommitted = BigDecimal.ZERO;
-        LinkedHashMap<String, BudgetSummaryDto.DepartmentSummary> byDept = new LinkedHashMap<>();
+        // Every budget is converted into the tenant base currency; a budget whose
+        // currency has no rate is excluded from all totals and reported instead.
+        CurrencyConversion fx = moneyAggregator.begin(org);
+        MoneyAccumulator totalAllocated = fx.newAccumulator();
+        MoneyAccumulator totalSpent = fx.newAccumulator();
+        MoneyAccumulator totalCommitted = fx.newAccumulator();
+        LinkedHashMap<String, DepartmentTotals> byDept = new LinkedHashMap<>();
         for (Budget b : budgets) {
-            totalAllocated = totalAllocated.add(b.getTotalAmount());
-            totalSpent = totalSpent.add(b.getSpentAmount());
             BigDecimal comm = b.getCommittedAmount() != null ? b.getCommittedAmount() : BigDecimal.ZERO;
-            totalCommitted = totalCommitted.add(comm);
+            if (fx.toBase(BigDecimal.ONE, b.getCurrency()).isEmpty()) {
+                // No rate: the pair is now recorded on fx; skip the budget entirely so
+                // allocated/spent/committed stay mutually consistent.
+                continue;
+            }
+            totalAllocated.add(b.getTotalAmount(), b.getCurrency());
+            totalSpent.add(b.getSpentAmount(), b.getCurrency());
+            totalCommitted.add(comm, b.getCurrency());
             String key = b.getDepartment() != null ? b.getDepartment().getId().toString() : "__org__";
             String name = b.getDepartment() != null ? b.getDepartment().getName() : "Org-wide";
-            BudgetSummaryDto.DepartmentSummary ds = byDept.computeIfAbsent(key, k ->
-                BudgetSummaryDto.DepartmentSummary.builder()
-                    .departmentId(key.equals("__org__") ? null : key)
-                    .departmentName(name)
-                    .allocated(BigDecimal.ZERO)
-                    .spent(BigDecimal.ZERO)
-                    .committed(BigDecimal.ZERO)
-                    .available(BigDecimal.ZERO)
-                    .build());
-            ds.setAllocated(ds.getAllocated().add(b.getTotalAmount()));
-            ds.setSpent(ds.getSpent().add(b.getSpentAmount()));
-            ds.setCommitted(ds.getCommitted().add(comm));
-            ds.setAvailable(ds.getAllocated().subtract(ds.getSpent()).subtract(ds.getCommitted()));
+            DepartmentTotals dt = byDept.computeIfAbsent(key, k -> new DepartmentTotals(
+                    key.equals("__org__") ? null : key, name,
+                    fx.newAccumulator(), fx.newAccumulator(), fx.newAccumulator()));
+            dt.allocated().add(b.getTotalAmount(), b.getCurrency());
+            dt.spent().add(b.getSpentAmount(), b.getCurrency());
+            dt.committed().add(comm, b.getCurrency());
         }
-        BigDecimal totalAvailable = totalAllocated.subtract(totalSpent).subtract(totalCommitted);
+        List<BudgetSummaryDto.DepartmentSummary> departments = new ArrayList<>();
+        for (DepartmentTotals dt : byDept.values()) {
+            departments.add(BudgetSummaryDto.DepartmentSummary.builder()
+                    .departmentId(dt.departmentId())
+                    .departmentName(dt.departmentName())
+                    .allocated(dt.allocated().amount())
+                    .spent(dt.spent().amount())
+                    .committed(dt.committed().amount())
+                    .available(CurrencyConversion.round(dt.allocated().rawSum()
+                            .subtract(dt.spent().rawSum()).subtract(dt.committed().rawSum())))
+                    .build());
+        }
+        BigDecimal totalAvailable = totalAllocated.rawSum()
+                .subtract(totalSpent.rawSum()).subtract(totalCommitted.rawSum());
         return BudgetSummaryDto.builder()
-            .totalAllocated(totalAllocated)
-            .totalSpent(totalSpent)
-            .totalCommitted(totalCommitted)
-            .totalAvailable(totalAvailable)
-            .byDepartment(new ArrayList<>(byDept.values()))
+            .currency(fx.baseCurrency())
+            .complete(fx.isComplete())
+            .missingRates(fx.missingRates())
+            .totalAllocated(totalAllocated.amount())
+            .totalSpent(totalSpent.amount())
+            .totalCommitted(totalCommitted.amount())
+            .totalAvailable(CurrencyConversion.round(totalAvailable))
+            .byDepartment(departments)
             .build();
+    }
+
+    /** Per-department running totals in the base currency. */
+    private record DepartmentTotals(String departmentId, String departmentName,
+                                    MoneyAccumulator allocated, MoneyAccumulator spent,
+                                    MoneyAccumulator committed) {
     }
 
     @Override

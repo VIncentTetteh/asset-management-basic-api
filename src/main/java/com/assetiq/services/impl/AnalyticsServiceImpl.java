@@ -14,7 +14,12 @@ import com.assetiq.repositories.BudgetRepository;
 import com.assetiq.repositories.DisposalRecordRepository;
 import com.assetiq.repositories.MaintenanceRecordRepository;
 import com.assetiq.repositories.PurchaseOrderRepository;
+import com.assetiq.models.Budget;
+import com.assetiq.models.DisposalRecord;
 import com.assetiq.services.AnalyticsService;
+import com.assetiq.services.money.CurrencyConversion;
+import com.assetiq.services.money.MoneyAccumulator;
+import com.assetiq.services.money.MoneyAggregator;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,6 +33,15 @@ import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.stream.Collectors;
 
+/**
+ * Analytics aggregates. All money figures are converted into the tenant base
+ * currency through {@link MoneyAggregator}; every response carries
+ * {@code currency}, {@code complete} and {@code missingRates}.
+ *
+ * <p>Maintenance and disposal records have no currency column of their own: a
+ * maintenance cost and a disposal sale value are treated as being in the related
+ * asset's currency (base currency when the record has no asset).
+ */
 @Service
 @Transactional(readOnly = true)
 public class AnalyticsServiceImpl implements AnalyticsService {
@@ -37,17 +51,20 @@ public class AnalyticsServiceImpl implements AnalyticsService {
     private final PurchaseOrderRepository purchaseOrderRepository;
     private final BudgetRepository budgetRepository;
     private final DisposalRecordRepository disposalRecordRepository;
+    private final MoneyAggregator moneyAggregator;
 
     public AnalyticsServiceImpl(AssetRepository assetRepository,
                                 MaintenanceRecordRepository maintenanceRecordRepository,
                                 PurchaseOrderRepository purchaseOrderRepository,
                                 BudgetRepository budgetRepository,
-                                DisposalRecordRepository disposalRecordRepository) {
+                                DisposalRecordRepository disposalRecordRepository,
+                                MoneyAggregator moneyAggregator) {
         this.assetRepository = assetRepository;
         this.maintenanceRecordRepository = maintenanceRecordRepository;
         this.purchaseOrderRepository = purchaseOrderRepository;
         this.budgetRepository = budgetRepository;
         this.disposalRecordRepository = disposalRecordRepository;
+        this.moneyAggregator = moneyAggregator;
     }
 
     // ── Asset Analytics ───────────────────────────────────────────────────────
@@ -60,24 +77,25 @@ public class AnalyticsServiceImpl implements AnalyticsService {
                 .filter(asset -> isWithinPeriod(assetDate(asset), start, end))
                 .toList();
         long total = assets.size();
-        BigDecimal totalValue = sumPurchaseCost(assets);
+        CurrencyConversion fx = moneyAggregator.begin(org);
+        BigDecimal totalValue = sumPurchaseCost(fx, assets).amount();
 
         List<Map<String, Object>> data;
         switch (groupBy.toLowerCase()) {
             case "status" -> {
                 Map<String, List<Asset>> grouped = assets.stream().collect(
                         Collectors.groupingBy(a -> a.getStatus() != null ? a.getStatus().name() : AssetStatus.IN_USE.name()));
-                data = buildGroups(grouped, total, totalValue);
+                data = buildGroups(fx, grouped, total);
             }
             case "department" -> {
                 Map<String, List<Asset>> grouped = assets.stream().collect(
                         Collectors.groupingBy(a -> a.getDepartment() != null ? a.getDepartment().getName() : "Unassigned"));
-                data = buildGroups(grouped, total, totalValue);
+                data = buildGroups(fx, grouped, total);
             }
             case "condition" -> {
                 Map<String, List<Asset>> grouped = assets.stream().collect(
                         Collectors.groupingBy(a -> a.getCondition() != null ? a.getCondition().name() : AssetCondition.GOOD.name()));
-                data = buildGroups(grouped, total, totalValue);
+                data = buildGroups(fx, grouped, total);
             }
             default -> throw new IllegalArgumentException(
                     "Invalid groupBy '" + groupBy + "'. Allowed values: status, department, condition");
@@ -90,7 +108,8 @@ public class AnalyticsServiceImpl implements AnalyticsService {
         response.put("groupBy", groupBy);
         response.put("data", data);
         response.put("total", total);
-        response.put("totalValue", totalValue.setScale(2, RoundingMode.HALF_UP));
+        response.put("totalValue", totalValue);
+        fx.putMetadata(response);
         response.put("generatedAt", Instant.now().toString());
         return response;
     }
@@ -108,31 +127,22 @@ public class AnalyticsServiceImpl implements AnalyticsService {
                 .filter(record -> isWithinPeriod(maintenanceDate(record), start, end))
                 .collect(Collectors.toCollection(LinkedHashSet::new));
 
-        BigDecimal totalAssetValue = sumPurchaseCost(assets);
+        CurrencyConversion fx = moneyAggregator.begin(org);
 
-        BigDecimal netBookValue = assets.stream()
-                .map(this::calculateDynamicNBV)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        // Per-asset figures are computed in the asset's currency, then converted.
+        MoneyAccumulator totalAssetValue = sumPurchaseCost(fx, assets);
 
-        BigDecimal totalDepreciation = totalAssetValue.subtract(netBookValue);
+        MoneyAccumulator netBookValue = fx.newAccumulator();
+        assets.forEach(a -> netBookValue.add(calculateDynamicNBV(a), a.getCurrency()));
+
+        BigDecimal totalDepreciation = totalAssetValue.rawSum().subtract(netBookValue.rawSum());
         if (totalDepreciation.signum() < 0) totalDepreciation = BigDecimal.ZERO;
 
-        BigDecimal totalMaintenanceCost = records.stream()
-                .map(m -> m.getCost() != null ? m.getCost() : BigDecimal.ZERO)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        // Maintenance cost has no currency column: it is in the related asset's currency.
+        MoneyAccumulator totalMaintenanceCost = fx.sum(records, MaintenanceRecord::getCost, this::maintenanceCurrency);
 
         // Sum of monthly depreciation charges across all actively-depreciating assets
-        BigDecimal monthlyDepreciation = assets.stream()
-                .filter(a -> a.getPurchaseCost() != null
-                        && a.getUsefulLifeMonths() != null
-                        && a.getUsefulLifeMonths() > 0)
-                .map(a -> {
-                    BigDecimal depreciable = a.getPurchaseCost()
-                            .subtract(a.getResidualValue() != null ? a.getResidualValue() : BigDecimal.ZERO);
-                    if (depreciable.signum() <= 0) return BigDecimal.ZERO;
-                    return depreciable.divide(BigDecimal.valueOf(a.getUsefulLifeMonths()), 2, RoundingMode.HALF_UP);
-                })
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        MoneyAccumulator monthlyDepreciation = sumMonthlyDepreciation(fx, assets);
 
         long assetsFullyDepreciated = assets.stream()
                 .filter(a -> a.getCurrentBookValue() != null && a.getResidualValue() != null
@@ -151,68 +161,52 @@ public class AnalyticsServiceImpl implements AnalyticsService {
 
         Map<String, Object> categoryBreakdown = new LinkedHashMap<>();
         byCategory.forEach((catName, catAssets) -> {
-            BigDecimal catValue = sumPurchaseCost(catAssets);
-            BigDecimal catNBV = catAssets.stream()
-                    .map(a -> a.getCurrentBookValue() != null ? a.getCurrentBookValue() : BigDecimal.ZERO)
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
-            BigDecimal catMonthlyDep = catAssets.stream()
-                    .filter(a -> a.getPurchaseCost() != null && a.getUsefulLifeMonths() != null && a.getUsefulLifeMonths() > 0)
-                    .map(a -> {
-                        BigDecimal dep = a.getPurchaseCost()
-                                .subtract(a.getResidualValue() != null ? a.getResidualValue() : BigDecimal.ZERO);
-                        if (dep.signum() <= 0) return BigDecimal.ZERO;
-                        return dep.divide(BigDecimal.valueOf(a.getUsefulLifeMonths()), 2, RoundingMode.HALF_UP);
-                    })
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
-
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("category", catName);
             m.put("count", catAssets.size());
-            m.put("value", catValue.setScale(2, RoundingMode.HALF_UP));
-            m.put("netBookValue", catNBV.setScale(2, RoundingMode.HALF_UP));
-            m.put("monthlyDepreciation", catMonthlyDep.setScale(2, RoundingMode.HALF_UP));
+            m.put("value", sumPurchaseCost(fx, catAssets).amount());
+            m.put("netBookValue", fx.sum(catAssets, Asset::getCurrentBookValue, Asset::getCurrency).amount());
+            m.put("monthlyDepreciation", sumMonthlyDepreciation(fx, catAssets).amount());
             categoryBreakdown.put(catName, m);
         });
 
-        BigDecimal totalAcquisition = assets.stream()
+        MoneyAccumulator totalAcquisition = sumPurchaseCost(fx, assets.stream()
                 .filter(a -> a.getPurchaseDate() != null && !a.getPurchaseDate().isBefore(start) && !a.getPurchaseDate().isAfter(end))
-                .map(a -> a.getPurchaseCost() != null ? a.getPurchaseCost() : BigDecimal.ZERO)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
+                .toList());
 
-        BigDecimal totalDisposal = disposalRecordRepository.findByOrganisationAndDisposalDateBetweenAndDeletedAtIsNull(org, start, end)
-                .stream()
-                .map(d -> d.getSaleValue() != null ? d.getSaleValue() : BigDecimal.ZERO)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        // Disposal sale value has no currency column: it is in the disposed asset's currency.
+        MoneyAccumulator totalDisposal = fx.sum(
+                disposalRecordRepository.findByOrganisationAndDisposalDateBetweenAndDeletedAtIsNull(org, start, end),
+                DisposalRecord::getSaleValue,
+                d -> d.getAsset() != null ? d.getAsset().getCurrency() : null);
 
         // Budget Consolidation
-        List<com.assetiq.models.Budget> budgets = budgetRepository.findByOrganisationAndDeletedAtIsNullOrderByPeriodStartDesc(org);
-        BigDecimal totalBudget = budgets.stream()
-                .map(b -> b.getTotalAmount() != null ? b.getTotalAmount() : BigDecimal.ZERO)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal actualSpend = budgets.stream()
-                .map(b -> b.getSpentAmount() != null ? b.getSpentAmount() : BigDecimal.ZERO)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        List<Budget> budgets = budgetRepository.findByOrganisationAndDeletedAtIsNullOrderByPeriodStartDesc(org);
+        MoneyAccumulator totalBudget = fx.sum(budgets, Budget::getTotalAmount, Budget::getCurrency);
+        MoneyAccumulator actualSpend = fx.sum(budgets, Budget::getSpentAmount, Budget::getCurrency);
 
-        double budgetUtilization = totalBudget.signum() > 0
-                ? actualSpend.divide(totalBudget, 4, RoundingMode.HALF_UP).doubleValue() * 100
+        // Utilisation from converted values, never from a mix of currencies.
+        double budgetUtilization = totalBudget.rawSum().signum() > 0
+                ? actualSpend.rawSum().divide(totalBudget.rawSum(), 4, RoundingMode.HALF_UP).doubleValue() * 100
                 : 0.0;
 
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("period", period);
         response.put("totalAssets", assets.size());
-        response.put("totalAssetValue", totalAssetValue.setScale(2, RoundingMode.HALF_UP));
-        response.put("totalDepreciation", totalDepreciation.setScale(2, RoundingMode.HALF_UP));
-        response.put("netBookValue", netBookValue.setScale(2, RoundingMode.HALF_UP));
-        response.put("totalMaintenance", totalMaintenanceCost.setScale(2, RoundingMode.HALF_UP));
-        response.put("monthlyDepreciation", monthlyDepreciation.setScale(2, RoundingMode.HALF_UP));
-        response.put("totalAcquisition", totalAcquisition.setScale(2, RoundingMode.HALF_UP));
-        response.put("totalDisposal", totalDisposal.setScale(2, RoundingMode.HALF_UP));
-        response.put("totalBudget", totalBudget.setScale(2, RoundingMode.HALF_UP));
-        response.put("totalActualSpend", actualSpend.setScale(2, RoundingMode.HALF_UP));
+        response.put("totalAssetValue", totalAssetValue.amount());
+        response.put("totalDepreciation", CurrencyConversion.round(totalDepreciation));
+        response.put("netBookValue", netBookValue.amount());
+        response.put("totalMaintenance", totalMaintenanceCost.amount());
+        response.put("monthlyDepreciation", monthlyDepreciation.amount());
+        response.put("totalAcquisition", totalAcquisition.amount());
+        response.put("totalDisposal", totalDisposal.amount());
+        response.put("totalBudget", totalBudget.amount());
+        response.put("totalActualSpend", actualSpend.amount());
         response.put("budgetUtilization", Math.round(budgetUtilization * 100.0) / 100.0);
         response.put("assetsFullyDepreciated", assetsFullyDepreciated);
         response.put("averageAssetAgeMonths", Math.round(averageAgeMonths * 10.0) / 10.0);
         response.put("breakdown", Map.of("byCategory", categoryBreakdown));
+        fx.putMetadata(response);
         response.put("generatedAt", Instant.now().toString());
         return response;
     }
@@ -233,21 +227,27 @@ public class AnalyticsServiceImpl implements AnalyticsService {
         long approved = pos.stream().filter(p -> p.getStatus() == POStatus.APPROVED || p.getStatus() == POStatus.DELIVERED).count();
         long rejected = pos.stream().filter(p -> p.getStatus() == POStatus.REJECTED || p.getStatus() == POStatus.CANCELLED).count();
 
-        BigDecimal totalValue = pos.stream()
-                .map(p -> p.getTotalAmount() != null ? p.getTotalAmount() : BigDecimal.ZERO)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        CurrencyConversion fx = moneyAggregator.begin(org);
 
-        BigDecimal averageValue = total > 0
-                ? totalValue.divide(BigDecimal.valueOf(total), 2, RoundingMode.HALF_UP)
-                : BigDecimal.ZERO;
+        // Convert each PO once; a PO whose currency has no rate is left out of the
+        // total, the average and the largest/smallest comparison alike.
+        List<BigDecimal> convertedValues = new ArrayList<>();
+        for (PurchaseOrder p : pos) {
+            BigDecimal amount = p.getTotalAmount() != null ? p.getTotalAmount() : BigDecimal.ZERO;
+            fx.toBase(amount, p.getCurrency()).ifPresent(convertedValues::add);
+        }
+        BigDecimal totalValue = convertedValues.stream().reduce(BigDecimal.ZERO, BigDecimal::add);
 
-        BigDecimal largestPO = pos.stream()
-                .map(p -> p.getTotalAmount() != null ? p.getTotalAmount() : BigDecimal.ZERO)
+        BigDecimal averageValue = convertedValues.isEmpty()
+                ? CurrencyConversion.round(BigDecimal.ZERO)
+                : totalValue.divide(BigDecimal.valueOf(convertedValues.size()),
+                        CurrencyConversion.MONEY_SCALE, CurrencyConversion.MONEY_ROUNDING);
+
+        BigDecimal largestPO = convertedValues.stream()
                 .max(Comparator.naturalOrder()).orElse(BigDecimal.ZERO);
 
-        BigDecimal smallestPO = pos.stream()
-                .filter(p -> p.getTotalAmount() != null && p.getTotalAmount().signum() > 0)
-                .map(PurchaseOrder::getTotalAmount)
+        BigDecimal smallestPO = convertedValues.stream()
+                .filter(v -> v.signum() > 0)
                 .min(Comparator.naturalOrder()).orElse(BigDecimal.ZERO);
 
         // Top 5 suppliers by PO count
@@ -257,13 +257,11 @@ public class AnalyticsServiceImpl implements AnalyticsService {
 
         List<Map<String, Object>> topSuppliers = bySupplier.entrySet().stream()
                 .map(e -> {
-                    BigDecimal supplierTotal = e.getValue().stream()
-                            .map(p -> p.getTotalAmount() != null ? p.getTotalAmount() : BigDecimal.ZERO)
-                            .reduce(BigDecimal.ZERO, BigDecimal::add);
                     Map<String, Object> m = new LinkedHashMap<>();
                     m.put("supplier", e.getKey());
                     m.put("poCount", e.getValue().size());
-                    m.put("totalValue", supplierTotal.setScale(2, RoundingMode.HALF_UP));
+                    m.put("totalValue",
+                            fx.sum(e.getValue(), PurchaseOrder::getTotalAmount, PurchaseOrder::getCurrency).amount());
                     return m;
                 })
                 .sorted((a, b) -> Integer.compare((int) b.get("poCount"), (int) a.get("poCount")))
@@ -277,11 +275,12 @@ public class AnalyticsServiceImpl implements AnalyticsService {
         response.put("submittedPOs", submitted);
         response.put("approvedPOs", approved);
         response.put("rejectedPOs", rejected);
-        response.put("totalPOValue", totalValue.setScale(2, RoundingMode.HALF_UP));
+        response.put("totalPOValue", CurrencyConversion.round(totalValue));
         response.put("averagePOValue", averageValue);
-        response.put("largestPO", largestPO.setScale(2, RoundingMode.HALF_UP));
-        response.put("smallestPO", smallestPO.setScale(2, RoundingMode.HALF_UP));
+        response.put("largestPO", CurrencyConversion.round(largestPO));
+        response.put("smallestPO", CurrencyConversion.round(smallestPO));
         response.put("topSuppliers", topSuppliers);
+        fx.putMetadata(response);
         response.put("generatedAt", Instant.now().toString());
         return response;
     }
@@ -302,13 +301,25 @@ public class AnalyticsServiceImpl implements AnalyticsService {
                 .map(r -> r.getAsset().getId())
                 .distinct().count();
 
-        BigDecimal totalCost = records.stream()
-                .map(r -> r.getCost() != null ? r.getCost() : BigDecimal.ZERO)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        CurrencyConversion fx = moneyAggregator.begin(org);
+        // Maintenance cost is in the related asset's currency (no currency column).
+        // Records without a cost count as zero in the average, as before; records
+        // whose currency has no rate are excluded from both total and average.
+        BigDecimal totalCost = BigDecimal.ZERO;
+        long costedRecords = 0;
+        for (MaintenanceRecord r : records) {
+            BigDecimal cost = r.getCost() != null ? r.getCost() : BigDecimal.ZERO;
+            Optional<BigDecimal> converted = fx.toBase(cost, maintenanceCurrency(r));
+            if (converted.isPresent()) {
+                totalCost = totalCost.add(converted.get());
+                costedRecords++;
+            }
+        }
 
-        BigDecimal avgCost = total > 0
-                ? totalCost.divide(BigDecimal.valueOf(total), 2, RoundingMode.HALF_UP)
-                : BigDecimal.ZERO;
+        BigDecimal avgCost = costedRecords > 0
+                ? totalCost.divide(BigDecimal.valueOf(costedRecords),
+                        CurrencyConversion.MONEY_SCALE, CurrencyConversion.MONEY_ROUNDING)
+                : CurrencyConversion.round(BigDecimal.ZERO);
 
         // Assets with overdue or upcoming maintenance (nextDueDate <= today, not yet done)
         LocalDate today = LocalDate.now();
@@ -331,27 +342,28 @@ public class AnalyticsServiceImpl implements AnalyticsService {
         }
 
         // Cost by maintenance type
-        Map<String, BigDecimal> costByType = records.stream()
+        Map<String, MoneyAccumulator> costAccByType = new LinkedHashMap<>();
+        records.stream()
                 .filter(r -> r.getMaintenanceType() != null)
-                .collect(Collectors.groupingBy(
-                        r -> r.getMaintenanceType().name(),
-                        Collectors.reducing(BigDecimal.ZERO,
-                                r -> r.getCost() != null ? r.getCost() : BigDecimal.ZERO,
-                                BigDecimal::add)));
-        costByType.replaceAll((k, v) -> v.setScale(2, RoundingMode.HALF_UP));
+                .forEach(r -> costAccByType
+                        .computeIfAbsent(r.getMaintenanceType().name(), k -> fx.newAccumulator())
+                        .add(r.getCost(), maintenanceCurrency(r)));
+        Map<String, BigDecimal> costByType = new LinkedHashMap<>();
+        costAccByType.forEach((k, acc) -> costByType.put(k, acc.amount()));
         for (MaintenanceType t : MaintenanceType.values()) {
-            costByType.putIfAbsent(t.name(), BigDecimal.ZERO);
+            costByType.putIfAbsent(t.name(), CurrencyConversion.round(BigDecimal.ZERO));
         }
 
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("period", period);
         response.put("totalMaintenanceRecords", total);
         response.put("assetsMaintained", assetsMaintained);
-        response.put("totalMaintenanceCost", totalCost.setScale(2, RoundingMode.HALF_UP));
+        response.put("totalMaintenanceCost", CurrencyConversion.round(totalCost));
         response.put("averageMaintenanceCost", avgCost);
         response.put("assetsNeedingMaintenance", assetsNeedingMaintenance);
         response.put("countByType", countByType);
         response.put("costByType", costByType);
+        fx.putMetadata(response);
         response.put("generatedAt", Instant.now().toString());
         return response;
     }
@@ -363,6 +375,9 @@ public class AnalyticsServiceImpl implements AnalyticsService {
         months = Math.max(1, Math.min(60, months));
         List<Asset> assets = assetRepository.findAllByOrganisationAndDeletedAtIsNull(org);
 
+        // Book values and charges are computed in each asset's currency, then
+        // converted at today's rate so every month is expressed in one currency.
+        CurrencyConversion fx = moneyAggregator.begin(org);
         YearMonth current = YearMonth.now();
         List<Map<String, Object>> trends = new ArrayList<>();
         BigDecimal totalDepreciationOverPeriod = BigDecimal.ZERO;
@@ -371,8 +386,8 @@ public class AnalyticsServiceImpl implements AnalyticsService {
             YearMonth ym = current.minusMonths(i);
             LocalDate monthEnd = ym.atEndOfMonth();
 
-            BigDecimal totalValue = BigDecimal.ZERO;
-            BigDecimal monthlyDepreciationCharge = BigDecimal.ZERO;
+            MoneyAccumulator totalValue = fx.newAccumulator();
+            MoneyAccumulator monthlyDepreciationCharge = fx.newAccumulator();
             int assetsRetiredOrDisposed = 0;
 
             for (Asset asset : assets) {
@@ -386,7 +401,7 @@ public class AnalyticsServiceImpl implements AnalyticsService {
                     BigDecimal residual = asset.getResidualValue() != null ? asset.getResidualValue() : BigDecimal.ZERO;
                     BigDecimal depreciable = asset.getPurchaseCost().subtract(residual);
                     if (depreciable.signum() <= 0) {
-                        totalValue = totalValue.add(asset.getPurchaseCost());
+                        totalValue.add(asset.getPurchaseCost(), asset.getCurrency());
                         continue;
                     }
                     BigDecimal monthlyDep = depreciable.divide(
@@ -394,15 +409,15 @@ public class AnalyticsServiceImpl implements AnalyticsService {
                     BigDecimal accDep = monthlyDep.multiply(BigDecimal.valueOf(monthsElapsed));
                     if (accDep.compareTo(depreciable) > 0) accDep = depreciable;
                     BigDecimal bookValue = asset.getPurchaseCost().subtract(accDep).max(residual);
-                    totalValue = totalValue.add(bookValue);
+                    totalValue.add(bookValue, asset.getCurrency());
 
                     // Depreciation charge for this month (zero if already fully depreciated)
                     BigDecimal remaining = depreciable.subtract(accDep.subtract(monthlyDep).max(BigDecimal.ZERO));
                     BigDecimal charge = monthlyDep.min(remaining).max(BigDecimal.ZERO);
-                    monthlyDepreciationCharge = monthlyDepreciationCharge.add(charge);
+                    monthlyDepreciationCharge.add(charge, asset.getCurrency());
                 } else {
                     // No depreciation data: carry purchase cost as book value
-                    totalValue = totalValue.add(asset.getPurchaseCost());
+                    totalValue.add(asset.getPurchaseCost(), asset.getCurrency());
                 }
 
                 if (asset.getStatus() == AssetStatus.RETIRED || asset.getStatus() == AssetStatus.DISPOSED) {
@@ -410,12 +425,12 @@ public class AnalyticsServiceImpl implements AnalyticsService {
                 }
             }
 
-            BigDecimal charge = monthlyDepreciationCharge.setScale(2, RoundingMode.HALF_UP);
+            BigDecimal charge = monthlyDepreciationCharge.amount();
             totalDepreciationOverPeriod = totalDepreciationOverPeriod.add(charge);
 
             Map<String, Object> point = new LinkedHashMap<>();
             point.put("month", ym.toString());
-            point.put("totalValue", totalValue.setScale(2, RoundingMode.HALF_UP));
+            point.put("totalValue", totalValue.amount());
             point.put("monthlyDepreciation", charge);
             point.put("assetsRetiredOrDisposed", assetsRetiredOrDisposed);
             trends.add(point);
@@ -424,28 +439,50 @@ public class AnalyticsServiceImpl implements AnalyticsService {
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("months", months);
         response.put("trends", trends);
-        response.put("totalDepreciationOverPeriod", totalDepreciationOverPeriod.setScale(2, RoundingMode.HALF_UP));
+        response.put("totalDepreciationOverPeriod", CurrencyConversion.round(totalDepreciationOverPeriod));
+        fx.putMetadata(response);
         response.put("generatedAt", Instant.now().toString());
         return response;
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private BigDecimal sumPurchaseCost(List<Asset> assets) {
-        return assets.stream()
-                .map(a -> a.getPurchaseCost() != null ? a.getPurchaseCost() : BigDecimal.ZERO)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
+    /** Purchase costs converted into the base currency; unconvertible assets are excluded. */
+    private MoneyAccumulator sumPurchaseCost(CurrencyConversion fx, List<Asset> assets) {
+        return fx.sum(assets, Asset::getPurchaseCost, Asset::getCurrency);
     }
 
-    private List<Map<String, Object>> buildGroups(Map<String, List<Asset>> grouped, long total, BigDecimal totalValue) {
+    /** Straight-line monthly depreciation charge per asset, converted and summed. */
+    private MoneyAccumulator sumMonthlyDepreciation(CurrencyConversion fx, List<Asset> assets) {
+        MoneyAccumulator acc = fx.newAccumulator();
+        for (Asset a : assets) {
+            if (a.getPurchaseCost() == null || a.getUsefulLifeMonths() == null || a.getUsefulLifeMonths() <= 0) {
+                continue;
+            }
+            BigDecimal depreciable = a.getPurchaseCost()
+                    .subtract(a.getResidualValue() != null ? a.getResidualValue() : BigDecimal.ZERO);
+            if (depreciable.signum() > 0) {
+                acc.add(depreciable.divide(BigDecimal.valueOf(a.getUsefulLifeMonths()), 2, RoundingMode.HALF_UP),
+                        a.getCurrency());
+            }
+        }
+        return acc;
+    }
+
+    /** Maintenance records have no currency column; their cost is in the asset's currency. */
+    private String maintenanceCurrency(MaintenanceRecord record) {
+        return record.getAsset() != null ? record.getAsset().getCurrency() : null;
+    }
+
+    private List<Map<String, Object>> buildGroups(CurrencyConversion fx, Map<String, List<Asset>> grouped, long total) {
         return grouped.entrySet().stream().map(e -> {
             long count = e.getValue().size();
-            BigDecimal value = sumPurchaseCost(e.getValue());
+            BigDecimal value = sumPurchaseCost(fx, e.getValue()).amount();
             double pct = total > 0 ? Math.round((count * 1000.0 / total)) / 10.0 : 0.0;
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("name", e.getKey());
             m.put("count", count);
-            m.put("value", value.setScale(2, RoundingMode.HALF_UP));
+            m.put("value", value);
             m.put("percentage", pct);
             return m;
         }).collect(Collectors.toList());

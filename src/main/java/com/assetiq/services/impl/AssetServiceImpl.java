@@ -391,7 +391,7 @@ public class AssetServiceImpl implements AssetService {
         if (dto.getPurchaseCost() != null)
             asset.setPurchaseCost(dto.getPurchaseCost());
         if (dto.getCurrency() != null)
-            asset.setCurrency(dto.getCurrency());
+            asset.setCurrency(CurrencyResolver.normaliseIsoCode(dto.getCurrency()));
         if (dto.getDepreciationMethod() != null)
             asset.setDepreciationMethod(dto.getDepreciationMethod());
         if (dto.getUsefulLifeMonths() != null)
@@ -716,6 +716,12 @@ public class AssetServiceImpl implements AssetService {
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         // 6. Net TCO = acquisition + maintenance + insurance + downtime - recovery
+        //
+        // Currency: every component is in the asset's own currency. Maintenance and
+        // disposal records have no currency column and are recorded against this
+        // asset, so they are in the asset's currency by convention; insurance and
+        // downtime rates are asset fields. No cross-currency addition happens here,
+        // and the result is labelled with the asset's currency (not the tenant base).
         BigDecimal netTco = acquisitionCost
                 .add(totalMaintenanceCost)
                 .add(totalInsuranceCost)
