@@ -2,10 +2,16 @@ package com.assetiq.services.impl;
 
 import com.assetiq.dto.CategoryDto;
 import com.assetiq.config.CachingConfig;
+import com.assetiq.enums.AssetStatus;
+import com.assetiq.models.Asset;
 import com.assetiq.models.Category;
+import com.assetiq.models.DepreciationPolicy;
 import com.assetiq.models.Organisation;
+import com.assetiq.repositories.AssetRepository;
 import com.assetiq.repositories.CategoryRepository;
+import com.assetiq.repositories.DepreciationPolicyRepository;
 import com.assetiq.repositories.OrganisationRepository;
+import com.assetiq.services.finance.DepreciationCalculator;
 import com.assetiq.services.CategoryService;
 import com.assetiq.services.TenantAwareService;
 import org.springframework.cache.annotation.CacheEvict;
@@ -14,6 +20,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.time.LocalDate;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -22,12 +30,21 @@ import java.util.stream.Collectors;
 @Transactional
 public class CategoryServiceImpl extends TenantAwareService implements CategoryService {
 
+    /** Relations an update may clear through {@link CategoryDto#getClearFields()}. */
+    static final Set<String> CLEARABLE_FIELDS = Set.of("depreciationPolicyId", "parentCategoryId");
+
     private final CategoryRepository categoryRepository;
+    private final DepreciationPolicyRepository depreciationPolicyRepository;
+    private final AssetRepository assetRepository;
 
     public CategoryServiceImpl(CategoryRepository categoryRepository,
-            OrganisationRepository organisationRepository) {
+            OrganisationRepository organisationRepository,
+            DepreciationPolicyRepository depreciationPolicyRepository,
+            AssetRepository assetRepository) {
         super(organisationRepository);
         this.categoryRepository = categoryRepository;
+        this.depreciationPolicyRepository = depreciationPolicyRepository;
+        this.assetRepository = assetRepository;
     }
 
     @Override
@@ -48,6 +65,9 @@ public class CategoryServiceImpl extends TenantAwareService implements CategoryS
                     categoryDto.getParentCategoryId(), org)
                     .orElseThrow(() -> new IllegalArgumentException("Parent category not found in your organisation"));
             category.setParentCategory(parentCategory);
+        }
+        if (categoryDto.getDepreciationPolicyId() != null) {
+            category.setDepreciationPolicy(requirePolicy(categoryDto.getDepreciationPolicyId(), org));
         }
 
         return mapToDto(categoryRepository.save(category));
@@ -97,6 +117,7 @@ public class CategoryServiceImpl extends TenantAwareService implements CategoryS
         category.setDescription(categoryDto.getDescription());
         category.setAssetPrefixCode(categoryDto.getAssetPrefixCode());
         category.setDefaultWarrantyPeriodMonths(categoryDto.getDefaultWarrantyPeriodMonths());
+        applyDepreciationPolicyAndClears(category, categoryDto, org);
 
         return mapToDto(categoryRepository.save(category));
     }
@@ -126,8 +147,53 @@ public class CategoryServiceImpl extends TenantAwareService implements CategoryS
                     .orElseThrow(() -> new IllegalArgumentException("Parent category not found in your organisation"));
             category.setParentCategory(parentCategory);
         }
+        applyDepreciationPolicyAndClears(category, categoryDto, org);
 
         return mapToDto(categoryRepository.save(category));
+    }
+
+    /**
+     * Sets or clears the depreciation policy (and clears the parent when asked).
+     * A policy change revalues the category's assets immediately, so the stored
+     * book value does not wait for the monthly job.
+     */
+    private void applyDepreciationPolicyAndClears(Category category, CategoryDto dto, Organisation org) {
+        Set<String> clears = dto.getClearFields() == null ? Set.of() : Set.copyOf(dto.getClearFields());
+        for (String field : clears) {
+            if (!CLEARABLE_FIELDS.contains(field)) {
+                throw new IllegalArgumentException("Field cannot be cleared: " + field);
+            }
+        }
+        if (clears.contains("depreciationPolicyId") && dto.getDepreciationPolicyId() != null) {
+            throw new IllegalArgumentException("Field is both set and cleared: depreciationPolicyId");
+        }
+        if (clears.contains("parentCategoryId")) {
+            if (dto.getParentCategoryId() != null) {
+                throw new IllegalArgumentException("Field is both set and cleared: parentCategoryId");
+            }
+            category.setParentCategory(null);
+        }
+
+        UUID before = category.getDepreciationPolicy() != null ? category.getDepreciationPolicy().getId() : null;
+        if (dto.getDepreciationPolicyId() != null) {
+            category.setDepreciationPolicy(requirePolicy(dto.getDepreciationPolicyId(), org));
+        } else if (clears.contains("depreciationPolicyId")) {
+            category.setDepreciationPolicy(null);
+        }
+        UUID after = category.getDepreciationPolicy() != null ? category.getDepreciationPolicy().getId() : null;
+        if (!Objects.equals(before, after) && category.getId() != null) {
+            LocalDate today = LocalDate.now();
+            for (Asset asset : assetRepository.findByOrganisationAndCategoryIdAndDeletedAtIsNull(org, category.getId())) {
+                if (asset.getStatus() != AssetStatus.DISPOSED) {
+                    asset.setCurrentBookValue(DepreciationCalculator.forAsset(asset, today).netBookValue());
+                }
+            }
+        }
+    }
+
+    private DepreciationPolicy requirePolicy(UUID policyId, Organisation org) {
+        return depreciationPolicyRepository.findByIdAndOrganisationAndDeletedAtIsNull(policyId, org)
+                .orElseThrow(() -> new IllegalArgumentException("Depreciation policy not found in your organisation"));
     }
 
     @Override
