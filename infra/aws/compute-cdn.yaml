@@ -136,6 +136,16 @@ Resources:
             PAYSTACK_KEY=$(aws secretsmanager get-secret-value --region ${AWS::Region} \
               --secret-id '${PaystackSecretArn}' --query SecretString --output text | jq -r .secretKey)
 
+            # Stored as hex; the app wants Base64 of the 32 raw bytes. Refuse to write
+            # an env file with a malformed key rather than boot-loop the container.
+            DATA_KEY_HEX=$(aws secretsmanager get-secret-value --region ${AWS::Region} \
+              --secret-id '${DataKeySecretArn}' --query SecretString --output text | jq -r .hex)
+            case "$DATA_KEY_HEX" in
+              *[!0-9a-f]*|"") echo "data-key secret is not hex; refusing to start" >&2; exit 1 ;;
+            esac
+            [ "${!#DATA_KEY_HEX}" -eq 64 ] || { echo "data-key secret is not 64 hex chars; refusing to start" >&2; exit 1; }
+            DATA_KEY_B64=$(printf '%s' "$DATA_KEY_HEX" | python3 -c 'import sys,base64,binascii; print(base64.b64encode(binascii.unhexlify(sys.stdin.read().strip())).decode())')
+
             cat > /etc/assetiq.env <<EOF
             SPRING_PROFILES_ACTIVE=prod
             SPRING_DATASOURCE_URL=jdbc:postgresql://${DbEndpoint}:5432/assetiq
@@ -143,6 +153,8 @@ Resources:
             SPRING_DATASOURCE_PASSWORD=$DB_PASS
             APP_JWT_SECRET=$JWT_SECRET
             PAYSTACK_SECRET_KEY=$PAYSTACK_KEY
+            APP_DATA_ENCRYPTION_KEY=$DATA_KEY_B64
+            APP_BILLING_CALLBACK_URL=https://${DistributionDomain}/billing/callback/
             SPRING_DATA_REDIS_HOST=redis
             SPRING_DATA_REDIS_PORT=6379
             APP_STORAGE_S3_ENABLED=true
@@ -234,6 +246,8 @@ Resources:
               Fn::ImportValue: !Sub "${FoundationStackName}-JwtSecretArn"
             PaystackSecretArn:
               Fn::ImportValue: !Sub "${FoundationStackName}-PaystackSecretArn"
+            DataKeySecretArn:
+              Fn::ImportValue: !Sub "${FoundationStackName}-DataEncryptionKeySecretArn"
             AppBucket:
               Fn::ImportValue: !Sub "${FoundationStackName}-AppStorageBucketName"
             DistributionDomain: !GetAtt Distribution.DomainName

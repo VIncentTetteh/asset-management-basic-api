@@ -139,6 +139,35 @@ Resources:
         - { Key: Environment, Value: !Ref Environment }
         - { Key: ManagedBy, Value: cloudformation }
 
+  # Field-level encryption key (MFA secrets, SSO/webhook secrets, gateway tokens).
+  #
+  # Generated as 64 lowercase hex characters (256 bits); the instance converts it
+  # to the Base64-of-32-bytes form StartupSecurityValidator requires. Nobody ever
+  # sees the value. Retained on delete and on replacement: losing this key makes
+  # every encrypted column unrecoverable, so the secret itself is the escrow copy,
+  # and its generation block must never change (a change would regenerate it).
+  DataEncryptionKeySecret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Name: !Sub "${ProjectName}/${Environment}/data-key"
+      Description: AES-256 field-encryption key for AssetIQ (hex encoded). Never rotate without a re-encryption run.
+      KmsKeyId: !Ref SecretsKey
+      GenerateSecretString:
+        SecretStringTemplate: '{}'
+        GenerateStringKey: "hex"
+        PasswordLength: 64
+        ExcludePunctuation: true
+        ExcludeUppercase: true
+        ExcludeCharacters: "ghijklmnopqrstuvwxyz"
+        IncludeSpace: false
+        RequireEachIncludedType: false
+      Tags:
+        - { Key: Project, Value: !Ref ProjectName }
+        - { Key: Environment, Value: !Ref Environment }
+        - { Key: ManagedBy, Value: cloudformation }
+
   PaystackSecret:
     Type: AWS::SecretsManager::Secret
     Properties:
@@ -377,7 +406,7 @@ Resources:
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
-              # Scoped to exactly three secret ARNs. The instance fetches these at
+              # Scoped to exactly four secret ARNs. The instance fetches these at
               # boot under its own identity; no secret is ever baked into user data,
               # an image, or an environment file on disk.
               - Effect: Allow
@@ -387,6 +416,7 @@ Resources:
                 Resource:
                   - !Ref JwtSecret
                   - !Ref PaystackSecret
+                  - !Ref DataEncryptionKeySecret
                   - !GetAtt Database.MasterUserSecret.SecretArn
                 Condition:
                   Bool: { "aws:SecureTransport": "true" }
@@ -444,6 +474,9 @@ Outputs:
   JwtSecretArn:
     Value: !Ref JwtSecret
     Export: { Name: !Sub "${AWS::StackName}-JwtSecretArn" }
+  DataEncryptionKeySecretArn:
+    Value: !Ref DataEncryptionKeySecret
+    Export: { Name: !Sub "${AWS::StackName}-DataEncryptionKeySecretArn" }
   PaystackSecretArn:
     Value: !Ref PaystackSecret
     Export: { Name: !Sub "${AWS::StackName}-PaystackSecretArn" }
