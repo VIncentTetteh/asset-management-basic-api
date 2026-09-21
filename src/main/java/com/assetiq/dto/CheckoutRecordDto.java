@@ -2,6 +2,7 @@ package com.assetiq.dto;
 
 import com.assetiq.enums.CheckoutStatus;
 import com.fasterxml.jackson.annotation.JsonInclude;
+import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -28,8 +29,12 @@ public class CheckoutRecordDto {
     private LocalDate expectedReturnDate;
     private LocalDate actualReturnDate;
     private UUID checkedInById;
+    /** Stored in a VARCHAR(50) column. */
+    @Size(max = 50)
     private String conditionOnCheckout;
+    @Size(max = 50)
     private String conditionOnReturn;
+    @Size(max = 2000)
     private String notes;
     private CheckoutStatus status;
     private UUID organisationId;

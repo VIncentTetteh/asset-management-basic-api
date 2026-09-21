@@ -2,6 +2,7 @@ package com.assetiq.controllers.v1;
 
 import com.assetiq.dto.CheckoutRecordDto;
 import com.assetiq.services.CheckoutService;
+import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -21,11 +22,11 @@ public class CheckoutController {
 
     /** Check out an asset to a user. */
     @PostMapping("/assets/{assetId}/users/{userId}")
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','CHECKOUT_ASSET','VIEW_ASSETS')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','CHECKOUT_ASSET')")
     public ResponseEntity<CheckoutRecordDto> checkOut(
             @PathVariable UUID assetId,
             @PathVariable UUID userId,
-            @RequestBody(required = false) CheckoutRecordDto dto) {
+            @Valid @RequestBody(required = false) CheckoutRecordDto dto) {
         return ResponseEntity.ok(checkoutService.checkOut(assetId, userId, dto));
     }
 
@@ -35,7 +36,7 @@ public class CheckoutController {
     public ResponseEntity<CheckoutRecordDto> checkOutToEmployee(
             @PathVariable UUID assetId,
             @PathVariable UUID employeeId,
-            @RequestBody(required = false) CheckoutRecordDto dto) {
+            @Valid @RequestBody(required = false) CheckoutRecordDto dto) {
         return ResponseEntity.ok(checkoutService.checkOutToEmployee(assetId, employeeId, dto));
     }
 
@@ -48,10 +49,10 @@ public class CheckoutController {
 
     /** Check in (return) a previously checked-out asset. */
     @PostMapping("/{checkoutRecordId}/checkin")
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','CHECKOUT_ASSET','VIEW_ASSETS')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','CHECKOUT_ASSET')")
     public ResponseEntity<CheckoutRecordDto> checkIn(
             @PathVariable UUID checkoutRecordId,
-            @RequestBody(required = false) CheckoutRecordDto dto) {
+            @Valid @RequestBody(required = false) CheckoutRecordDto dto) {
         return ResponseEntity.ok(checkoutService.checkIn(checkoutRecordId, dto));
     }
 

@@ -163,6 +163,7 @@ public class CheckoutServiceImpl extends TenantAwareService implements CheckoutS
 
         record.setActualReturnDate(LocalDate.now());
         record.setConditionOnReturn(dto != null ? dto.getConditionOnReturn() : null);
+        record.setNotes(appendReturnNotes(record.getNotes(), dto != null ? dto.getNotes() : null));
         record.setCheckedInBy(checkedInBy);
         record.setStatus(CheckoutStatus.RETURNED);
 
@@ -173,9 +174,7 @@ public class CheckoutServiceImpl extends TenantAwareService implements CheckoutS
 
         notificationService.notifyOrgAdmins(org, NotificationType.CHECKOUT,
                 "Asset Returned",
-                "Asset '" + asset.getName() + "' has been returned by "
-                        + record.getCheckedOutBy().getFirstName() + " "
-                        + record.getCheckedOutBy().getLastName() + ".",
+                "Asset '" + asset.getName() + "' has been returned by " + holderName(record) + ".",
                 saved.getId(), null);
 
         log.info("Asset {} checked in (record={})", asset.getId(), saved.getId());
@@ -255,6 +254,22 @@ public class CheckoutServiceImpl extends TenantAwareService implements CheckoutS
         }
         throw new org.springframework.security.access.AccessDeniedException(
                 "No authenticated user in security context");
+    }
+
+    /**
+     * The check-in form has its own notes field; the record has one notes column,
+     * so return notes are appended rather than silently dropped.
+     */
+    static String appendReturnNotes(String checkoutNotes, String returnNotes) {
+        if (returnNotes == null || returnNotes.isBlank()) return checkoutNotes;
+        String line = "Return notes: " + returnNotes.trim();
+        return (checkoutNotes == null || checkoutNotes.isBlank()) ? line : checkoutNotes + "\n" + line;
+    }
+
+    /** Who held the asset: the employee recipient when there is one, else the user. */
+    private static String holderName(CheckoutRecord r) {
+        if (r.getEmployee() != null) return r.getEmployee().getFullName();
+        return r.getCheckedOutBy().getFirstName() + " " + r.getCheckedOutBy().getLastName();
     }
 
     private CheckoutRecordDto toDto(CheckoutRecord r) {
