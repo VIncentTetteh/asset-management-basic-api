@@ -1,5 +1,7 @@
 package com.assetiq.controllers.v1;
 
+import com.assetiq.exceptions.MfaCodeInvalidException;
+import com.assetiq.exceptions.MfaEnrolmentRequiredException;
 import com.assetiq.models.User;
 import com.assetiq.multitenancy.TenantContext;
 import com.assetiq.repositories.UserRepository;
@@ -46,6 +48,9 @@ import java.util.UUID;
  *
  * Login flow (after password verification):
  *   4. POST /challenge → exchange mfaChallengeToken + TOTP code for a full JWT
+ *
+ * Step-up (already signed in, before a @RequireFreshMfa action):
+ *   5. POST /step-up   → TOTP code → access token re-issued with a fresh mfaAuthenticatedAt
  */
 @RestController
 @RequestMapping("/api/v1/mfa")
@@ -238,8 +243,7 @@ public class MfaController {
         }
 
         // Verify the TOTP code
-        if (user.getMfaSecret() == null
-                || !codeVerifier.isValidCode(secretCryptoService.decrypt(user.getMfaSecret()), code)) {
+        if (!isValidTotp(user, code)) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("error", "Invalid authenticator code."));
         }
@@ -249,29 +253,7 @@ public class MfaController {
         userRepository.save(user);
 
         // Build and return the full JWT
-        Map<String, Object> fullClaims = new HashMap<>();
-        fullClaims.put("email", user.getEmail());
-        fullClaims.put("firstName", user.getFirstName());
-        fullClaims.put("lastName", user.getLastName());
-        fullClaims.put("sessionVersion", user.getSessionVersion());
-        // Short-lived proof used by @RequireFreshMfa. Refresh deliberately does
-        // not copy this claim, so step-up assurance cannot be extended silently.
-        fullClaims.put("mfaAuthenticatedAt", Instant.now().getEpochSecond());
-
-        if (user.getRole() != null) {
-            String roleName = user.getRole().getName();
-            fullClaims.put("role", roleName.startsWith("ROLE_") ? roleName : "ROLE_" + roleName);
-            // Permissions intentionally excluded from the JWT (Phase 1 / B-6).
-            // They are resolved live from the permission cache on every request.
-        }
-        if (user.getOrganisation() != null) {
-            fullClaims.put("organisationId", user.getOrganisation().getId().toString());
-        }
-        if (user.getDepartment() != null) {
-            fullClaims.put("departmentId", user.getDepartment().getId().toString());
-        }
-
-        String token = jwtUtil.generateToken(user.getEmail(), fullClaims, jwtExpirationMillis);
+        String token = buildAccessToken(user, Instant.now().getEpochSecond());
         RefreshSessionService.IssuedRefreshToken refresh = refreshSessionService.issue(user);
         setSessionCookies(servletResponse, token, refresh);
 
@@ -288,11 +270,97 @@ public class MfaController {
                 "expiresIn", jwtExpirationMillis / 1000));
     }
 
-    private void setSessionCookies(HttpServletResponse response, String accessToken,
-                                   RefreshSessionService.IssuedRefreshToken refresh) {
-        ResponseCookie access = ResponseCookie.from("access_token", accessToken)
+    /**
+     * Step-up re-authentication for an already signed-in user.
+     *
+     * <p>Verifies a current TOTP code through the same {@link #isValidTotp} path as
+     * {@code /challenge} and re-issues the access token (cookie + body, for Bearer
+     * clients) with a fresh {@code mfaAuthenticatedAt}, satisfying
+     * {@code @RequireFreshMfa} for its max age.
+     *
+     * <p>Only the access token is replaced. The existing refresh session is kept: the
+     * user has not started a new login, and minting a second refresh session per
+     * approval would multiply live sessions. Because refresh deliberately drops
+     * {@code mfaAuthenticatedAt}, step-up assurance still expires on schedule.
+     *
+     * <p>Rate limited with the auth tier ({@code /api/v1/mfa/**} in
+     * {@code RateLimitingInterceptor}), same as {@code /challenge}.
+     *
+     * POST /api/v1/mfa/step-up
+     * Body: { "code": "123456" }
+     */
+    @PostMapping("/step-up")
+    public ResponseEntity<Map<String, Object>> stepUp(Authentication auth,
+                                                      @RequestBody Map<String, String> body,
+                                                      HttpServletResponse servletResponse) {
+        User user = resolveUser(auth);
+        if (!Boolean.TRUE.equals(user.getMfaEnabled()) || user.getMfaSecret() == null) {
+            throw new MfaEnrolmentRequiredException(
+                    "Two-factor authentication must be set up before performing this action");
+        }
+
+        String code = body != null ? body.get("code") : null;
+        if (code == null || code.isBlank()) {
+            throw new IllegalArgumentException("Missing 'code' in request body.");
+        }
+        if (!isValidTotp(user, code)) {
+            throw new MfaCodeInvalidException("Invalid authenticator code.");
+        }
+
+        long mfaAuthenticatedAt = Instant.now().getEpochSecond();
+        String token = buildAccessToken(user, mfaAuthenticatedAt);
+        servletResponse.addHeader(HttpHeaders.SET_COOKIE, accessCookie(token).toString());
+
+        return ResponseEntity.ok(Map.of(
+                "mfaAuthenticatedAt", mfaAuthenticatedAt,
+                "token", token,
+                "tokenType", "Bearer",
+                "expiresIn", jwtExpirationMillis / 1000));
+    }
+
+    /** Single TOTP verification path shared by {@code /challenge} and {@code /step-up}. */
+    private boolean isValidTotp(User user, String code) {
+        return user.getMfaSecret() != null
+                && codeVerifier.isValidCode(secretCryptoService.decrypt(user.getMfaSecret()), code);
+    }
+
+    /**
+     * Builds a full-access JWT for an MFA-verified user. {@code mfaAuthenticatedAt}
+     * is the short-lived proof used by {@code @RequireFreshMfa}; refresh deliberately
+     * does not copy it, so step-up assurance cannot be extended silently.
+     */
+    private String buildAccessToken(User user, long mfaAuthenticatedAt) {
+        Map<String, Object> fullClaims = new HashMap<>();
+        fullClaims.put("email", user.getEmail());
+        fullClaims.put("firstName", user.getFirstName());
+        fullClaims.put("lastName", user.getLastName());
+        fullClaims.put("sessionVersion", user.getSessionVersion());
+        fullClaims.put("mfaAuthenticatedAt", mfaAuthenticatedAt);
+
+        if (user.getRole() != null) {
+            String roleName = user.getRole().getName();
+            fullClaims.put("role", roleName.startsWith("ROLE_") ? roleName : "ROLE_" + roleName);
+            // Permissions intentionally excluded from the JWT (Phase 1 / B-6).
+            // They are resolved live from the permission cache on every request.
+        }
+        if (user.getOrganisation() != null) {
+            fullClaims.put("organisationId", user.getOrganisation().getId().toString());
+        }
+        if (user.getDepartment() != null) {
+            fullClaims.put("departmentId", user.getDepartment().getId().toString());
+        }
+        return jwtUtil.generateToken(user.getEmail(), fullClaims, jwtExpirationMillis);
+    }
+
+    private ResponseCookie accessCookie(String accessToken) {
+        return ResponseCookie.from("access_token", accessToken)
                 .httpOnly(true).secure(authCookieSecure).sameSite("Strict")
                 .path("/api").maxAge(jwtExpirationMillis / 1000).build();
+    }
+
+    private void setSessionCookies(HttpServletResponse response, String accessToken,
+                                   RefreshSessionService.IssuedRefreshToken refresh) {
+        ResponseCookie access = accessCookie(accessToken);
         long refreshMaxAge = Math.max(0, Duration.between(Instant.now(), refresh.expiresAt()).toSeconds());
         ResponseCookie refreshCookie = ResponseCookie.from("refresh_token", refresh.token())
                 .httpOnly(true).secure(authCookieSecure).sameSite("Strict")
