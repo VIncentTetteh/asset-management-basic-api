@@ -267,6 +267,20 @@ app:
       # Set to true to load SAML IdP metadata and register Spring Security SAML2 SPs.
       # Leave false in environments without a SAML IdP (avoids metadata download at startup).
       enabled: ${APP_SSO_SAML_ENABLED:false}
+    # Where the SSO callback is allowed to deliver a one-time exchange code. A
+    # redirect that is not covered by one of these prefixes is dropped and the
+    # browser finishes on the web app instead.
+    allowed-exchange-redirect-prefixes: ${APP_SSO_EXCHANGE_REDIRECT_PREFIXES:assetiq://,eam://,exp://,http://localhost,http://127.0.0.1}
+    # One extra prefix, for a deployment whose mobile build comes back through an
+    # https universal link rather than a custom scheme — for example
+    # https://app.<your-domain>/auth/sso/callback. Empty by default and
+    # deliberately not defaulted to any domain: this is where session codes get
+    # delivered, so it is the deployment's decision, not the code's. Ignored
+    # unless it starts with https:// (an http:// prefix would hand the code to
+    # the network). PKCE (see Pkce / the codeChallenge parameter on
+    # /auth/sso/initiate) is what protects the code in transit; this list is what
+    # decides who is allowed to receive it at all.
+    allowed-exchange-redirect-https-prefix: ${APP_SSO_EXCHANGE_REDIRECT_HTTPS_PREFIX:}
 
   # ── Webhook DLQ retry ─────────────────────────────────────────────────────
   webhook:

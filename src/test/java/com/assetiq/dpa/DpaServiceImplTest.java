@@ -38,6 +38,7 @@ class DpaServiceImplTest {
     @Mock DsarRequestRepository   dsarRepository;
     @Mock UserRepository          userRepository;
     @Mock EmailService            emailService;
+    @Mock com.assetiq.services.UserErasureService userErasureService;
 
     DpaServiceImpl service;
     Organisation   org;
@@ -46,7 +47,8 @@ class DpaServiceImplTest {
     @BeforeEach
     void setUp() {
         // emailEnabled = false by default (don't test email in unit tests)
-        service = new DpaServiceImpl(consentRepository, dsarRepository, userRepository, emailService, false);
+        service = new DpaServiceImpl(consentRepository, dsarRepository, userRepository, emailService,
+                userErasureService, false);
 
         org  = new Organisation();
         org.setId(UUID.randomUUID());

@@ -35,17 +35,20 @@ public class DpaServiceImpl implements DpaService {
     private final DsarRequestRepository   dsarRepository;
     private final UserRepository          userRepository;
     private final EmailService            emailService;
+    private final com.assetiq.services.UserErasureService userErasureService;
     private final boolean                 emailEnabled;
 
     public DpaServiceImpl(ConsentRecordRepository consentRepository,
                           DsarRequestRepository   dsarRepository,
                           UserRepository          userRepository,
                           EmailService            emailService,
+                          com.assetiq.services.UserErasureService userErasureService,
                           @org.springframework.beans.factory.annotation.Value("${app.email.enabled:false}") boolean emailEnabled) {
         this.consentRepository = consentRepository;
         this.dsarRepository    = dsarRepository;
         this.userRepository    = userRepository;
         this.emailService      = emailService;
+        this.userErasureService = userErasureService;
         this.emailEnabled      = emailEnabled;
     }
 
@@ -196,6 +199,18 @@ public class DpaServiceImpl implements DpaService {
             // Only a user of the same organisation (was findById: any tenant's user).
             dsar.setAssignedTo(userRepository.findByIdAndOrganisation(assignedToUserId, org)
                     .orElseThrow(() -> new IllegalArgumentException("Assignee not found in your organisation")));
+        }
+
+        // Completing an ERASURE request is the moment the erasure actually happens.
+        // Before this the register recorded a promise and nothing carried it out,
+        // which is the worst of both worlds: an audit trail saying the data was
+        // erased, and the data still there. It runs through the same
+        // UserErasureService the self-service deletion uses, so the anonymisation
+        // rules have exactly one definition.
+        if (closing && newStatus == DsarRequest.Status.COMPLETED
+                && dsar.getRequestType() == DsarRequest.RequestType.ERASURE
+                && dsar.getRequesterUser() != null) {
+            userErasureService.erase(dsar.getRequesterUser(), "DSAR ERASURE fulfilment " + dsar.getId());
         }
 
         log.info("[DPA] DSAR {} updated to status={} org={}", id, newStatus, org.getId());

@@ -71,6 +71,26 @@ public class UserController {
         return ResponseEntity.noContent().build();
     }
 
+    /**
+     * DELETE /api/v1/users/me — delete your own account.
+     *
+     * <p>Before this, a non-admin user could only file a DSAR and wait for a
+     * compliance officer; App Store 5.1.1(v) and the equivalent Play policy both
+     * require an in-app path. Two proofs are required, because this is not
+     * reversible: a fresh MFA step-up (the annotation) and the account password
+     * (the body). The organisation's last administrator is refused with 409 —
+     * a tenant nobody can administer is an outage, not a deletion; that caller
+     * closes the organisation instead.
+     */
+    @DeleteMapping("/me")
+    @RequireFreshMfa
+    public ResponseEntity<Void> deleteMe(
+            Authentication authentication,
+            @Valid @RequestBody com.assetiq.dto.VerifyPasswordRequest request) {
+        userService.deleteMe(authentication.getName(), request);
+        return ResponseEntity.noContent().build();
+    }
+
     // ── Admin-only endpoints ──────────────────────────────────────────────────
 
     @PostMapping

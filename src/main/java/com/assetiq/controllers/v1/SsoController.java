@@ -13,6 +13,7 @@ import com.assetiq.repositories.UserRepository;
 import com.assetiq.security.JwtUtil;
 import com.assetiq.services.RefreshSessionService;
 import com.assetiq.security.SecretCryptoService;
+import com.assetiq.security.sso.Pkce;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletResponse;
@@ -103,6 +104,17 @@ public class SsoController {
     @Value("${app.sso.allowed-exchange-redirect-prefixes:assetiq://,eam://,exp://,http://localhost,http://127.0.0.1}")
     private String allowedExchangeRedirectPrefixes;
 
+    /**
+     * One extra allowed exchange-redirect prefix, for a deployment whose mobile
+     * build hands back through an https universal link rather than a custom scheme.
+     * Empty by default and deliberately not defaulted to any domain: a redirect
+     * prefix is a place session codes get delivered to, so it is the deployment's
+     * decision, never the code's. Ignored unless it starts with {@code https://}
+     * — an http:// entry would hand the code to the network.
+     */
+    @Value("${app.sso.allowed-exchange-redirect-https-prefix:}")
+    private String allowedExchangeRedirectHttpsPrefix;
+
     @Value("${app.auth.cookie-secure:false}")
     private boolean authCookieSecure;
 
@@ -189,7 +201,23 @@ public class SsoController {
     public void initiate(@RequestParam UUID orgId,
                          @RequestParam(required = false) String provider,
                          @RequestParam(required = false) String exchangeRedirectUri,
+                         @RequestParam(required = false) String codeChallenge,
+                         @RequestParam(required = false) String codeChallengeMethod,
                          HttpServletResponse response) throws IOException {
+
+        // PKCE (RFC 7636). S256 only: "plain" publishes the verifier as the
+        // challenge, so it proves nothing, and accepting it would let a caller
+        // opt out of the protection by asking nicely.
+        if (!Pkce.isSupportedMethod(codeChallengeMethod)) {
+            response.sendError(HttpServletResponse.SC_BAD_REQUEST,
+                    "Unsupported code_challenge_method; only S256 is accepted");
+            return;
+        }
+        String challenge = codeChallenge == null || codeChallenge.isBlank() ? null : codeChallenge.trim();
+        if (challenge != null && !Pkce.isWellFormedChallenge(challenge)) {
+            response.sendError(HttpServletResponse.SC_BAD_REQUEST, "Malformed code_challenge");
+            return;
+        }
 
         OrgSsoConfig cfg = ssoConfigRepository.findByOrganisationIdAndEnabledTrue(orgId)
                 .orElse(null);
@@ -207,7 +235,7 @@ public class SsoController {
         }
 
         // OAuth2 / OIDC flow
-        initiateOAuth2(cfg, orgId, exchangeRedirectUri, response);
+        initiateOAuth2(cfg, orgId, exchangeRedirectUri, challenge, response);
     }
 
     // ── POST /api/v1/auth/sso/exchange ──────────────────────────────────────
@@ -219,10 +247,30 @@ public class SsoController {
             return ResponseEntity.badRequest().body(Map.of("error", "code is required"));
         }
 
+        // The code is consumed before anything else is checked: a code that has
+        // been presented once is spent, whether or not the proof that came with it
+        // was any good. Otherwise a wrong verifier would leave the code redeemable.
         StoredSsoExchange exchange = consumeExchangeCode(code);
         if (exchange == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("error", "SSO exchange code is invalid or expired"));
+        }
+
+        if (exchange.codeChallenge() != null) {
+            String verifier = body.get("codeVerifier");
+            if (verifier == null || verifier.isBlank()) {
+                verifier = body.get("code_verifier");
+            }
+            if (verifier == null || verifier.isBlank()) {
+                log.warn("[SSO] Exchange refused: the flow was started with PKCE but no code verifier was sent");
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "codeVerifier is required for this exchange code"));
+            }
+            if (!Pkce.matches(exchange.codeChallenge(), verifier)) {
+                log.warn("[SSO] Exchange refused: code verifier does not match the stored challenge");
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "codeVerifier does not match the code challenge"));
+            }
         }
 
         Optional<User> user = userRepository.findById(exchange.userId());
@@ -299,7 +347,7 @@ public class SsoController {
             log.info("[SSO] OAuth2 login succeeded for {} in org {}", email, orgId);
             if (storedState.exchangeRedirectUri() != null) {
                 String exchangeCode = UUID.randomUUID().toString().replace("-", "");
-                storeExchangeCode(exchangeCode, user.getId(), token);
+                storeExchangeCode(exchangeCode, user.getId(), token, storedState.codeChallenge());
                 servletResponse.sendRedirect(appendQuery(storedState.exchangeRedirectUri(),
                         "code=" + enc(exchangeCode) + "&sso=success"));
                 return;
@@ -366,8 +414,10 @@ public class SsoController {
 
     // ── OAuth2 helpers ────────────────────────────────────────────────────────
 
-    private void storeState(String state, UUID orgId, String nonce, String exchangeRedirectUri) {
-        StoredSsoState storedState = new StoredSsoState(orgId, nonce, exchangeRedirectUri, Instant.now().plus(STATE_TTL));
+    private void storeState(String state, UUID orgId, String nonce, String exchangeRedirectUri,
+                            String codeChallenge) {
+        StoredSsoState storedState = new StoredSsoState(orgId, nonce, exchangeRedirectUri,
+                Instant.now().plus(STATE_TTL), codeChallenge);
         if (redis != null) {
             redis.opsForValue().set("sso:state:" + state, storedState.serialize(), STATE_TTL);
             return;
@@ -389,8 +439,8 @@ public class SsoController {
         return stored;
     }
 
-    private void initiateOAuth2(OrgSsoConfig cfg, UUID orgId, String exchangeRedirectUri, HttpServletResponse response)
-            throws IOException {
+    private void initiateOAuth2(OrgSsoConfig cfg, UUID orgId, String exchangeRedirectUri, String codeChallenge,
+                                HttpServletResponse response) throws IOException {
 
         if (cfg.getClientId() == null || cfg.getIssuerUri() == null) {
             response.sendError(HttpServletResponse.SC_BAD_REQUEST,
@@ -409,7 +459,7 @@ public class SsoController {
         // Generate a CSRF-protecting state token and nonce for ID-token binding.
         String state = UUID.randomUUID().toString().replace("-", "");
         String nonce = UUID.randomUUID().toString().replace("-", "");
-        storeState(state, orgId, nonce, normalizeExchangeRedirectUri(exchangeRedirectUri));
+        storeState(state, orgId, nonce, normalizeExchangeRedirectUri(exchangeRedirectUri), codeChallenge);
 
         String scopes = cfg.getScopes() != null ? cfg.getScopes() : "openid email profile";
         String redirectUri = cfg.getRedirectUri() != null
@@ -428,8 +478,9 @@ public class SsoController {
         response.sendRedirect(authUrl);
     }
 
-    private void storeExchangeCode(String code, UUID userId, String token) {
-        StoredSsoExchange exchange = new StoredSsoExchange(userId, token, Instant.now().plus(EXCHANGE_CODE_TTL));
+    private void storeExchangeCode(String code, UUID userId, String token, String codeChallenge) {
+        StoredSsoExchange exchange = new StoredSsoExchange(userId, token,
+                Instant.now().plus(EXCHANGE_CODE_TTL), codeChallenge);
         if (redis != null) {
             redis.opsForValue().set("sso:exchange:" + code, exchange.serialize(), EXCHANGE_CODE_TTL);
             return;
@@ -461,6 +512,13 @@ public class SsoController {
             if (!allowed.isBlank() && trimmed.startsWith(allowed)) {
                 return trimmed;
             }
+        }
+        // The deployment's own universal-link prefix, if it configured one. Only
+        // https is honoured: an http:// entry would deliver the code in clear.
+        String httpsPrefix = allowedExchangeRedirectHttpsPrefix == null
+                ? "" : allowedExchangeRedirectHttpsPrefix.trim();
+        if (httpsPrefix.startsWith("https://") && trimmed.startsWith(httpsPrefix)) {
+            return trimmed;
         }
         return null;
     }
@@ -813,12 +871,48 @@ public class SsoController {
         catch (IllegalArgumentException ex) { return SsoProvider.GOOGLE; }
     }
 
-    private record StoredSsoState(UUID orgId, String nonce, String exchangeRedirectUri, Instant expiresAt) {
+    /**
+     * The PKCE challenge rides on the state so it survives the round trip to the
+     * IdP, and is copied onto the exchange code at the callback. Deserialisation
+     * still accepts the 3- and 4-field forms written before PKCE, so states in
+     * flight across a deploy are not invalidated.
+     */
+    private record StoredSsoState(UUID orgId, String nonce, String exchangeRedirectUri, Instant expiresAt,
+                                  String codeChallenge) {
         String serialize() {
-            return orgId + "|" + nonce + "|" + b64(exchangeRedirectUri) + "|" + expiresAt.toEpochMilli();
+            return orgId + "|" + nonce + "|" + b64(exchangeRedirectUri) + "|" + expiresAt.toEpochMilli()
+                    + "|" + b64(codeChallenge);
         }
 
         static StoredSsoState deserialize(String value) {
+            if (value == null || value.isBlank()) {
+                return null;
+            }
+            String[] parts = value.split("\\|", 5);
+            if (parts.length < 3 || parts.length > 5) {
+                return null;
+            }
+            try {
+                int expiresAtIndex = parts.length == 3 ? 2 : 3;
+                StoredSsoState state = new StoredSsoState(
+                        UUID.fromString(parts[0]),
+                        parts[1],
+                        parts.length >= 4 ? unb64(parts[2]) : null,
+                        Instant.ofEpochMilli(Long.parseLong(parts[expiresAtIndex])),
+                        parts.length == 5 ? unb64(parts[4]) : null);
+                return state.expiresAt().isBefore(Instant.now()) ? null : state;
+            } catch (Exception ex) {
+                return null;
+            }
+        }
+    }
+
+    private record StoredSsoExchange(UUID userId, String token, Instant expiresAt, String codeChallenge) {
+        String serialize() {
+            return userId + "|" + b64(token) + "|" + expiresAt.toEpochMilli() + "|" + b64(codeChallenge);
+        }
+
+        static StoredSsoExchange deserialize(String value) {
             if (value == null || value.isBlank()) {
                 return null;
             }
@@ -827,37 +921,11 @@ public class SsoController {
                 return null;
             }
             try {
-                int expiresAtIndex = parts.length == 4 ? 3 : 2;
-                StoredSsoState state = new StoredSsoState(
-                        UUID.fromString(parts[0]),
-                        parts[1],
-                        parts.length == 4 ? unb64(parts[2]) : null,
-                        Instant.ofEpochMilli(Long.parseLong(parts[expiresAtIndex])));
-                return state.expiresAt().isBefore(Instant.now()) ? null : state;
-            } catch (Exception ex) {
-                return null;
-            }
-        }
-    }
-
-    private record StoredSsoExchange(UUID userId, String token, Instant expiresAt) {
-        String serialize() {
-            return userId + "|" + b64(token) + "|" + expiresAt.toEpochMilli();
-        }
-
-        static StoredSsoExchange deserialize(String value) {
-            if (value == null || value.isBlank()) {
-                return null;
-            }
-            String[] parts = value.split("\\|", 3);
-            if (parts.length != 3) {
-                return null;
-            }
-            try {
                 StoredSsoExchange exchange = new StoredSsoExchange(
                         UUID.fromString(parts[0]),
                         unb64(parts[1]),
-                        Instant.ofEpochMilli(Long.parseLong(parts[2])));
+                        Instant.ofEpochMilli(Long.parseLong(parts[2])),
+                        parts.length == 4 ? unb64(parts[3]) : null);
                 return exchange.expiresAt().isBefore(Instant.now()) ? null : exchange;
             } catch (Exception ex) {
                 return null;

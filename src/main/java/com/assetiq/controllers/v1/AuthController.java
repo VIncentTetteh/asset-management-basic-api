@@ -610,6 +610,59 @@ public class AuthController {
         return ResponseEntity.ok(Map.of("message", "Logout successful."));
     }
 
+    /**
+     * Proves the caller knows their own password, without issuing anything.
+     *
+     * <p>The mobile client was gating account deletion by calling {@code /login}
+     * again, which mints a session it never uses (and, on an MFA account, leaves a
+     * challenge hanging). This answers the actual question and nothing else: 204
+     * when the password matches, 401 when it does not. No token, no cookie, no
+     * session, no change to the account's lockout counters — a re-confirmation is
+     * not a sign-in attempt, and locking someone out of an account they are
+     * already signed into would be its own denial of service.
+     *
+     * <p>It sits under {@code /api/v1/auth/**}, so it is already inside the auth
+     * rate-limit tier (5/min, 20/hour per client) that brakes {@code /login}; no
+     * second limiter is introduced, because two limiters on one surface is how you
+     * get a gap between them. The bcrypt comparison runs on every call — including
+     * one from a session whose account has since gone — so the response time does
+     * not separate "wrong password" from "no such account".
+     */
+    @PostMapping("/verify-password")
+    public ResponseEntity<Void> verifyPassword(
+            org.springframework.security.core.Authentication authentication,
+            @Valid @RequestBody com.assetiq.dto.VerifyPasswordRequest request) {
+        UUID organisationId = TenantContext.getOrganisationId();
+        if (authentication == null || organisationId == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+        User user = userRepository.findByEmailAndOrganisationId(authentication.getName(), organisationId)
+                .orElse(null);
+        String hash = user != null && user.getPasswordHash() != null
+                ? user.getPasswordHash() : decoyPasswordHash();
+        boolean matches = passwordEncoder.matches(request.password(), hash);
+        if (user == null || !matches) {
+            log.info("[AUTH] Password re-confirmation failed for an authenticated session");
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+        return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * A hash of a value nobody holds, encoded once. It exists so the bcrypt work
+     * factor is paid even when there is no account to compare against.
+     */
+    private String decoyPasswordHash() {
+        String hash = decoyHash;
+        if (hash == null) {
+            hash = passwordEncoder.encode(UUID.randomUUID().toString());
+            decoyHash = hash;
+        }
+        return hash;
+    }
+
+    private volatile String decoyHash;
+
     /** Revoke every device/session for the authenticated account. */
     @PostMapping("/logout-all")
     public ResponseEntity<?> logoutAll(

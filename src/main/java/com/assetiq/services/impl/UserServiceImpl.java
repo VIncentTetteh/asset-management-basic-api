@@ -50,6 +50,7 @@ public class UserServiceImpl extends TenantAwareService implements UserService {
     private final PermissionCacheService permissionCacheService;
     private final SessionRevocationService sessionRevocationService;
     private final RbacAuditService rbacAuditService;
+    private final com.assetiq.services.UserErasureService userErasureService;
 
     @Value("${app.email.base-url:http://localhost:3000}")
     private String baseUrl;
@@ -63,7 +64,8 @@ public class UserServiceImpl extends TenantAwareService implements UserService {
             EmailService emailService,
             PermissionCacheService permissionCacheService,
             SessionRevocationService sessionRevocationService,
-            RbacAuditService rbacAuditService) {
+            RbacAuditService rbacAuditService,
+            com.assetiq.services.UserErasureService userErasureService) {
         super(organisationRepository);
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
@@ -74,6 +76,7 @@ public class UserServiceImpl extends TenantAwareService implements UserService {
         this.permissionCacheService = permissionCacheService;
         this.sessionRevocationService = sessionRevocationService;
         this.rbacAuditService = rbacAuditService;
+        this.userErasureService = userErasureService;
     }
 
     @Override
@@ -289,6 +292,50 @@ public class UserServiceImpl extends TenantAwareService implements UserService {
         // A changed password must end every existing session, as a reset does.
         sessionRevocationService.revokeAll(user);
         rbacAuditService.recordPasswordChanged(user.getId());
+    }
+
+    @Override
+    @CacheEvict(value = CachingConfig.CacheNames.USERS, allEntries = true)
+    public void deleteMe(String email, com.assetiq.dto.VerifyPasswordRequest request) {
+        Organisation org = requireTenantOrg();
+        User user = userRepository.findByEmailAndOrganisationId(email, org.getId())
+                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+
+        if (user.getPasswordHash() == null
+                || !passwordEncoder.matches(request.password(), user.getPasswordHash())) {
+            throw new com.assetiq.exceptions.FieldValidationException("password",
+                    "The password is not correct");
+        }
+        if (isSoleAdministrator(user, org)) {
+            throw new IllegalStateException(
+                    "You are the only administrator of this organisation, so deleting your account would leave it"
+                    + " with nobody who can manage it. Make someone else an administrator first, or close the"
+                    + " organisation instead.");
+        }
+
+        // One implementation of what erasure means, shared with DSAR fulfilment.
+        String erasedEmail = user.getEmail();
+        userErasureService.erase(user, "self-service account deletion");
+        // The cache is keyed on the address the caller signed in with, not the
+        // one erasure left behind.
+        permissionCacheService.evictForUser(email, org.getId().toString());
+        permissionCacheService.evictForUser(erasedEmail, org.getId().toString());
+    }
+
+    /**
+     * True when this user is an administrator and no other live, active
+     * administrator remains. Administrators are identified the same way the rest
+     * of the stack identifies them: by a role whose name contains ADMIN.
+     */
+    private boolean isSoleAdministrator(User user, Organisation org) {
+        java.util.List<User> admins = userRepository
+                .findByOrganisationAndRole_NameContainingIgnoreCaseAndDeletedAtIsNull(org, "ADMIN");
+        boolean callerIsAdmin = admins.stream().anyMatch(a -> a.getId().equals(user.getId()));
+        if (!callerIsAdmin) {
+            return false;
+        }
+        return admins.stream().noneMatch(a -> !a.getId().equals(user.getId())
+                && a.getStatus() == UserStatus.ACTIVE);
     }
 
     @Override

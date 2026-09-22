@@ -32,6 +32,17 @@ public interface UserService {
      */
     void changeOwnPassword(String email, com.assetiq.dto.ChangePasswordRequest request);
 
+    /**
+     * Deletes the caller's own account: the erasure a non-admin user could
+     * previously only ask for through a DSAR.
+     *
+     * <p>Gated on a fresh MFA proof at the controller and on the password here.
+     * Refused (409) when the caller is the organisation's last administrator —
+     * a tenant nobody can administer is not a deletion, it is an outage. That
+     * caller closes the whole organisation instead.
+     */
+    void deleteMe(String email, com.assetiq.dto.VerifyPasswordRequest request);
+
     UserDto deactivateUser(UUID id);
 
     /** Re-enables a deactivated user (fresh MFA at the controller). */

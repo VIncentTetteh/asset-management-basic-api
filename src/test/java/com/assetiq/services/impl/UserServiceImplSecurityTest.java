@@ -57,6 +57,7 @@ class UserServiceImplSecurityTest {
     @Mock PermissionCacheService permissionCacheService;
     @Mock SessionRevocationService sessionRevocationService;
     @Mock RbacAuditService rbacAuditService;
+    @Mock com.assetiq.services.UserErasureService userErasureService;
 
     private UserServiceImpl service;
     private Organisation org;
@@ -66,7 +67,7 @@ class UserServiceImplSecurityTest {
     void setUp() {
         service = new UserServiceImpl(userRepository, roleRepository, departmentRepository, organisationRepository,
                 passwordEncoder, usageLimitService, emailService, permissionCacheService, sessionRevocationService,
-                rbacAuditService);
+                rbacAuditService, userErasureService);
         org = new Organisation();
         org.setId(UUID.randomUUID());
         TenantContext.setOrganisationId(org.getId());
