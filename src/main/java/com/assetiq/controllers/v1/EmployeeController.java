@@ -23,8 +23,36 @@ public class EmployeeController {
 
     private final EmployeeService employeeService;
 
-    public EmployeeController(EmployeeService employeeService) {
+    private final jakarta.validation.Validator validator;
+
+    public EmployeeController(EmployeeService employeeService, jakarta.validation.Validator validator) {
         this.employeeService = employeeService;
+        this.validator = validator;
+    }
+
+    /**
+     * {@code List<@Valid Item>} request bodies are not validated by Spring MVC (the
+     * list itself is the validated object and Bean Validation does not cascade into
+     * a root collection), so a blank or over-long item title reached the database.
+     * Each item is checked here and the first problem is a field error such as
+     * {@code items[0].title}.
+     */
+    private void validateItems(List<EmployeeChecklistItemDto> items) {
+        if (items == null) return;
+        for (int i = 0; i < items.size(); i++) {
+            EmployeeChecklistItemDto item = items.get(i);
+            if (item == null) {
+                throw new com.assetiq.exceptions.FieldValidationException("items[" + i + "]", "must not be null");
+            }
+            var violations = validator.validate(item);
+            if (!violations.isEmpty()) {
+                var v = violations.stream()
+                        .min(java.util.Comparator.comparing(c -> c.getPropertyPath().toString()))
+                        .orElseThrow();
+                throw new com.assetiq.exceptions.FieldValidationException(
+                        "items[" + i + "]." + v.getPropertyPath(), v.getMessage());
+            }
+        }
     }
 
     @GetMapping
@@ -88,6 +116,7 @@ public class EmployeeController {
     public ResponseEntity<EmployeeChecklistDto> onboard(
             @PathVariable UUID id,
             @RequestBody(required = false) List<@Valid EmployeeChecklistItemDto> items) {
+        validateItems(items);
         return ResponseEntity.ok(employeeService.onboard(id, items));
     }
 
@@ -101,6 +130,7 @@ public class EmployeeController {
     public ResponseEntity<EmployeeChecklistDto> offboard(
             @PathVariable UUID id,
             @RequestBody(required = false) List<@Valid EmployeeChecklistItemDto> extraItems) {
+        validateItems(extraItems);
         return ResponseEntity.ok(employeeService.offboard(id, extraItems));
     }
 
