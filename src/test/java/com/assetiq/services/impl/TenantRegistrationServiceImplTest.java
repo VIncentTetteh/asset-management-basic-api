@@ -21,7 +21,6 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
-import org.springframework.dao.IncorrectResultSizeDataAccessException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -66,9 +65,9 @@ class TenantRegistrationServiceImplTest {
         when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
         when(subscriptionPlanRepository.findByCodeAndDeletedAtIsNull("FREEMIUM")).thenReturn(Optional.of(new SubscriptionPlan()));
         when(passwordEncoder.encode(anyString())).thenReturn("hash");
-        // The old lookup: an Optional of a user who exists in several tenants.
-        when(userRepository.findByEmail(anyString()))
-                .thenThrow(new IncorrectResultSizeDataAccessException(1, 2));
+        // The email already exists in several tenants.
+        when(userRepository.findAllByEmail(anyString()))
+                .thenReturn(java.util.List.of(new User(), new User()));
     }
 
     private static TenantRegisterRequest request() {

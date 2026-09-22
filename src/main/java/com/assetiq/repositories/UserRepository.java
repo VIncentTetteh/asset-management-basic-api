@@ -19,8 +19,16 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     // refresh, and the JWT filter, so they must be loaded in the same query or
     // accessing them later will throw LazyInitializationException.
 
-    @EntityGraph(attributePaths = {"role", "organisation", "department"})
-    Optional<User> findByEmail(String email);
+    /**
+     * The account for an email when exactly one tenant has it; empty when none or
+     * several do. Replaces a derived {@code findByEmail}, whose Optional result threw
+     * IncorrectResultSizeDataAccessException (a 500) once an email existed in two
+     * tenants. Prefer {@link #findByEmailAndOrganisationId} whenever a tenant is known.
+     */
+    default Optional<User> findSoleByEmail(String email) {
+        List<User> matches = findAllByEmail(email);
+        return matches.size() == 1 ? Optional.of(matches.get(0)) : Optional.empty();
+    }
 
     /** True when any tenant has a user with this email (safe when several do). */
     boolean existsByEmailIgnoreCase(String email);

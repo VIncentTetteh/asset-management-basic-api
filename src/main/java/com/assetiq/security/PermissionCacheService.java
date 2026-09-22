@@ -129,7 +129,7 @@ public class PermissionCacheService {
             // collection is loaded in a single JOIN rather than a lazy second query.
             var userOpt = (organisationId != null && !organisationId.isBlank())
                     ? userRepository.findWithRolesByEmailAndOrgId(email, UUID.fromString(organisationId))
-                    : userRepository.findByEmail(email);
+                    : userRepository.findSoleByEmail(email);
 
             return userOpt.map(user -> {
                 // B-5: use the many-to-many roles set for permission resolution.

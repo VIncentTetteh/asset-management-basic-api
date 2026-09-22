@@ -540,7 +540,7 @@ public class AuthController {
                 userOpt = Optional.empty();
             }
         } else {
-            userOpt = userRepository.findByEmail(email);
+            userOpt = userRepository.findSoleByEmail(email);
         }
         if (userOpt.isEmpty()) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)

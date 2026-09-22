@@ -145,7 +145,7 @@ public class NotificationsController {
             return userRepository.findByEmailAndOrganisationId(email, TenantContext.getOrganisationId())
                     .orElseThrow(() -> new AccessDeniedException("User not found in organisation"));
         }
-        return userRepository.findByEmail(email)
+        return userRepository.findSoleByEmail(email)
                 .orElseThrow(() -> new AccessDeniedException("User not found"));
     }
 

@@ -139,7 +139,7 @@ public class ApiAuditInterceptor implements HandlerInterceptor {
                 return byOrg.get();
             }
         }
-        return userRepository.findByEmail(actorEmail).orElse(null);
+        return userRepository.findSoleByEmail(actorEmail).orElse(null);
     }
 
     private String resolveHandler(Object handler) {

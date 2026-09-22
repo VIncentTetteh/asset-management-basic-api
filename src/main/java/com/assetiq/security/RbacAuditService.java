@@ -229,7 +229,7 @@ public class RbacAuditService {
             Optional<User> byOrg = userRepository.findByEmailAndOrganisationId(email, orgId);
             if (byOrg.isPresent()) return byOrg;
         }
-        return userRepository.findByEmail(email);
+        return userRepository.findSoleByEmail(email);
     }
 
     // ── Value formatters ──────────────────────────────────────────────────────

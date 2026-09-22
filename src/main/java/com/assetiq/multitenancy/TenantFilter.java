@@ -158,19 +158,18 @@ public class TenantFilter extends OncePerRequestFilter {
             } catch (IllegalArgumentException ignored) { /* bad header UUID */ }
         }
 
-        try {
-            User user = userRepository.findByEmail(email).orElse(null);
-            if (user == null) {
-                response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "User not found");
-                return null;
-            }
-            return user;
-        } catch (Exception e) {
+        java.util.List<User> matches = userRepository.findAllByEmail(email);
+        if (matches.size() == 1) {
+            return matches.get(0);
+        }
+        if (matches.isEmpty()) {
+            response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "User not found");
+        } else {
             log.warn("[TENANT_FILTER] Email '{}' exists in multiple organisations. " +
                     "Re-authenticate or provide X-Organisation-Id header.", email);
             response.sendError(HttpServletResponse.SC_UNAUTHORIZED,
                     "User email exists in multiple organisations. Please re-authenticate.");
-            return null;
         }
+        return null;
     }
 }

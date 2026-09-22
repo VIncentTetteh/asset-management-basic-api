@@ -237,7 +237,7 @@ public class MfaController {
                 user = userRepository.findByEmailAndOrganisationId(email, UUID.fromString(orgIdStr))
                         .orElseThrow(() -> new IllegalStateException("User not found"));
             } else {
-                user = userRepository.findByEmail(email)
+                user = userRepository.findSoleByEmail(email)
                         .orElseThrow(() -> new IllegalStateException("User not found"));
             }
         } catch (Exception e) {
