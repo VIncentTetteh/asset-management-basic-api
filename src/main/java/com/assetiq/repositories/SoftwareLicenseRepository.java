@@ -5,6 +5,7 @@ import com.assetiq.models.Organisation;
 import com.assetiq.models.SoftwareLicense;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.repository.query.Param;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -41,4 +42,14 @@ public interface SoftwareLicenseRepository extends JpaRepository<SoftwareLicense
             "AND l.expiryDate = :expiryDate")
     Page<SoftwareLicense> findExpiringOn(
             @Param("expiryDate") LocalDate expiryDate, Pageable pageable);
+
+    /**
+     * Expiry job: ACTIVE or EXPIRING_SOON licences whose expiry date has passed become
+     * EXPIRED, across all organisations; auto-renewing licences are left alone.
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("UPDATE SoftwareLicense l SET l.status = com.assetiq.enums.LicenseStatus.EXPIRED, l.updatedAt = :now "
+            + "WHERE l.deletedAt IS NULL AND l.expiryDate < :today AND (l.autoRenew IS NULL OR l.autoRenew = false) "
+            + "AND l.status IN (com.assetiq.enums.LicenseStatus.ACTIVE, com.assetiq.enums.LicenseStatus.EXPIRING_SOON)")
+    int expirePastExpiryDate(@Param("today") LocalDate today, @Param("now") java.time.Instant now);
 }

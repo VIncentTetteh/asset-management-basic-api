@@ -4,6 +4,7 @@ import com.assetiq.models.Contract;
 import com.assetiq.models.Organisation;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 import org.springframework.data.domain.Page;
@@ -32,4 +33,15 @@ public interface ContractRepository extends JpaRepository<Contract, UUID> {
             "AND c.endDate = :expiryDate AND c.status NOT IN ('EXPIRED','TERMINATED')")
     Page<Contract> findExpiringOn(
             @Param("expiryDate") LocalDate expiryDate, Pageable pageable);
+
+    /**
+     * Expiry job: ACTIVE or EXPIRING_SOON contracts whose end date has passed become
+     * EXPIRED, across all organisations. Auto-renewing contracts are left alone (they
+     * renew rather than lapse). Returns the number of contracts expired.
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("UPDATE Contract c SET c.status = com.assetiq.enums.ContractStatus.EXPIRED, c.updatedAt = :now "
+            + "WHERE c.deletedAt IS NULL AND c.endDate < :today AND c.autoRenew = false "
+            + "AND c.status IN (com.assetiq.enums.ContractStatus.ACTIVE, com.assetiq.enums.ContractStatus.EXPIRING_SOON)")
+    int expirePastEndDate(@Param("today") LocalDate today, @Param("now") java.time.Instant now);
 }
