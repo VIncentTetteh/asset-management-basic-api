@@ -3,6 +3,7 @@ package com.assetiq.dto;
 import com.assetiq.enums.CloudAssetStatus;
 import com.assetiq.enums.CloudProvider;
 import com.assetiq.enums.CloudResourceType;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -52,8 +53,11 @@ public class CloudAssetDto {
      */
     @Size(max = 50)
     private String environment;
+    /** Tags/labels as a JSON object of string values, e.g. {"team":"payments"}; blank = none. */
     private String tags;
     private String description;
+    /** When a provider sync last refreshed this record; manual edits never set it. */
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private Instant lastSyncAt;
     private Instant createdAt;
     private Instant updatedAt;

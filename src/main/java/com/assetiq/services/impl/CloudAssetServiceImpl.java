@@ -89,7 +89,7 @@ public class CloudAssetServiceImpl extends TenantAwareService implements CloudAs
         Organisation org = requireTenantOrg();
         CloudAsset asset = new CloudAsset();
         mapToEntity(dto, asset, org);
-        asset.setLastSyncAt(Instant.now());
+        // lastSyncAt stays null: only a provider sync sets it.
         return toDto(cloudAssetRepo.save(asset));
     }
 
@@ -128,8 +128,8 @@ public class CloudAssetServiceImpl extends TenantAwareService implements CloudAs
         Organisation org = requireTenantOrg();
         CloudAsset asset = cloudAssetRepo.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
                 .orElseThrow(() -> new jakarta.persistence.EntityNotFoundException("Cloud asset not found: " + id));
+        // A manual edit keeps the last sync time: it says when the provider last reported.
         mapToEntity(dto, asset, org);
-        asset.setLastSyncAt(Instant.now());
         return toDto(cloudAssetRepo.save(asset));
     }
 
@@ -335,9 +335,37 @@ public class CloudAssetServiceImpl extends TenantAwareService implements CloudAs
         entity.setMonthlyCostEstimate(dto.getMonthlyCostEstimate());
         entity.setCurrency(currencyResolver.resolveOrDefault(dto.getCurrency()));
         entity.setEnvironment(CloudEnvironment.normaliseToName(dto.getEnvironment()));
-        entity.setTags(dto.getTags());
+        entity.setTags(normaliseTags(dto.getTags()));
         entity.setDescription(dto.getDescription());
         entity.setOrganisation(org);
+    }
+
+    private static final com.fasterxml.jackson.databind.ObjectMapper TAGS_JSON =
+            new com.fasterxml.jackson.databind.ObjectMapper();
+
+    /**
+     * Tags must be a JSON object whose values are strings (as providers report
+     * labels); blank means none. Returned compacted so equal tags compare equal.
+     */
+    static String normaliseTags(String tags) {
+        if (tags == null || tags.isBlank()) return null;
+        com.fasterxml.jackson.databind.JsonNode node;
+        try {
+            node = TAGS_JSON.readTree(tags);
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            throw new IllegalArgumentException("Tags must be a JSON object, e.g. {\"team\":\"payments\"}");
+        }
+        if (node == null || !node.isObject()) {
+            throw new IllegalArgumentException("Tags must be a JSON object, e.g. {\"team\":\"payments\"}");
+        }
+        java.util.Iterator<java.util.Map.Entry<String, com.fasterxml.jackson.databind.JsonNode>> fields = node.fields();
+        while (fields.hasNext()) {
+            var field = fields.next();
+            if (field.getKey().isBlank() || !field.getValue().isTextual()) {
+                throw new IllegalArgumentException("Each tag needs a name and a text value (tag '" + field.getKey() + "')");
+            }
+        }
+        return node.isEmpty() ? null : node.toString();
     }
 
     private CloudAssetDto toDto(CloudAsset a) {

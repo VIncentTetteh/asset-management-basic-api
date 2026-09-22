@@ -87,4 +87,34 @@ class CloudAssetServiceImplSyncTest {
         assertThatThrownBy(() -> service.recordMonthlyCost(id, "2026-09", new BigDecimal("-1"), null))
                 .isInstanceOf(IllegalArgumentException.class);
     }
+
+    @Test
+    void manualEditsNeverStampTheSyncTime() {
+        java.time.Instant synced = java.time.Instant.parse("2026-09-01T08:00:00Z");
+        com.assetiq.models.CloudAsset existing = new com.assetiq.models.CloudAsset();
+        existing.setId(UUID.randomUUID());
+        existing.setOrganisation(org);
+        existing.setLastSyncAt(synced);
+        when(cloudAssetRepo.findByIdAndOrganisationAndDeletedAtIsNull(existing.getId(), org)).thenReturn(Optional.of(existing));
+        when(cloudAssetRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        com.assetiq.dto.CloudAssetDto dto = new com.assetiq.dto.CloudAssetDto();
+        dto.setName("db-1");
+        dto.setTags("{ \"team\" : \"payments\" }");
+
+        assertThat(service.update(existing.getId(), dto).getLastSyncAt()).isEqualTo(synced);
+        assertThat(existing.getTags()).isEqualTo("{\"team\":\"payments\"}");
+        assertThat(service.create(dto).getLastSyncAt()).isNull();
+    }
+
+    @Test
+    void tagsMustBeAJsonObjectOfText() {
+        assertThat(CloudAssetServiceImpl.normaliseTags("  ")).isNull();
+        assertThat(CloudAssetServiceImpl.normaliseTags("{}")).isNull();
+        assertThatThrownBy(() -> CloudAssetServiceImpl.normaliseTags("team=payments"))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> CloudAssetServiceImpl.normaliseTags("[1,2]"))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> CloudAssetServiceImpl.normaliseTags("{\"n\":1}"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
 }
