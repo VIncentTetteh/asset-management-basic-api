@@ -138,7 +138,7 @@ public class DpaServiceImpl implements DpaService {
                 emailService.sendTemplate(
                         saved.getRequesterEmail(),
                         "Your Data Subject Request Has Been Received — AssetIQ",
-                        "dsar-acknowledgement",
+                        "email/dsar-acknowledgement",
                         model);
                 log.info("[DPA] DSAR acknowledgement email sent to {}", saved.getRequesterEmail());
             } catch (Exception e) {

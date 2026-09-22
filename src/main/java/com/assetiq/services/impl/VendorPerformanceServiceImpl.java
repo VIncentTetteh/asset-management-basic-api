@@ -72,6 +72,7 @@ public class VendorPerformanceServiceImpl extends TenantAwareService implements 
     }
 
     @Override
+    @org.springframework.transaction.annotation.Transactional(readOnly = true)
     public VendorPerformanceReviewDto getById(UUID id) {
         Organisation org = requireTenantOrg();
         return toDto(reviewRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
@@ -79,6 +80,8 @@ public class VendorPerformanceServiceImpl extends TenantAwareService implements 
     }
 
     @Override
+    // toDto reads the lazy supplier: without a session that threw and the list 500'd.
+    @org.springframework.transaction.annotation.Transactional(readOnly = true)
     public List<VendorPerformanceReviewDto> listAll() {
         Organisation org = requireTenantOrg();
         return reviewRepository.findByOrganisationAndDeletedAtIsNullOrderByCreatedAtDesc(org)
@@ -86,6 +89,7 @@ public class VendorPerformanceServiceImpl extends TenantAwareService implements 
     }
 
     @Override
+    @org.springframework.transaction.annotation.Transactional(readOnly = true)
     public List<VendorPerformanceReviewDto> listBySupplier(UUID supplierId) {
         Organisation org = requireTenantOrg();
         supplierRepository.findByIdAndOrganisationAndDeletedAtIsNull(supplierId, org)

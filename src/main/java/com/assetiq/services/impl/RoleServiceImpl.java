@@ -117,10 +117,7 @@ public class RoleServiceImpl extends TenantAwareService implements RoleService {
         role.setName(name);
         role.setDescription(roleDto.getDescription());
 
-        // Replace the permission set wholesale; orphanRemoval deletes the old rows.
-        role.getRolePermissions().clear();
-        role.getRolePermissions().addAll(
-                buildPermissions(role, requested, role.isGrantAllPermissions()));
+        syncPermissions(role, requested);
 
         RoleDto saved = mapToDto(roleRepository.save(role));
         // B-3: targeted eviction — only this role's cache entry
@@ -163,9 +160,7 @@ public class RoleServiceImpl extends TenantAwareService implements RoleService {
                     .map(RolePermission::getPermission).sorted().collect(Collectors.toList());
             List<String> requested = validPermissions(roleDto.getPermissions());
             PermissionGrantGuard.assertCallerHolds(requested, "give this role those permissions");
-            role.getRolePermissions().clear();
-            role.getRolePermissions().addAll(
-                    buildPermissions(role, requested, role.isGrantAllPermissions()));
+            syncPermissions(role, requested);
             // B-3: targeted eviction after permission change
             permissionCacheService.evictForRole(id);
         }
@@ -259,6 +254,28 @@ public class RoleServiceImpl extends TenantAwareService implements RoleService {
             throw new IllegalArgumentException("Unknown permission(s): " + String.join(", ", unknown));
         }
         return cleaned;
+    }
+
+    /**
+     * Moves the role's permission rows to exactly {@code requested}.
+     *
+     * <p>Only the difference is touched. Clearing the whole set and re-adding it looked
+     * equivalent but was not: Hibernate orders the inserts before the orphan deletes
+     * within a flush, so every permission kept across an edit collided with its own row
+     * on {@code uq_rp_role_permission} and saving a role failed.
+     */
+    private static void syncPermissions(Role role, List<String> requested) {
+        Set<String> desired = buildPermissions(role, requested, role.isGrantAllPermissions()).stream()
+                .map(RolePermission::getPermission)
+                .collect(Collectors.toCollection(java.util.LinkedHashSet::new));
+        // Keep the rows already holding a desired permission; drop the rest.
+        role.getRolePermissions().removeIf(existing -> !desired.remove(existing.getPermission()));
+        for (String permission : desired) {
+            RolePermission rp = new RolePermission();
+            rp.setRole(role);
+            rp.setPermission(permission);
+            role.getRolePermissions().add(rp);
+        }
     }
 
     /**
