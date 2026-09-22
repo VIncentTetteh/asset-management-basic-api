@@ -1,5 +1,6 @@
 package com.assetiq.dto;
 
+import com.assetiq.validation.ValidPhone;
 import com.assetiq.enums.SupplierStatus;
 import com.assetiq.validation.NullOrNotBlank;
 import com.assetiq.validation.OnCreate;
@@ -32,6 +33,7 @@ public class SupplierDto {
     private String email;
 
     @Size(max = 255)
+    @ValidPhone
     private String phone;
 
     private String address;

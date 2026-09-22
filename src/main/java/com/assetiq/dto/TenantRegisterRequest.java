@@ -1,5 +1,6 @@
 package com.assetiq.dto;
 
+import com.assetiq.validation.ValidPhone;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
@@ -31,6 +32,7 @@ public class TenantRegisterRequest {
     @Size(max = 255)
     private String taxId;
     @Size(max = 255)
+    @ValidPhone
     private String contactPhone;
 
     // Initial admin user fields
@@ -44,6 +46,7 @@ public class TenantRegisterRequest {
     @Email(message = "Admin email must be valid")
     private String adminEmail;
 
+    @ValidPhone
     private String adminPhone;
     private String adminJobTitle;
 

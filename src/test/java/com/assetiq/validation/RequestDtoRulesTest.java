@@ -46,6 +46,49 @@ class RequestDtoRulesTest {
     }
 
     @Test
+    void phone_isOneRuleEverywhereItAppears() {
+        // Phone fields only had a length limit, so "n/a" and a pasted paragraph
+        // were both stored. The web app's FIELD_LIMITS phone entries use the
+        // same regex as ValidPhone.PATTERN.
+        for (String ok : new String[] {"+233 20 123 4567", "+233200000123", "020-123-4567", "(030) 276 1000", null, ""}) {
+            UserDto user = new UserDto();
+            user.setPhone(ok);
+            assertThat(invalidFields(user)).as("accepts %s", ok).doesNotContain("phone");
+        }
+        for (String bad : new String[] {"n/a", "call me", "12345", "0800 CALL NOW"}) {
+            UserDto user = new UserDto();
+            user.setPhone(bad);
+            assertThat(invalidFields(user)).as("rejects %s", bad).contains("phone");
+        }
+
+        TenantRegisterRequest register = new TenantRegisterRequest();
+        register.setContactPhone("not a phone");
+        register.setAdminPhone("also not");
+        assertThat(invalidFields(register)).contains("contactPhone", "adminPhone");
+    }
+
+    @Test
+    void networkScan_checksTheRangeAndTheAddressesItIsGiven() {
+        com.assetiq.dto.NetworkScanRequestDto ok = new com.assetiq.dto.NetworkScanRequestDto();
+        ok.setCidrRange("192.168.1.0/24");
+        ok.setIpAddresses(java.util.List.of("192.168.1.10", "10.0.0.5"));
+        ok.setPorts(java.util.List.of(22, 443));
+        assertThat(invalidFields(ok)).isEmpty();
+
+        // The shape used to be checked in the service only, so a typo came back
+        // as a bare 400 rather than a field error the form could mark.
+        com.assetiq.dto.NetworkScanRequestDto bad = new com.assetiq.dto.NetworkScanRequestDto();
+        bad.setCidrRange("example.com/24");
+        bad.setIpAddresses(java.util.List.of("not-an-ip"));
+        bad.setPorts(java.util.List.of(70000));
+        bad.setTimeoutMs(60_000);
+        assertThat(invalidFields(bad))
+                .contains("cidrRange", "timeoutMs")
+                .anyMatch(f -> f.startsWith("ipAddresses"))
+                .anyMatch(f -> f.startsWith("ports"));
+    }
+
+    @Test
     void expense_requiresTitleAmountAndCategory() {
         assertThat(invalidFields(new ExpenseDto())).contains("title", "amount", "category");
     }

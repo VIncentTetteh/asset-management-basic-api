@@ -1,5 +1,6 @@
 package com.assetiq.dto;
 
+import com.assetiq.validation.ValidPhone;
 import com.assetiq.enums.EmployeeStatus;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import jakarta.validation.constraints.Email;
@@ -39,6 +40,7 @@ public class EmployeeDto {
     private String email;
 
     @Size(max = 100)
+    @ValidPhone
     private String phone;
 
     @Size(max = 255)

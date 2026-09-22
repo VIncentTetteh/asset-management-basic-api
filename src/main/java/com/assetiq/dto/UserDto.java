@@ -1,5 +1,6 @@
 package com.assetiq.dto;
 
+import com.assetiq.validation.ValidPhone;
 import com.assetiq.enums.UserStatus;
 import com.assetiq.validation.NullOrNotBlank;
 import com.assetiq.validation.OnCreate;
@@ -33,6 +34,7 @@ public class UserDto {
     private String email;
 
     @Size(max = 255)
+    @ValidPhone
     private String phone;
 
     /**

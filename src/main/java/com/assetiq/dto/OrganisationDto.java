@@ -1,5 +1,6 @@
 package com.assetiq.dto;
 
+import com.assetiq.validation.ValidPhone;
 import com.assetiq.enums.OrganisationStatus;
 import com.assetiq.validation.NullOrNotBlank;
 import com.assetiq.validation.OnCreate;
@@ -41,6 +42,7 @@ public class OrganisationDto {
     private String contactEmail;
 
     @Size(max = 255)
+    @ValidPhone
     private String contactPhone;
 
     @Size(max = 255)
