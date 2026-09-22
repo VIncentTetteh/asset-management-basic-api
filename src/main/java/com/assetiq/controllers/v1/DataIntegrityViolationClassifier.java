@@ -37,7 +37,7 @@ final class DataIntegrityViolationClassifier {
 
     /**
      * Unique constraint / index name to the API field it protects. Built from the
-     * unique constraints in the Flyway migrations (V7 baseline, V17, V22, V46) and
+     * unique constraints in the Flyway migrations (V7 baseline, V17, V22, V46, V51) and
      * the entity {@code @UniqueConstraint} declarations. Postgres' default names for
      * the V7 inline {@code UNIQUE} columns ({@code <table>_<column>_key}) are listed
      * too, since databases built from V7 carry them.
@@ -70,6 +70,7 @@ final class DataIntegrityViolationClassifier {
             Map.entry("uk_po_number_per_org", "poNumber"),
             Map.entry("uq_purchase_order_org_number_live", "poNumber"),
             Map.entry("uk_license_key_per_org", "licenseKey"),
+            Map.entry("uq_exchange_rates_org_pair_date_live", "effectiveDate"),
             // operations
             Map.entry("uq_cloud_asset_org_resource_live", "resourceId"),
             Map.entry("uq_cloud_cost_record_asset_month_service_live", "serviceName"),

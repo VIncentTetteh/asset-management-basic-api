@@ -1,7 +1,10 @@
 package com.assetiq.services.impl;
 
 import com.assetiq.dto.ExchangeRateDto;
+import com.assetiq.exceptions.DuplicateFieldException;
+import com.assetiq.exceptions.FieldValidationException;
 import com.assetiq.models.ExchangeRate;
+import com.assetiq.services.CurrencyResolver;
 import com.assetiq.models.Organisation;
 import com.assetiq.repositories.ExchangeRateRepository;
 import com.assetiq.repositories.OrganisationRepository;
@@ -43,18 +46,26 @@ public class ExchangeRateServiceImpl extends TenantAwareService implements Excha
     @Override
     public ExchangeRateDto create(ExchangeRateDto dto) {
         Organisation org = requireTenantOrg();
-        String base = dto.getBaseCurrency().trim().toUpperCase();
-        String target = dto.getTargetCurrency().trim().toUpperCase();
+        String base = isoCode("baseCurrency", dto.getBaseCurrency());
+        String target = isoCode("targetCurrency", dto.getTargetCurrency());
         if (base.equals(target)) {
-            throw new IllegalArgumentException("Base and target currencies must differ");
+            throw new FieldValidationException("targetCurrency", "Base and target currencies must differ");
+        }
+        LocalDate effectiveDate = dto.getEffectiveDate() != null ? dto.getEffectiveDate() : LocalDate.now();
+        // One live rate per pair and day (V51): a second one made conversions on that
+        // date pick either rate. The unique index backs this check under races.
+        if (exchangeRateRepository.existsByOrganisationAndBaseCurrencyAndTargetCurrencyAndEffectiveDateAndDeletedAtIsNull(
+                org, base, target, effectiveDate)) {
+            throw new DuplicateFieldException("effectiveDate", "A " + base + " to " + target
+                    + " rate effective " + effectiveDate + " already exists; delete it first to replace it");
         }
 
         ExchangeRate er = new ExchangeRate();
         er.setBaseCurrency(base);
         er.setTargetCurrency(target);
         er.setRate(dto.getRate());
-        er.setEffectiveDate(dto.getEffectiveDate() != null ? dto.getEffectiveDate() : LocalDate.now());
-        er.setSource(dto.getSource() != null ? dto.getSource() : "MANUAL");
+        er.setEffectiveDate(effectiveDate);
+        er.setSource(dto.getSource() != null && !dto.getSource().isBlank() ? dto.getSource().trim() : "MANUAL");
         er.setOrganisation(org);
 
         return toDto(exchangeRateRepository.save(er));
@@ -152,5 +163,14 @@ public class ExchangeRateServiceImpl extends TenantAwareService implements Excha
         dto.setSource(er.getSource());
         dto.setOrganisationId(er.getOrganisation().getId());
         return dto;
+    }
+
+    /** A real ISO-4217 code, as every other money field requires; else a field error. */
+    private static String isoCode(String field, String code) {
+        try {
+            return CurrencyResolver.normaliseIsoCode(code);
+        } catch (IllegalArgumentException e) {
+            throw new FieldValidationException(field, e.getMessage());
+        }
     }
 }

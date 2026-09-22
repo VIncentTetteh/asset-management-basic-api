@@ -70,6 +70,13 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return new ResponseEntity<>(body, HttpStatus.BAD_REQUEST);
     }
 
+    @ExceptionHandler(com.assetiq.exceptions.DuplicateFieldException.class)
+    public ResponseEntity<Object> handleDuplicateField(com.assetiq.exceptions.DuplicateFieldException ex) {
+        Map<String, Object> body = errorBody(409, ex.getMessage(), "DUPLICATE");
+        body.put("errors", new HashMap<>(Map.of(ex.getField(), DataIntegrityViolationClassifier.ALREADY_IN_USE)));
+        return new ResponseEntity<>(body, HttpStatus.CONFLICT);
+    }
+
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<Object> handleIllegalArgument(IllegalArgumentException ex) {
         return new ResponseEntity<>(errorBody(400, ex.getMessage(), "BAD_REQUEST"), HttpStatus.BAD_REQUEST);

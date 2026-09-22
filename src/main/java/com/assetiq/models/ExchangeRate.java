@@ -8,10 +8,11 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 
 
+// One live rate per (organisation, pair, effective date): partial unique index
+// uq_exchange_rates_org_pair_date_live (V51, WHERE deleted_at IS NULL). JPA cannot
+// declare a partial index, so no @UniqueConstraint here.
 @Entity
-@Table(name = "exchange_rates", uniqueConstraints = {
-    @UniqueConstraint(columnNames = {"base_currency", "target_currency", "effective_date", "organisation_id"})
-})
+@Table(name = "exchange_rates")
 @Getter
 @Setter
 public class ExchangeRate extends BaseEntity {

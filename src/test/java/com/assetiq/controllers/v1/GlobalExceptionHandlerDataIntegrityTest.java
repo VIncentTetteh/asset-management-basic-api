@@ -61,6 +61,26 @@ class GlobalExceptionHandlerDataIntegrityTest {
     }
 
     @Test
+    void uniqueViolation_exchangeRatePairDate_mapsToEffectiveDate() {
+        SQLException sql = new SQLException(
+                "ERROR: duplicate key value violates unique constraint \"uq_exchange_rates_org_pair_date_live\"", "23505");
+
+        assertThat(body(handler.handleDataIntegrity(wrap(sql))).get("errors"))
+                .isEqualTo(Map.of("effectiveDate", "already in use"));
+    }
+
+    @Test
+    void serviceDuplicate_is409DuplicateNamingTheField() {
+        ResponseEntity<Object> response = handler.handleDuplicateField(
+                new com.assetiq.exceptions.DuplicateFieldException("effectiveDate", "A USD to GHS rate already exists"));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(409);
+        assertThat(body(response).get("errorCode")).isEqualTo("DUPLICATE");
+        assertThat(body(response).get("message")).isEqualTo("A USD to GHS rate already exists");
+        assertThat(body(response).get("errors")).isEqualTo(Map.of("effectiveDate", "already in use"));
+    }
+
+    @Test
     void uniqueViolation_unknownConstraint_fallsBackToKeyColumns() {
         PSQLException sql = new PSQLException(
                 "ERROR: duplicate key value violates unique constraint \"some_new_index\"\n"
