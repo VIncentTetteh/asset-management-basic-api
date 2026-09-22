@@ -1,5 +1,6 @@
 package com.assetiq.validation;
 
+import com.assetiq.dto.ContractDto;
 import com.assetiq.dto.PurchaseOrderRejectRequest;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validation;
@@ -9,6 +10,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
+import java.math.BigDecimal;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -44,5 +46,20 @@ class FinanceDtoRulesTest {
         assertThat(invalidFields(new PurchaseOrderRejectRequest(" "))).containsExactly("reason");
         assertThat(invalidFields(new PurchaseOrderRejectRequest("x".repeat(5001)))).containsExactly("reason");
         assertThat(invalidFields(new PurchaseOrderRejectRequest("Over budget"))).isEmpty();
+    }
+
+    @Test
+    void contract_valueAndAlertDaysAreNotNegative_documentUrlAtMost500() {
+        ContractDto dto = new ContractDto();
+        dto.setValue(new BigDecimal("-0.01"));
+        dto.setAlertDaysBefore(-1);
+        dto.setDocumentUrl("x".repeat(501));
+        dto.setContractNumber("x".repeat(101));
+        assertThat(invalidFields(dto)).containsExactlyInAnyOrder("value", "alertDaysBefore", "documentUrl", "contractNumber");
+        dto.setValue(BigDecimal.ZERO);
+        dto.setAlertDaysBefore(0);
+        dto.setDocumentUrl("https://docs.example.com/c.pdf");
+        dto.setContractNumber("C-1");
+        assertThat(invalidFields(dto)).isEmpty();
     }
 }

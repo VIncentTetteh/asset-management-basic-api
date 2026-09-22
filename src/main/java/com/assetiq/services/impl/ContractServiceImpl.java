@@ -2,6 +2,7 @@ package com.assetiq.services.impl;
 
 import com.assetiq.dto.ContractDto;
 import com.assetiq.enums.ContractStatus;
+import com.assetiq.exceptions.FieldValidationException;
 import com.assetiq.models.Contract;
 import com.assetiq.models.Organisation;
 import com.assetiq.repositories.*;
@@ -103,13 +104,12 @@ public class ContractServiceImpl extends TenantAwareService implements ContractS
         if (dto.getAutoRenew() != null) contract.setAutoRenew(dto.getAutoRenew());
 
         if (dto.getSupplierId() != null) {
-            supplierRepository.findByIdAndOrganisationAndDeletedAtIsNull(dto.getSupplierId(), org)
-                    .ifPresent(contract::setSupplier);
+            contract.setSupplier(requireSupplier(dto.getSupplierId(), org));
         }
         if (dto.getAssetId() != null) {
-            assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(dto.getAssetId(), org)
-                    .ifPresent(contract::setAsset);
+            contract.setAsset(requireAsset(dto.getAssetId(), org));
         }
+        requireEndNotBeforeStart(contract);
 
         return toDto(contractRepository.save(contract));
     }
@@ -139,13 +139,28 @@ public class ContractServiceImpl extends TenantAwareService implements ContractS
         contract.setNotes(dto.getNotes());
         contract.setOrganisation(org);
 
-        if (dto.getSupplierId() != null) {
-            supplierRepository.findByIdAndOrganisationAndDeletedAtIsNull(dto.getSupplierId(), org)
-                    .ifPresent(contract::setSupplier);
-        }
-        if (dto.getAssetId() != null) {
-            assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(dto.getAssetId(), org)
-                    .ifPresent(contract::setAsset);
+        // Create and PUT are full replacements: a null supplier or asset unlinks it,
+        // and an id that is not in this organisation is refused, not silently dropped.
+        contract.setSupplier(dto.getSupplierId() != null ? requireSupplier(dto.getSupplierId(), org) : null);
+        contract.setAsset(dto.getAssetId() != null ? requireAsset(dto.getAssetId(), org) : null);
+        requireEndNotBeforeStart(contract);
+    }
+
+    private com.assetiq.models.Supplier requireSupplier(UUID supplierId, Organisation org) {
+        return supplierRepository.findByIdAndOrganisationAndDeletedAtIsNull(supplierId, org)
+                .orElseThrow(() -> new FieldValidationException("supplierId", "Supplier not found in your organisation"));
+    }
+
+    private com.assetiq.models.Asset requireAsset(UUID assetId, Organisation org) {
+        return assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(assetId, org)
+                .orElseThrow(() -> new FieldValidationException("assetId", "Asset not found in your organisation"));
+    }
+
+    /** The web form checks this too; the API is the authority for every client. */
+    private static void requireEndNotBeforeStart(Contract contract) {
+        if (contract.getStartDate() != null && contract.getEndDate() != null
+                && contract.getEndDate().isBefore(contract.getStartDate())) {
+            throw new FieldValidationException("endDate", "End date must be on or after the start date");
         }
     }
 
