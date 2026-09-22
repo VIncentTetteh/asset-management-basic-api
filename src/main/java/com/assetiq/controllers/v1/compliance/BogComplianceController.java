@@ -123,9 +123,9 @@ public class BogComplianceController extends TenantAwareService {
         if (body.containsKey("remediationPlan"))   control.setRemediationPlan((String) body.get("remediationPlan"));
         if (body.containsKey("evidenceUrl"))       control.setEvidenceUrl((String) body.get("evidenceUrl"));
         if (body.containsKey("targetDate")) {
-            try {
-                control.setTargetDate(Instant.parse((String) body.get("targetDate")));
-            } catch (Exception ignored) { /* best-effort */ }
+            // Was Instant.parse inside catch-ignore: the web form's "yyyy-MM-dd" failed
+            // to parse and the date was silently dropped.
+            control.setTargetDate(parseTargetDate(body.get("targetDate")));
         }
 
         BogControl saved = bogControlRepository.save(control);
@@ -133,6 +133,25 @@ public class BogComplianceController extends TenantAwareService {
                 "id", saved.getId(),
                 "directiveRef", saved.getDirectiveRef(),
                 "status", saved.getStatus().name()));
+    }
+
+    /**
+     * A target date as an ISO instant or a calendar date ({@code yyyy-MM-dd}, stored
+     * at 12:00 UTC like the web app's dateToInstant, so it shows as the same day in
+     * every time zone). Null or blank clears it; anything else is a 400.
+     */
+    static Instant parseTargetDate(Object raw) {
+        if (raw == null) return null;
+        String value = raw.toString().trim();
+        if (value.isEmpty()) return null;
+        try {
+            if (value.length() == 10) {
+                return java.time.LocalDate.parse(value).atTime(12, 0).toInstant(java.time.ZoneOffset.UTC);
+            }
+            return Instant.parse(value);
+        } catch (java.time.format.DateTimeParseException ex) {
+            throw new IllegalArgumentException("targetDate must be a date (yyyy-MM-dd) or an ISO-8601 instant");
+        }
     }
 
     // ── PATCH /controls/{id}/status ─────────────────────────────────────────
