@@ -6,6 +6,7 @@ import com.assetiq.enums.DepreciationMethod;
 import com.assetiq.enums.NotificationType;
 import com.assetiq.exceptions.ResourceNotFoundException;
 import com.assetiq.models.Asset;
+import com.assetiq.models.Category;
 import com.assetiq.models.Department;
 import com.assetiq.models.Location;
 import com.assetiq.models.Organisation;
@@ -381,6 +382,59 @@ class AssetServiceImplTest {
             assertThat(tco.getTotalMaintenanceCost()).isEqualByComparingTo("0");
             assertThat(tco.getComplete()).isFalse();
             assertThat(tco.getMissingRates()).containsExactly("EUR->GHS");
+        }
+    }
+
+    @Nested
+    @DisplayName("create applies the category's prefix and default warranty")
+    class CategoryDefaultsOnCreate {
+
+        private Category laptops;
+
+        @BeforeEach
+        void category() {
+            laptops = entity(new Category());
+            laptops.setAssetPrefixCode("LAP");
+            laptops.setDefaultWarrantyPeriodMonths(36);
+            when(categoryRepository.findByIdAndOrganisationAndDeletedAtIsNull(laptops.getId(), org))
+                    .thenReturn(Optional.of(laptops));
+            when(assetRepository.findAssetTagsStartingWith(org, "LAP-")).thenReturn(List.of("LAP-0004"));
+        }
+
+        private AssetDto newAsset() {
+            AssetDto dto = new AssetDto();
+            dto.setName("MacBook");
+            dto.setCategoryId(laptops.getId());
+            dto.setPurchaseDate(LocalDate.of(2026, 3, 1));
+            return dto;
+        }
+
+        @Test
+        void missingTagAndWarrantyComeFromTheCategory() {
+            AssetDto created = service.create(newAsset());
+
+            assertThat(created.getAssetTag()).isEqualTo("LAP-0005");
+            assertThat(created.getWarrantyExpiryDate()).isEqualTo(LocalDate.of(2029, 3, 1));
+        }
+
+        @Test
+        void suppliedValuesWin() {
+            AssetDto dto = newAsset();
+            dto.setAssetTag("CUSTOM-1");
+            dto.setWarrantyExpiryDate(LocalDate.of(2027, 1, 1));
+
+            AssetDto created = service.create(dto);
+
+            assertThat(created.getAssetTag()).isEqualTo("CUSTOM-1");
+            assertThat(created.getWarrantyExpiryDate()).isEqualTo(LocalDate.of(2027, 1, 1));
+        }
+
+        @Test
+        void noPurchaseDateMeansNoWarrantyDefault() {
+            AssetDto dto = newAsset();
+            dto.setPurchaseDate(null);
+
+            assertThat(service.create(dto).getWarrantyExpiryDate()).isNull();
         }
     }
 

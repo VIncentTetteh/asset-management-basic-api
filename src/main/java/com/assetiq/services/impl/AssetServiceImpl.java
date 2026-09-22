@@ -1,5 +1,7 @@
 package com.assetiq.services.impl;
 
+import com.assetiq.assets.CategoryAssetDefaults;
+
 import com.assetiq.dto.AssetDto;
 import com.assetiq.dto.AssetFilterRequest;
 import com.assetiq.dto.AssetHistoryEventDto;
@@ -232,6 +234,7 @@ public class AssetServiceImpl implements AssetService {
             categoryRepository.findByIdAndOrganisationAndDeletedAtIsNull(dto.getCategoryId(), organisation)
                     .ifPresent(asset::setCategory);
         }
+        applyCategoryDefaults(asset, organisation);
         if (dto.getLocationId() != null) {
             locationRepository.findByIdAndOrganisationAndDeletedAtIsNull(dto.getLocationId(), organisation)
                     .ifPresent(asset::setLocation);
@@ -298,6 +301,24 @@ public class AssetServiceImpl implements AssetService {
             return result;
         } catch (DataIntegrityViolationException ex) {
             throw new IllegalStateException("Asset with the same name already exists in this department");
+        }
+    }
+
+    /**
+     * Applies what the asset's category promises when the caller left the field
+     * empty: the next {@code PREFIX-0001} style tag from the category's prefix code,
+     * and a warranty expiry of purchase date plus the category's default warranty.
+     */
+    private void applyCategoryDefaults(Asset asset, Organisation organisation) {
+        Category category = asset.getCategory();
+        if (category == null) return;
+        String prefix = CategoryAssetDefaults.prefixOf(category);
+        if (prefix != null && (asset.getAssetTag() == null || asset.getAssetTag().isBlank())) {
+            asset.setAssetTag(CategoryAssetDefaults.nextTag(prefix,
+                    assetRepository.findAssetTagsStartingWith(organisation, prefix + "-")));
+        }
+        if (asset.getWarrantyExpiryDate() == null) {
+            asset.setWarrantyExpiryDate(CategoryAssetDefaults.warrantyExpiry(category, asset.getPurchaseDate()));
         }
     }
 

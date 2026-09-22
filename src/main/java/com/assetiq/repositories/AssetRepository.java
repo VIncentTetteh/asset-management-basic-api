@@ -53,6 +53,13 @@ public interface AssetRepository extends JpaRepository<Asset, UUID>, JpaSpecific
         // Asset-specific queries
         Optional<Asset> findByAssetTagAndDeletedAtIsNull(String assetTag);
 
+        /**
+         * Asset tags in the organisation that start with {@code prefix}, including
+         * deleted assets so a generated tag never reuses a retired number.
+         */
+        @Query("select a.assetTag from Asset a where a.organisation = :org and a.assetTag like concat(:prefix, '%')")
+        List<String> findAssetTagsStartingWith(@Param("org") Organisation org, @Param("prefix") String prefix);
+
         Optional<Asset> findBySerialNumberAndDeletedAtIsNull(String serialNumber);
 
         Set<Asset> findByDepartmentIdAndDeletedAtIsNull(UUID departmentId);
