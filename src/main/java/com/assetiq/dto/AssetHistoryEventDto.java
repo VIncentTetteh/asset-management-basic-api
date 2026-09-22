@@ -1,7 +1,7 @@
 package com.assetiq.dto;
 
 import java.time.LocalDate;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.UUID;
 
 /**
@@ -16,7 +16,8 @@ public class AssetHistoryEventDto {
 
     private UUID id;
     private EventType eventType;
-    private LocalDateTime occurredAt;
+    /** When the event happened, as an instant (serialised with its UTC offset). */
+    private Instant occurredAt;
 
     /** Human-readable summary of what happened. */
     private String summary;
@@ -50,7 +51,7 @@ public class AssetHistoryEventDto {
 
     // ---- static factory helpers ----
 
-    public static AssetHistoryEventDto ofAudit(UUID id, LocalDateTime at, String actor,
+    public static AssetHistoryEventDto ofAudit(UUID id, Instant at, String actor,
                                                String method, String path, Integer status) {
         AssetHistoryEventDto e = new AssetHistoryEventDto();
         e.id = id;
@@ -64,7 +65,7 @@ public class AssetHistoryEventDto {
         return e;
     }
 
-    public static AssetHistoryEventDto ofTransfer(UUID id, LocalDateTime at, String actor,
+    public static AssetHistoryEventDto ofTransfer(UUID id, Instant at, String actor,
                                                   String fromDept, String toDept,
                                                   String fromLoc, String toLoc, String status) {
         AssetHistoryEventDto e = new AssetHistoryEventDto();
@@ -81,7 +82,7 @@ public class AssetHistoryEventDto {
         return e;
     }
 
-    public static AssetHistoryEventDto ofMaintenance(UUID id, LocalDateTime at, String type,
+    public static AssetHistoryEventDto ofMaintenance(UUID id, Instant at, String type,
                                                      String status, LocalDate scheduled, LocalDate performed) {
         AssetHistoryEventDto e = new AssetHistoryEventDto();
         e.id = id;
@@ -95,7 +96,7 @@ public class AssetHistoryEventDto {
         return e;
     }
 
-    public static AssetHistoryEventDto ofDisposal(UUID id, LocalDateTime at, String actor,
+    public static AssetHistoryEventDto ofDisposal(UUID id, Instant at, String actor,
                                                   String method, LocalDate disposalDate) {
         AssetHistoryEventDto e = new AssetHistoryEventDto();
         e.id = id;
@@ -112,7 +113,7 @@ public class AssetHistoryEventDto {
 
     public UUID getId() { return id; }
     public EventType getEventType() { return eventType; }
-    public LocalDateTime getOccurredAt() { return occurredAt; }
+    public Instant getOccurredAt() { return occurredAt; }
     public String getSummary() { return summary; }
     public String getActor() { return actor; }
     public String getFromDepartment() { return fromDepartment; }

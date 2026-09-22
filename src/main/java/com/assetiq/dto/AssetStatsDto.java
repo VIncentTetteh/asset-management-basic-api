@@ -9,6 +9,8 @@ public class AssetStatsDto {
     private long disposed;
     private long reserved;
     private long missing;
+    private long pendingProcurement;
+    private long underRepair;
     private long assigned;
     private long unassigned;
     /** Register value: purchase cost of every non-disposed asset, in {@link #currency}. */
@@ -25,6 +27,8 @@ public class AssetStatsDto {
     public long getDisposed()    { return disposed; }
     public long getReserved()    { return reserved; }
     public long getMissing()     { return missing; }
+    public long getPendingProcurement() { return pendingProcurement; }
+    public long getUnderRepair() { return underRepair; }
     public long getAssigned()    { return assigned; }
     public long getUnassigned()  { return unassigned; }
     public java.math.BigDecimal getTotalValue() { return totalValue; }
@@ -40,6 +44,8 @@ public class AssetStatsDto {
     public void setDisposed(long disposed)       { this.disposed = disposed; }
     public void setReserved(long reserved)       { this.reserved = reserved; }
     public void setMissing(long missing)         { this.missing = missing; }
+    public void setPendingProcurement(long pendingProcurement) { this.pendingProcurement = pendingProcurement; }
+    public void setUnderRepair(long underRepair) { this.underRepair = underRepair; }
     public void setAssigned(long assigned)       { this.assigned = assigned; }
     public void setUnassigned(long unassigned)   { this.unassigned = unassigned; }
     public void setTotalValue(java.math.BigDecimal totalValue) { this.totalValue = totalValue; }

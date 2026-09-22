@@ -367,6 +367,33 @@ class AssetServiceImplTest {
     }
 
     @Test
+    void historyCarriesTheInstantTheEventHappened() {
+        java.time.Instant at = java.time.Instant.parse("2026-03-01T23:30:00Z");
+        com.assetiq.models.MaintenanceRecord m = new com.assetiq.models.MaintenanceRecord();
+        m.setId(UUID.randomUUID());
+        m.setCreatedAt(at);
+        when(maintenanceRecordRepository.findByAssetIdAndDeletedAtIsNull(asset.getId())).thenReturn(java.util.Set.of(m));
+
+        var history = service.getHistory(asset.getId());
+
+        assertThat(history).singleElement().extracting(e -> e.getOccurredAt()).isEqualTo(at);
+    }
+
+    @Test
+    void statsCountPendingProcurementAndUnderRepair() {
+        org.setBillingCurrency("GHS");
+        when(assetRepository.countGroupedByStatus(org)).thenReturn(List.of(
+                new Object[]{AssetStatus.PENDING_PROCUREMENT, 3L},
+                new Object[]{AssetStatus.UNDER_REPAIR, 2L}));
+        when(assetRepository.sumOnBookPurchaseCostByCurrency(org)).thenReturn(List.of());
+
+        var stats = service.getStats();
+
+        assertThat(stats.getPendingProcurement()).isEqualTo(3);
+        assertThat(stats.getUnderRepair()).isEqualTo(2);
+    }
+
+    @Test
     @DisplayName("stats carry the register-wide value converted to the base currency")
     void statsCarryRegisterValue() {
         org.setBillingCurrency("GHS");

@@ -821,7 +821,7 @@ public class AssetServiceImpl implements AssetService {
                 .findByOrganisationAndAssetIdInPath(org, assetId.toString())
                 .forEach(e -> timeline.add(AssetHistoryEventDto.ofAudit(
                         e.getId(),
-                        e.getCreatedAt() != null ? e.getCreatedAt().atZone(ZoneOffset.UTC).toLocalDateTime() : null,
+                        e.getCreatedAt(),
                         e.getActorEmail(),
                         e.getMethod(),
                         e.getPath(),
@@ -831,7 +831,7 @@ public class AssetServiceImpl implements AssetService {
         assetTransferRepository.findByAssetIdAndDeletedAtIsNull(assetId)
                 .forEach(t -> timeline.add(AssetHistoryEventDto.ofTransfer(
                         t.getId(),
-                        t.getCreatedAt() != null ? t.getCreatedAt().atZone(ZoneOffset.UTC).toLocalDateTime() : null,
+                        t.getCreatedAt(),
                         t.getRequestedBy() != null ? t.getRequestedBy().getEmail() : null,
                         t.getFromDepartment() != null ? t.getFromDepartment().getName() : null,
                         t.getToDepartment() != null ? t.getToDepartment().getName() : null,
@@ -843,7 +843,7 @@ public class AssetServiceImpl implements AssetService {
         maintenanceRecordRepository.findByAssetIdAndDeletedAtIsNull(assetId)
                 .forEach(m -> timeline.add(AssetHistoryEventDto.ofMaintenance(
                         m.getId(),
-                        m.getCreatedAt() != null ? m.getCreatedAt().atZone(ZoneOffset.UTC).toLocalDateTime() : null,
+                        m.getCreatedAt(),
                         m.getMaintenanceType() != null ? m.getMaintenanceType().name() : null,
                         m.getStatus() != null ? m.getStatus().name() : null,
                         m.getScheduledDate(),
@@ -854,7 +854,7 @@ public class AssetServiceImpl implements AssetService {
                 .filter(com.assetiq.models.DisposalRecord::isEffective)
                 .forEach(d -> timeline.add(AssetHistoryEventDto.ofDisposal(
                         d.getId(),
-                        d.getCreatedAt() != null ? d.getCreatedAt().atZone(ZoneOffset.UTC).toLocalDateTime() : null,
+                        d.getCreatedAt(),
                         d.getApprovedBy() != null ? d.getApprovedBy().getEmail() : null,
                         d.getDisposalMethod() != null ? d.getDisposalMethod().name() : null,
                         d.getDisposalDate())));
@@ -993,6 +993,8 @@ public class AssetServiceImpl implements AssetService {
                 case "DISPOSED"    -> stats.setDisposed(count);
                 case "RESERVED"    -> stats.setReserved(count);
                 case "MISSING"     -> stats.setMissing(count);
+                case "PENDING_PROCUREMENT" -> stats.setPendingProcurement(count);
+                case "UNDER_REPAIR" -> stats.setUnderRepair(count);
                 default            -> { /* ignore unknown statuses */ }
             }
         }
