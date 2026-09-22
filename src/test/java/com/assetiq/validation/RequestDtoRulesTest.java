@@ -115,6 +115,11 @@ class RequestDtoRulesTest {
         user.setPassword("a".repeat(73));
         assertThat(invalidFields(user)).contains("password");
 
+        com.assetiq.dto.ChangePasswordRequest change = new com.assetiq.dto.ChangePasswordRequest();
+        change.setCurrentPassword("anything");
+        change.setNewPassword("a".repeat(73));
+        assertThat(invalidFields(change)).containsExactly("newPassword");
+
         TenantRegisterRequest tenant = new TenantRegisterRequest();
         tenant.setPassword("a".repeat(100));
         assertThat(invalidFields(tenant)).contains("password");

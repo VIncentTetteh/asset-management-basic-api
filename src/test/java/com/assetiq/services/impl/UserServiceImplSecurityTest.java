@@ -22,6 +22,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentMatchers;
+import org.mockito.Mockito;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
@@ -189,5 +190,50 @@ class UserServiceImplSecurityTest {
         put.setFirstName("A");
         put.setLastName("B");
         assertThat(service.updateUser(target.getId(), put).getEmployeeId()).isEqualTo("EMP-KEEP");
+    }
+
+    private com.assetiq.dto.ChangePasswordRequest change(String current, String next) {
+        com.assetiq.dto.ChangePasswordRequest r = new com.assetiq.dto.ChangePasswordRequest();
+        r.setCurrentPassword(current);
+        r.setNewPassword(next);
+        return r;
+    }
+
+    @Test
+    void changeOwnPasswordChecksTheCurrentOneThenRevokesSessionsAndAudits() {
+        target.setPasswordHash("old-hash");
+        when(userRepository.findByEmailAndOrganisationId(target.getEmail(), org.getId())).thenReturn(Optional.of(target));
+        when(passwordEncoder.matches("old password", "old-hash")).thenReturn(true);
+        when(passwordEncoder.encode("new password!")).thenReturn("new-hash");
+
+        service.changeOwnPassword(target.getEmail(), change("old password", "new password!"));
+
+        assertThat(target.getPasswordHash()).isEqualTo("new-hash");
+        Mockito.verify(sessionRevocationService).revokeAll(target);
+        Mockito.verify(rbacAuditService).recordPasswordChanged(target.getId());
+    }
+
+    @Test
+    void wrongCurrentPasswordIsAFieldErrorAndChangesNothing() {
+        target.setPasswordHash("old-hash");
+        when(userRepository.findByEmailAndOrganisationId(target.getEmail(), org.getId())).thenReturn(Optional.of(target));
+        when(passwordEncoder.matches(ArgumentMatchers.anyString(), ArgumentMatchers.anyString())).thenReturn(false);
+
+        assertThatThrownBy(() -> service.changeOwnPassword(target.getEmail(), change("guess", "new password!")))
+                .isInstanceOf(com.assetiq.exceptions.FieldValidationException.class)
+                .extracting("field").isEqualTo("currentPassword");
+        assertThat(target.getPasswordHash()).isEqualTo("old-hash");
+        Mockito.verifyNoInteractions(sessionRevocationService);
+    }
+
+    @Test
+    void theNewPasswordMustDiffer() {
+        target.setPasswordHash("old-hash");
+        when(userRepository.findByEmailAndOrganisationId(target.getEmail(), org.getId())).thenReturn(Optional.of(target));
+        when(passwordEncoder.matches("same password", "old-hash")).thenReturn(true);
+
+        assertThatThrownBy(() -> service.changeOwnPassword(target.getEmail(), change("same password", "same password")))
+                .isInstanceOf(com.assetiq.exceptions.FieldValidationException.class)
+                .extracting("field").isEqualTo("newPassword");
     }
 }

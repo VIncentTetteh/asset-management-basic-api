@@ -26,6 +26,12 @@ public interface UserService {
      */
     UserDto patchMe(String email, UserDto dto);
 
+    /**
+     * Changes the signed-in user's password after checking the current one, then
+     * signs out every session (including this one) and records an audit event.
+     */
+    void changeOwnPassword(String email, com.assetiq.dto.ChangePasswordRequest request);
+
     UserDto deactivateUser(UUID id);
 
     /** Re-enables a deactivated user (fresh MFA at the controller). */

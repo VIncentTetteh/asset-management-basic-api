@@ -62,4 +62,7 @@ public enum AuditEventType {
 
     /** A platform operator granted a tenant a plan period without payment. */
     PLAN_GRANTED,
+
+    /** A user changed their own password (POST /users/me/password). */
+    PASSWORD_CHANGED,
 }

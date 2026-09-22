@@ -148,6 +148,13 @@ public class RbacAuditService {
                 "PUT", "/users/" + userId);
     }
 
+    /** Records a self-service password change; no password material is stored. */
+    @Transactional
+    public void recordPasswordChanged(UUID userId) {
+        persist(AuditEventType.PASSWORD_CHANGED, userId.toString(), null, null,
+                "POST", "/users/me/password");
+    }
+
     // ── Auth events ───────────────────────────────────────────────────────────
 
     /**

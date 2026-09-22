@@ -63,6 +63,13 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return new ResponseEntity<>(body, HttpStatus.BAD_REQUEST);
     }
 
+    @ExceptionHandler(com.assetiq.exceptions.FieldValidationException.class)
+    public ResponseEntity<Object> handleFieldValidation(com.assetiq.exceptions.FieldValidationException ex) {
+        Map<String, Object> body = errorBody(400, "Validation failed", "VALIDATION_FAILED");
+        body.put("errors", Map.of(ex.getField(), ex.getMessage()));
+        return new ResponseEntity<>(body, HttpStatus.BAD_REQUEST);
+    }
+
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<Object> handleIllegalArgument(IllegalArgumentException ex) {
         return new ResponseEntity<>(errorBody(400, ex.getMessage(), "BAD_REQUEST"), HttpStatus.BAD_REQUEST);

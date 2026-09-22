@@ -271,6 +271,27 @@ public class UserServiceImpl extends TenantAwareService implements UserService {
     }
 
     @Override
+    public void changeOwnPassword(String email, com.assetiq.dto.ChangePasswordRequest request) {
+        Organisation org = requireTenantOrg();
+        User user = userRepository.findByEmailAndOrganisationId(email, org.getId())
+                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+        if (user.getPasswordHash() == null
+                || !passwordEncoder.matches(request.getCurrentPassword(), user.getPasswordHash())) {
+            throw new com.assetiq.exceptions.FieldValidationException("currentPassword",
+                    "The current password is not correct");
+        }
+        if (request.getNewPassword().equals(request.getCurrentPassword())) {
+            throw new com.assetiq.exceptions.FieldValidationException("newPassword",
+                    "Choose a password different from the current one");
+        }
+        user.setPasswordHash(passwordEncoder.encode(request.getNewPassword()));
+        userRepository.save(user);
+        // A changed password must end every existing session, as a reset does.
+        sessionRevocationService.revokeAll(user);
+        rbacAuditService.recordPasswordChanged(user.getId());
+    }
+
+    @Override
     @CacheEvict(value = CachingConfig.CacheNames.USERS, allEntries = true)
     public UserDto deactivateUser(UUID id) {
         Organisation org = requireTenantOrg();

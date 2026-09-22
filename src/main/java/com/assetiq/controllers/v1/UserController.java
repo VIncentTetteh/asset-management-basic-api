@@ -58,6 +58,19 @@ public class UserController {
         return ResponseEntity.ok(userService.patchMe(authentication.getName(), dto));
     }
 
+    /**
+     * POST /api/v1/users/me/password — change your own password. Checks the
+     * current password, applies the password policy, then signs out every
+     * session (including this one): the client must sign in again.
+     */
+    @PostMapping("/me/password")
+    public ResponseEntity<Void> changeMyPassword(
+            Authentication authentication,
+            @Valid @RequestBody com.assetiq.dto.ChangePasswordRequest request) {
+        userService.changeOwnPassword(authentication.getName(), request);
+        return ResponseEntity.noContent().build();
+    }
+
     // ── Admin-only endpoints ──────────────────────────────────────────────────
 
     @PostMapping
