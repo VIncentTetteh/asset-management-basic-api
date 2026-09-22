@@ -39,10 +39,22 @@ public class AssetTransferDto {
     @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private UUID completedById;
 
+    /** Display names (full name, else email) of the maker, checker and completer. */
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private String requestedByName;
+
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private String approvedByName;
+
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private String completedByName;
+
     /** When the transfer was requested. */
     @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private java.time.Instant createdAt;
 
+    /** The day the transfer was completed; set by the complete endpoint only. */
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private LocalDate transferDate;
 
     /** Read-only: the workflow endpoints own the status. */

@@ -149,7 +149,19 @@ class AssetTransferWorkflowTest {
         AssetTransferDto out = service.completeTransfer(t.getId());
         assertThat(out.getStatus()).isEqualTo(TransferStatus.COMPLETED);
         assertThat(out.getCompletedById()).isEqualTo(approver.getId());
+        assertThat(out.getCompletedByName()).isEqualTo("checker@example.com");
+        assertThat(out.getRequestedByName()).isEqualTo("maker@example.com");
+        assertThat(out.getTransferDate()).isEqualTo(java.time.LocalDate.now());
         assertThat(asset.getDepartment()).isEqualTo(to);
+    }
+
+    @Test
+    void displayNamePrefersTheFullName() {
+        User u = new User();
+        u.setEmail("ama@example.com");
+        u.setFirstName("Ama");
+        u.setLastName("Mensah");
+        assertThat(AssetTransferServiceImpl.displayName(u)).isEqualTo("Ama Mensah");
     }
 
     @Test

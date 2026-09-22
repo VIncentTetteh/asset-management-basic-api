@@ -288,17 +288,27 @@ public class AssetTransferServiceImpl extends TenantAwareService implements Asse
             dto.setToLocationId(transfer.getToLocation().getId());
         }
         dto.setRequestedById(transfer.getRequestedBy().getId());
+        dto.setRequestedByName(displayName(transfer.getRequestedBy()));
         if (transfer.getApprovedBy() != null) {
             dto.setApprovedById(transfer.getApprovedBy().getId());
+            dto.setApprovedByName(displayName(transfer.getApprovedBy()));
         }
         if (transfer.getCompletedBy() != null) {
             dto.setCompletedById(transfer.getCompletedBy().getId());
+            dto.setCompletedByName(displayName(transfer.getCompletedBy()));
         }
         dto.setTransferDate(transfer.getTransferDate());
         dto.setCreatedAt(transfer.getCreatedAt());
         dto.setStatus(transfer.getStatus());
         dto.setReason(transfer.getReason());
         return dto;
+    }
+
+    /** A user's full name, or their email when no name is on file. */
+    static String displayName(User user) {
+        String name = ((user.getFirstName() == null ? "" : user.getFirstName()) + " "
+                + (user.getLastName() == null ? "" : user.getLastName())).trim();
+        return name.isEmpty() ? user.getEmail() : name;
     }
 
     private User resolveCurrentUser(Organisation org) {
