@@ -30,7 +30,7 @@ public class DepartmentController {
     @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_USER','ROLE_ADMIN','VIEW_DEPARTMENTS','MANAGE_DEPARTMENTS')")
     public ResponseEntity<DepartmentDto> get(@PathVariable UUID id) {
         DepartmentDto dto = departmentService.get(id);
-        if (dto == null) return ResponseEntity.notFound().build();
+        if (dto == null) throw new com.assetiq.exceptions.ResourceNotFoundException("Department not found");
         return ResponseEntity.ok(dto);
     }
 
@@ -43,31 +43,22 @@ public class DepartmentController {
     @GetMapping("/{parentId}/sub-departments")
     @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_USER','ROLE_ADMIN','VIEW_DEPARTMENTS','MANAGE_DEPARTMENTS')")
     public ResponseEntity<List<DepartmentDto>> listSubDepartments(@PathVariable UUID parentId) {
-        try {
-            return ResponseEntity.ok(departmentService.listSubDepartments(parentId));
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.notFound().build();
-        }
+        // Unknown department -> 404 (ResourceNotFoundException); bad input -> 400.
+        return ResponseEntity.ok(departmentService.listSubDepartments(parentId));
     }
 
     @PutMapping("/{id}")
     @PreAuthorize("hasAuthority('ROLE_ORG_ADMIN') or hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_DEPARTMENTS')")
     public ResponseEntity<DepartmentDto> update(@PathVariable UUID id, @Valid @RequestBody DepartmentDto dto) {
-        try {
-            return ResponseEntity.ok(departmentService.update(id, dto));
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.notFound().build();
-        }
+        // Unknown department -> 404 (ResourceNotFoundException); bad input -> 400.
+        return ResponseEntity.ok(departmentService.update(id, dto));
     }
 
     @PatchMapping("/{id}")
     @PreAuthorize("hasAuthority('ROLE_ORG_ADMIN') or hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_DEPARTMENTS')")
     public ResponseEntity<DepartmentDto> patch(@PathVariable UUID id, @RequestBody DepartmentDto dto) {
-        try {
-            return ResponseEntity.ok(departmentService.patch(id, dto));
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.notFound().build();
-        }
+        // Unknown department -> 404 (ResourceNotFoundException); bad input -> 400.
+        return ResponseEntity.ok(departmentService.patch(id, dto));
     }
 
     @DeleteMapping("/{id}")

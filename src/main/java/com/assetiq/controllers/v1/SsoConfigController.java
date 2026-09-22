@@ -90,7 +90,7 @@ public class SsoConfigController {
             @RequestBody Map<String, Boolean> body) {
         Boolean enabled = body.get("enabled");
         if (enabled == null) {
-            return ResponseEntity.badRequest().build();
+            throw new IllegalArgumentException("enabled is required");
         }
         return ResponseEntity.ok(ssoConfigService.setEnabled(orgId, enabled));
     }

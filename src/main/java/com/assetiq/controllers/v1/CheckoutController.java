@@ -62,7 +62,8 @@ public class CheckoutController {
         try {
             return ResponseEntity.ok(checkoutService.getById(id));
         } catch (IllegalArgumentException e) {
-            return ResponseEntity.notFound().build();
+            // Stays a 404, now with the reason in the body.
+            throw new com.assetiq.exceptions.ResourceNotFoundException(e.getMessage());
         }
     }
 

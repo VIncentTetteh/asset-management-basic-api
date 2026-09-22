@@ -142,7 +142,7 @@ public class DepartmentServiceImpl implements DepartmentService {
                 .orElseThrow(() -> new IllegalArgumentException("Organisation not found: " + orgId));
 
         departmentRepository.findByIdAndOrganisationAndDeletedAtIsNull(parentDepartmentId, org)
-                .orElseThrow(() -> new IllegalArgumentException("Parent department not found in your organisation"));
+                .orElseThrow(() -> new com.assetiq.exceptions.ResourceNotFoundException("Parent department not found in your organisation"));
 
         List<Department> result = departmentRepository
                 .findAllByOrganisationAndParentDepartmentIdAndDeletedAtIsNull(org, parentDepartmentId);
@@ -161,7 +161,7 @@ public class DepartmentServiceImpl implements DepartmentService {
                 .orElseThrow(() -> new IllegalArgumentException("Organisation not found: " + orgId));
 
         Department d = departmentRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
-                .orElseThrow(() -> new IllegalArgumentException("Department not found in your organisation"));
+                .orElseThrow(() -> new com.assetiq.exceptions.ResourceNotFoundException("Department not found in your organisation"));
 
         if (dto.getName() != null && !dto.getName().equalsIgnoreCase(d.getName())) {
             if (departmentRepository.existsByNameIgnoreCaseAndOrganisationAndDeletedAtIsNull(dto.getName(), org)) {
@@ -225,7 +225,7 @@ public class DepartmentServiceImpl implements DepartmentService {
                 .orElseThrow(() -> new IllegalArgumentException("Organisation not found: " + orgId));
 
         Department d = departmentRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
-                .orElseThrow(() -> new IllegalArgumentException("Department not found in your organisation"));
+                .orElseThrow(() -> new com.assetiq.exceptions.ResourceNotFoundException("Department not found in your organisation"));
 
         d.setDeletedAt(Instant.now());
         departmentRepository.save(d);

@@ -39,7 +39,8 @@ public class ExchangeRateController {
         try {
             return ResponseEntity.ok(exchangeRateService.getById(id));
         } catch (IllegalArgumentException e) {
-            return ResponseEntity.notFound().build();
+            // Stays a 404, now with the reason in the body.
+            throw new com.assetiq.exceptions.ResourceNotFoundException(e.getMessage());
         }
     }
 

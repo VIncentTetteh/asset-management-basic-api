@@ -82,7 +82,7 @@ public class BudgetController {
             @RequestBody Map<String, BigDecimal> body) {
         BigDecimal amount = body.get("amount");
         if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) {
-            return ResponseEntity.badRequest().build();
+            throw new IllegalArgumentException("amount must be greater than zero");
         }
         return ResponseEntity.ok(budgetService.recordSpend(id, amount));
     }

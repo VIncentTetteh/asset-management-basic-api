@@ -76,14 +76,9 @@ public class AssetController {
     @PostMapping
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','CREATE_ASSET','EDIT_ASSET')")
     public ResponseEntity<AssetDto> create(@Valid @RequestBody AssetDto dto) {
-        try {
-            AssetDto created = assetService.create(dto);
-            return ResponseEntity.ok(created);
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().build();
-        } catch (IllegalStateException e) {
-            return ResponseEntity.status(409).body(null);
-        }
+        // IllegalArgumentException -> 400 and IllegalStateException -> 409 come from
+        // GlobalExceptionHandler, with the service's message in the body.
+        return ResponseEntity.ok(assetService.create(dto));
     }
 
     @GetMapping("/{id}")
@@ -91,7 +86,7 @@ public class AssetController {
     public ResponseEntity<AssetDto> get(@PathVariable UUID id) {
         AssetDto dto = assetService.get(id);
         if (dto == null)
-            return ResponseEntity.notFound().build();
+            throw new com.assetiq.exceptions.ResourceNotFoundException("Asset not found");
         return ResponseEntity.ok(dto);
     }
 
@@ -124,38 +119,19 @@ public class AssetController {
     @PostMapping("/{id}/assign/{departmentId}")
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','DELETE_ASSET','EDIT_ASSET','TRANSFER_ASSET','DISPOSE_ASSET')")
     public ResponseEntity<AssetDto> assign(@PathVariable UUID id, @PathVariable UUID departmentId) {
-        try {
-            AssetDto dto = assetService.assignToDepartment(id, departmentId);
-            return ResponseEntity.ok(dto);
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().build();
-        } catch (IllegalStateException e) {
-            return ResponseEntity.status(409).body(null);
-        }
+        return ResponseEntity.ok(assetService.assignToDepartment(id, departmentId));
     }
 
     @PostMapping("/{id}/assign-user/{userId}")
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','EDIT_ASSET','TRANSFER_ASSET')")
     public ResponseEntity<AssetDto> assignUser(@PathVariable UUID id, @PathVariable UUID userId) {
-        try {
-            AssetDto dto = assetService.assignToUser(id, userId);
-            return ResponseEntity.ok(dto);
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().build();
-        } catch (IllegalStateException e) {
-            return ResponseEntity.status(409).body(null);
-        }
+        return ResponseEntity.ok(assetService.assignToUser(id, userId));
     }
 
     @DeleteMapping("/{id}/assign-user")
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','EDIT_ASSET','TRANSFER_ASSET')")
     public ResponseEntity<AssetDto> unassignUser(@PathVariable UUID id) {
-        try {
-            AssetDto dto = assetService.unassignUser(id);
-            return ResponseEntity.ok(dto);
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().build();
-        }
+        return ResponseEntity.ok(assetService.unassignUser(id));
     }
 
     @PutMapping("/{id}")
@@ -218,7 +194,8 @@ public class AssetController {
         try {
             return ResponseEntity.ok(assetService.getHistory(id));
         } catch (IllegalArgumentException e) {
-            return ResponseEntity.notFound().build();
+            // Stays a 404, now with the reason in the body.
+            throw new com.assetiq.exceptions.ResourceNotFoundException(e.getMessage());
         }
     }
 
@@ -232,7 +209,8 @@ public class AssetController {
         try {
             return ResponseEntity.ok(assetService.getTco(id));
         } catch (IllegalArgumentException e) {
-            return ResponseEntity.notFound().build();
+            // Stays a 404, now with the reason in the body.
+            throw new com.assetiq.exceptions.ResourceNotFoundException(e.getMessage());
         }
     }
 
@@ -247,7 +225,8 @@ public class AssetController {
         try {
             return ResponseEntity.ok(assetService.getByQrPayload(payload));
         } catch (IllegalArgumentException e) {
-            return ResponseEntity.notFound().build();
+            // Stays a 404, now with the reason in the body.
+            throw new com.assetiq.exceptions.ResourceNotFoundException(e.getMessage());
         }
     }
 

@@ -30,21 +30,14 @@ public class LeaseRecordController {
     @PutMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','MANAGE_LEASES')")
     public ResponseEntity<LeaseRecordDto> update(@PathVariable UUID id, @RequestBody LeaseRecordDto dto) {
-        try {
-            return ResponseEntity.ok(leaseRecordService.update(id, dto));
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.notFound().build();
-        }
+        // Unknown lease -> 404 (ResourceNotFoundException); invalid input -> 400.
+        return ResponseEntity.ok(leaseRecordService.update(id, dto));
     }
 
     @GetMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','ROLE_USER','MANAGE_LEASES','VIEW_CONTRACTS')")
     public ResponseEntity<LeaseRecordDto> getById(@PathVariable UUID id) {
-        try {
-            return ResponseEntity.ok(leaseRecordService.getById(id));
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.notFound().build();
-        }
+        return ResponseEntity.ok(leaseRecordService.getById(id));
     }
 
     @GetMapping
@@ -80,7 +73,8 @@ public class LeaseRecordController {
         try {
             return ResponseEntity.ok(leaseRecordService.terminate(id, reason));
         } catch (IllegalStateException e) {
-            return ResponseEntity.badRequest().build();
+            // Already terminated / expired: stays a 400, now with the reason in the body.
+            throw new IllegalArgumentException(e.getMessage(), e);
         }
     }
 

@@ -30,7 +30,7 @@ public class OrganisationController {
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','VIEW_ASSETS')")
     public ResponseEntity<OrganisationDto> get(@PathVariable UUID id) {
         OrganisationDto dto = organisationService.get(id);
-        if (dto == null) return ResponseEntity.notFound().build();
+        if (dto == null) throw new com.assetiq.exceptions.ResourceNotFoundException("Organisation not found");
         return ResponseEntity.ok(dto);
     }
 

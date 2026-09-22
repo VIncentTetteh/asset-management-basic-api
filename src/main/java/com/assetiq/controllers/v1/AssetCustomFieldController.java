@@ -35,10 +35,10 @@ public class AssetCustomFieldController {
         try {
             return ResponseEntity.status(HttpStatus.CREATED).body(fieldService.create(assetId, dto));
         } catch (IllegalArgumentException e) {
-            return ResponseEntity.notFound().build();
-        } catch (IllegalStateException e) {
-            return ResponseEntity.status(HttpStatus.CONFLICT).build();
+            // Stays a 404, now with the reason in the body.
+            throw new com.assetiq.exceptions.ResourceNotFoundException(e.getMessage());
         }
+        // IllegalStateException (duplicate field name) -> 409 with its message.
     }
 
     @GetMapping
@@ -47,7 +47,8 @@ public class AssetCustomFieldController {
         try {
             return ResponseEntity.ok(fieldService.listByAsset(assetId));
         } catch (IllegalArgumentException e) {
-            return ResponseEntity.notFound().build();
+            // Stays a 404, now with the reason in the body.
+            throw new com.assetiq.exceptions.ResourceNotFoundException(e.getMessage());
         }
     }
 
@@ -60,7 +61,8 @@ public class AssetCustomFieldController {
         try {
             return ResponseEntity.ok(fieldService.update(fieldId, dto));
         } catch (IllegalArgumentException e) {
-            return ResponseEntity.notFound().build();
+            // Stays a 404, now with the reason in the body.
+            throw new com.assetiq.exceptions.ResourceNotFoundException(e.getMessage());
         }
     }
 
@@ -73,7 +75,8 @@ public class AssetCustomFieldController {
             fieldService.delete(fieldId);
             return ResponseEntity.noContent().build();
         } catch (IllegalArgumentException e) {
-            return ResponseEntity.notFound().build();
+            // Stays a 404, now with the reason in the body.
+            throw new com.assetiq.exceptions.ResourceNotFoundException(e.getMessage());
         }
     }
 }

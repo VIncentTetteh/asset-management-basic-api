@@ -220,7 +220,7 @@ public class LeaseRecordServiceImpl extends TenantAwareService implements LeaseR
 
     private LeaseRecord requireLease(UUID id, Organisation org) {
         return leaseRecordRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
-                .orElseThrow(() -> new IllegalArgumentException("Lease record not found: " + id));
+                .orElseThrow(() -> new com.assetiq.exceptions.ResourceNotFoundException("Lease record not found: " + id));
     }
 
     private LeaseRecordDto toDto(LeaseRecord r) {

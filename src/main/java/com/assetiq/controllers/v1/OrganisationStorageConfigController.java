@@ -77,7 +77,7 @@ public class OrganisationStorageConfigController {
         requireTenantAccess(orgId);
         Boolean enabled = body.get("enabled");
         if (enabled == null) {
-            return ResponseEntity.badRequest().build();
+            throw new IllegalArgumentException("enabled is required");
         }
         return ResponseEntity.ok(storageConfigService.toggleS3(orgId, enabled));
     }
