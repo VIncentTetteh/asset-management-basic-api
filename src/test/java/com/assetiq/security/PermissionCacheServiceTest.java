@@ -58,6 +58,8 @@ class PermissionCacheServiceTest {
             Role role = roleWithPermissions(roleId, false,
                     "VIEW_ASSETS", "CREATE_ASSET", "EDIT_ASSET");
             when(roleRepository.findById(roleId)).thenReturn(Optional.of(role));
+            when(roleRepository.findPermissionNamesByRoleId(roleId))
+                    .thenReturn(List.of("VIEW_ASSETS", "CREATE_ASSET", "EDIT_ASSET"));
 
             List<String> perms = service.getPermissionsForRole(roleId);
 
@@ -97,6 +99,8 @@ class PermissionCacheServiceTest {
             UUID roleId = UUID.randomUUID();
             Role role = roleWithRawPermissions(roleId, false, "VIEW_ASSETS", "", null, "  ");
             when(roleRepository.findById(roleId)).thenReturn(Optional.of(role));
+            when(roleRepository.findPermissionNamesByRoleId(roleId))
+                    .thenReturn(java.util.Arrays.asList("VIEW_ASSETS", "", null, "  "));
 
             List<String> perms = service.getPermissionsForRole(roleId);
 

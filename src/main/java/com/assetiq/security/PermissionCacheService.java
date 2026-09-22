@@ -72,6 +72,7 @@ public class PermissionCacheService {
      * @param organisationId JWT organisationId claim (for multi-tenant disambiguation)
      * @return deduplicated list of permission strings, e.g. ["VIEW_ASSETS", "MANAGE_ROLES"]
      */
+    @Transactional(readOnly = true)
     public List<String> getPermissionsForUser(String email, String organisationId) {
         try {
             List<UUID> roleIds = getRoleIdsForUser(email, organisationId);
@@ -171,9 +172,11 @@ public class PermissionCacheService {
                     if (role.isGrantAllPermissions()) {
                         return new java.util.ArrayList<>(RolePermissionDefaults.allPermissionNames());
                     }
-                    // B-1: stream from relational join table — no JSON parsing needed
-                    return role.getRolePermissions().stream()
-                            .map(RolePermission::getPermission)
+                    // B-1: read the join table directly. The helpers in this class are
+                    // reached by self-invocation, which skips the @Transactional proxy,
+                    // so touching the lazy role.getRolePermissions() here could run
+                    // without a session and silently yield no permissions at all.
+                    return roleRepository.findPermissionNamesByRoleId(roleId).stream()
                             .filter(p -> p != null && !p.isBlank())
                             .sorted()
                             .collect(Collectors.toList());

@@ -11,6 +11,16 @@ import java.util.UUID;
 
 @Repository
 public interface RoleRepository extends JpaRepository<Role, UUID> {
+
+    /**
+     * A role's permission names, read straight from the join table. Callers need
+     * only the names; loading the lazy {@code rolePermissions} collection instead
+     * requires an open session, which a cache-miss path outside a transaction lacks.
+     */
+    @org.springframework.data.jpa.repository.Query(
+            "select rp.permission from RolePermission rp where rp.role.id = :roleId")
+    java.util.List<String> findPermissionNamesByRoleId(
+            @org.springframework.data.repository.query.Param("roleId") UUID roleId);
     Optional<Role> findByNameAndOrganisationId(String name, UUID organisationId);
 
     Set<Role> findByOrganisationId(UUID organisationId);
