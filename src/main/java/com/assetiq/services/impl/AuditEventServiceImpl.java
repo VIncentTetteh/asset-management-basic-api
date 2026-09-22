@@ -1,6 +1,7 @@
 package com.assetiq.services.impl;
 
 import com.assetiq.dto.AuditEventDto;
+import com.assetiq.dto.PagedResponseDto;
 import com.assetiq.enums.AuditEventType;
 import com.assetiq.models.AuditEvent;
 import com.assetiq.models.Organisation;
@@ -10,6 +11,7 @@ import com.assetiq.services.AuditEventService;
 import com.assetiq.services.TenantAwareService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 
@@ -52,10 +54,42 @@ public class AuditEventServiceImpl extends TenantAwareService implements AuditEv
                                          Boolean success, String method, String path,
                                          AuditEventType eventType) {
         Organisation org = requireTenantOrg();
+        return auditEventRepository
+                .findAll(filterSpec(org, actorId, start, end, success, method, path, eventType),
+                        Sort.by(Sort.Direction.DESC, "createdAt"))
+                .stream()
+                .map(this::mapToDto)
+                .collect(Collectors.toList());
+    }
+
+    @Override
+    public PagedResponseDto<AuditEventDto> getEventsPaged(UUID actorId, Instant start, Instant end,
+                                                          Boolean success, String method, String path,
+                                                          AuditEventType eventType,
+                                                          Integer page, Integer size) {
+        Organisation org = requireTenantOrg();
+        int pageNum  = page != null && page > 0 ? page : 0;
+        int pageSize = size != null && size > 0 ? Math.min(size, MAX_PAGE_SIZE) : DEFAULT_PAGE_SIZE;
+
+        var result = auditEventRepository.findAll(
+                filterSpec(org, actorId, start, end, success, method, path, eventType),
+                PageRequest.of(pageNum, pageSize, Sort.by(Sort.Direction.DESC, "createdAt")));
+
+        PagedResponseDto<AuditEventDto> response = new PagedResponseDto<>();
+        response.setTotal(result.getTotalElements());
+        response.setLimit(pageSize);
+        response.setOffset((long) pageNum * pageSize);
+        response.setItems(result.getContent().stream().map(this::mapToDto).collect(Collectors.toList()));
+        return response;
+    }
+
+    private Specification<AuditEvent> filterSpec(Organisation org, UUID actorId, Instant start, Instant end,
+                                                 Boolean success, String method, String path,
+                                                 AuditEventType eventType) {
         // Normalise method to upper-case so UPPER(e.method) = UPPER(:method) matches
         String normMethod = method != null ? method.toUpperCase(Locale.ROOT) : null;
 
-        Specification<AuditEvent> specification = (root, query, builder) -> {
+        return (root, query, builder) -> {
             List<Predicate> predicates = new ArrayList<>();
             predicates.add(builder.equal(root.get("organisation"), org));
             predicates.add(builder.isNull(root.get("deletedAt")));
@@ -84,12 +118,6 @@ public class AuditEventServiceImpl extends TenantAwareService implements AuditEv
 
             return builder.and(predicates.toArray(Predicate[]::new));
         };
-
-        return auditEventRepository
-                .findAll(specification, Sort.by(Sort.Direction.DESC, "createdAt"))
-                .stream()
-                .map(this::mapToDto)
-                .collect(Collectors.toList());
     }
 
     private AuditEventDto mapToDto(AuditEvent event) {

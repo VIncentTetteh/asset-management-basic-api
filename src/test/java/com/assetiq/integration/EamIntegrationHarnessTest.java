@@ -175,14 +175,31 @@ class EamIntegrationHarnessTest {
     void auditEvents_supportEmptyAndOptionalFiltersOnPostgres() throws Exception {
         mockMvc.perform(auth(get("/api/v1/audit-events")))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$").isArray());
+                .andExpect(jsonPath("$.items").isArray())
+                .andExpect(jsonPath("$.limit").value(50))
+                .andExpect(jsonPath("$.offset").value(0));
 
         mockMvc.perform(auth(get("/api/v1/audit-events")
                         .param("method", "GET")
                         .param("success", "true")
                         .param("path", "/api/v1")))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$").isArray());
+                .andExpect(jsonPath("$.items").isArray());
+    }
+
+    @Test
+    void auditEvents_areBoundedByTheRequestedPageSize() throws Exception {
+        // A tenant with a long history must not get every row in one response.
+        mockMvc.perform(auth(get("/api/v1/audit-events").param("size", "2")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.limit").value(2))
+                .andExpect(jsonPath("$.items.length()").value(org.hamcrest.Matchers.lessThanOrEqualTo(2)));
+
+        // An oversized request is clamped rather than honoured.
+        mockMvc.perform(auth(get("/api/v1/audit-events").param("size", "5000").param("page", "1")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.limit").value(200))
+                .andExpect(jsonPath("$.offset").value(200));
     }
 
     @Test
