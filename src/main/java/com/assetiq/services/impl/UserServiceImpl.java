@@ -359,6 +359,27 @@ public class UserServiceImpl extends TenantAwareService implements UserService {
         return saved;
     }
 
+    @Override
+    @CacheEvict(value = CachingConfig.CacheNames.USERS, allEntries = true)
+    public UserDto clearRole(UUID userId) {
+        Organisation org = requireTenantOrg();
+        User user = userRepository.findByIdAndOrganisation(userId, org)
+                .orElseThrow(() -> new IllegalArgumentException("User not found in your organisation"));
+        if (isCurrentUser(user)) {
+            throw new IllegalStateException("You cannot change your own role; ask another administrator");
+        }
+        if (user.getRole() != null) {
+            String oldRoleName = user.getRole().getName();
+            user.setRole(null);
+            // Removing the role removes every permission, so live sessions must go.
+            sessionRevocationService.revokeAll(user);
+            rbacAuditService.recordUserRoleAssigned(userId, oldRoleName, null);
+        }
+        UserDto saved = toDto(user);
+        permissionCacheService.evictForUser(user.getEmail(), org.getId().toString());
+        return saved;
+    }
+
     private UserDto toDto(User user) {
         UserDto dto = new UserDto();
         dto.setId(user.getId());

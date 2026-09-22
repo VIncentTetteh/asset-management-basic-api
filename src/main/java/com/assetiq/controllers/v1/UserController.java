@@ -130,4 +130,15 @@ public class UserController {
             @RequestParam UUID roleId) {
         return ResponseEntity.ok(userService.assignRole(id, roleId));
     }
+
+    /**
+     * Removes the user's role. They keep their login and resolve to no
+     * permissions; a role could previously be changed but never taken off.
+     */
+    @DeleteMapping("/{id}/role")
+    @RequireFreshMfa
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_USERS','EDIT_USER','DELETE_USER')")
+    public ResponseEntity<UserDto> clearRole(@PathVariable UUID id) {
+        return ResponseEntity.ok(userService.clearRole(id));
+    }
 }

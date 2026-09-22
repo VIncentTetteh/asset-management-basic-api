@@ -38,4 +38,11 @@ public interface UserService {
     UserDto activateUser(UUID id);
 
     UserDto assignRole(UUID userId, UUID roleId);
+
+    /**
+     * Removes the user's role. A user without one keeps their login but resolves
+     * to no permissions, which is how access is withdrawn without deactivating
+     * the account (a user can already be created with no role).
+     */
+    UserDto clearRole(UUID userId);
 }

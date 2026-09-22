@@ -38,6 +38,13 @@ public class DepartmentDto {
     @Digits(integer = 36, fraction = 2)
     private BigDecimal budgetLimit;
 
+    /**
+     * PATCH/PUT only: {@code true} removes the planning cap. An omitted
+     * {@code budgetLimit} means "unchanged", so without this flag a cap could
+     * only ever be changed, never taken off.
+     */
+    private Boolean clearBudgetLimit;
+
     private DepartmentStatus status;
 
     private UUID organisationId;

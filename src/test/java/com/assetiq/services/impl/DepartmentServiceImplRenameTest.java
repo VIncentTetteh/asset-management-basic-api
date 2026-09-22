@@ -64,6 +64,26 @@ class DepartmentServiceImplRenameTest {
     }
 
     @Test
+    void clearBudgetLimitRemovesThePlanningCap() {
+        dept.setBudgetLimit(new java.math.BigDecimal("50000.00"));
+        DepartmentDto dto = new DepartmentDto();
+        dto.setClearBudgetLimit(true);
+
+        service.update(dept.getId(), dto);
+
+        assertThat(dept.getBudgetLimit()).isNull();
+    }
+
+    @Test
+    void anOmittedBudgetLimitLeavesTheCapAlone() {
+        dept.setBudgetLimit(new java.math.BigDecimal("50000.00"));
+
+        service.update(dept.getId(), new DepartmentDto());
+
+        assertThat(dept.getBudgetLimit()).isEqualByComparingTo("50000.00");
+    }
+
+    @Test
     void caseOnlyRenameIsSaved() {
         service.update(dept.getId(), rename("Finance"));
 

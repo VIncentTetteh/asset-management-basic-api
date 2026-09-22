@@ -197,8 +197,13 @@ public class DepartmentServiceImpl implements DepartmentService {
             }
             d.setCostCenterCode(dto.getCostCenterCode());
         }
-        if (dto.getBudgetLimit() != null)
+        if (Boolean.TRUE.equals(dto.getClearBudgetLimit())) {
+            // An empty planning cap means "no cap": it is stored as NULL and read
+            // back as "—", rather than as a cap of zero.
+            d.setBudgetLimit(null);
+        } else if (dto.getBudgetLimit() != null) {
             d.setBudgetLimit(dto.getBudgetLimit());
+        }
         if (dto.getStatus() != null)
             d.setStatus(dto.getStatus());
 

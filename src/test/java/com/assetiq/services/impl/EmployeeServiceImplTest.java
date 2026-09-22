@@ -315,6 +315,68 @@ class EmployeeServiceImplTest {
                 () -> employeeService.completeChecklistItem(item.getId(), false));
     }
 
+    // ── termination date ──────────────────────────────────────────────────────
+
+    @Test
+    void update_blankTerminationDateClearsIt() {
+        Organisation org = tenantOrganisation();
+        Employee employee = employeeWithOrg(org);
+        employee.setTerminationDate(java.time.LocalDate.of(2024, 1, 31));
+        when(employeeRepository.findByIdAndOrganisationAndDeletedAtIsNull(employee.getId(), org))
+                .thenReturn(Optional.of(employee));
+        when(employeeRepository.save(any(Employee.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        EmployeeDto dto = new EmployeeDto();
+        dto.setFirstName("Kofi");
+        dto.setLastName("Boateng");
+        dto.setTerminationDate(null);
+
+        EmployeeDto updated = employeeService.update(employee.getId(), dto);
+
+        assertNull(updated.getTerminationDate());
+    }
+
+    @Test
+    void update_terminatingWithoutADateStillStampsToday() {
+        Organisation org = tenantOrganisation();
+        Employee employee = employeeWithOrg(org);
+        when(employeeRepository.findByIdAndOrganisationAndDeletedAtIsNull(employee.getId(), org))
+                .thenReturn(Optional.of(employee));
+        when(employeeRepository.save(any(Employee.class))).thenAnswer(inv -> inv.getArgument(0));
+        lenient().when(checkoutRepository.findByEmployeeAndStatusAndDeletedAtIsNull(any(), any()))
+                .thenReturn(List.of());
+
+        EmployeeDto dto = new EmployeeDto();
+        dto.setFirstName("Kofi");
+        dto.setLastName("Boateng");
+        dto.setStatus(EmployeeStatus.TERMINATED);
+
+        EmployeeDto updated = employeeService.update(employee.getId(), dto);
+
+        assertEquals(java.time.LocalDate.now(), updated.getTerminationDate());
+    }
+
+    @Test
+    void update_terminatingWithADateKeepsTheDateGiven() {
+        Organisation org = tenantOrganisation();
+        Employee employee = employeeWithOrg(org);
+        when(employeeRepository.findByIdAndOrganisationAndDeletedAtIsNull(employee.getId(), org))
+                .thenReturn(Optional.of(employee));
+        when(employeeRepository.save(any(Employee.class))).thenAnswer(inv -> inv.getArgument(0));
+        lenient().when(checkoutRepository.findByEmployeeAndStatusAndDeletedAtIsNull(any(), any()))
+                .thenReturn(List.of());
+
+        EmployeeDto dto = new EmployeeDto();
+        dto.setFirstName("Kofi");
+        dto.setLastName("Boateng");
+        dto.setStatus(EmployeeStatus.TERMINATED);
+        dto.setTerminationDate(java.time.LocalDate.of(2025, 6, 30));
+
+        EmployeeDto updated = employeeService.update(employee.getId(), dto);
+
+        assertEquals(java.time.LocalDate.of(2025, 6, 30), updated.getTerminationDate());
+    }
+
     // ── helpers ───────────────────────────────────────────────────────────────
 
     private Organisation tenantOrganisation() {

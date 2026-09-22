@@ -128,17 +128,21 @@ public class EmployeeServiceImpl extends TenantAwareService implements EmployeeS
                     });
         }
 
-        if (dto.getStatus() == EmployeeStatus.TERMINATED && employee.getStatus() != EmployeeStatus.TERMINATED) {
+        boolean terminating =
+                dto.getStatus() == EmployeeStatus.TERMINATED && employee.getStatus() != EmployeeStatus.TERMINATED;
+        if (terminating) {
             requireNoActiveCheckouts(employee,
                     "Cannot terminate: employee still holds assets. Run offboarding to return them first.");
-            if (employee.getTerminationDate() == null && dto.getTerminationDate() == null) {
-                employee.setTerminationDate(LocalDate.now());
-            }
         }
 
         applyDto(employee, dto, org);
         if (dto.getStatus() != null) {
             employee.setStatus(dto.getStatus());
+        }
+        // Stamped after the body is applied, so a termination that names no date
+        // still gets today's while a date the caller did send is kept.
+        if (terminating && employee.getTerminationDate() == null) {
+            employee.setTerminationDate(LocalDate.now());
         }
 
         return toDto(employeeRepository.save(employee));
@@ -405,9 +409,9 @@ public class EmployeeServiceImpl extends TenantAwareService implements EmployeeS
         employee.setPhone(dto.getPhone());
         employee.setJobTitle(dto.getJobTitle());
         employee.setHireDate(dto.getHireDate());
-        if (dto.getTerminationDate() != null) {
-            employee.setTerminationDate(dto.getTerminationDate());
-        }
+        // PUT replaces the record, so a blank termination date clears it. The old
+        // null-guard made the date impossible to remove once it had been set.
+        employee.setTerminationDate(dto.getTerminationDate());
         employee.setNotes(dto.getNotes());
 
         if (dto.getDepartmentId() != null) {

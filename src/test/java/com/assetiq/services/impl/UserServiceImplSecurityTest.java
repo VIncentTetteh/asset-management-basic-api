@@ -134,6 +134,26 @@ class UserServiceImplSecurityTest {
     }
 
     @Test
+    void roleCanBeRemovedLeavingTheUserWithNoPermissions() {
+        Role viewer = role(false, "VIEW_USERS");
+        target.setRole(viewer);
+        actAs("boss@example.com", "ROLE_ADMIN");
+
+        assertThat(service.clearRole(target.getId()).getRoleId()).isNull();
+        // Every permission is gone, so the sessions holding the old ones must go too.
+        Mockito.verify(sessionRevocationService).revokeAll(target);
+    }
+
+    @Test
+    void cannotRemoveYourOwnRole() {
+        target.setRole(role(false, "VIEW_USERS"));
+        actAs("someone@example.com", "ROLE_ADMIN");
+
+        assertThatThrownBy(() -> service.clearRole(target.getId()))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
     void cannotDeactivateYourselfAndPatchCannotChangeStatus() {
         actAs("someone@example.com", "ROLE_ADMIN");
         assertThatThrownBy(() -> service.deactivateUser(target.getId())).isInstanceOf(IllegalStateException.class);
