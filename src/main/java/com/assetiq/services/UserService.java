@@ -28,5 +28,8 @@ public interface UserService {
 
     UserDto deactivateUser(UUID id);
 
+    /** Re-enables a deactivated user (fresh MFA at the controller). */
+    UserDto activateUser(UUID id);
+
     UserDto assignRole(UUID userId, UUID roleId);
 }

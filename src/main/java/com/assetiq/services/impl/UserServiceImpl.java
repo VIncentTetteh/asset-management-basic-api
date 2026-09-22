@@ -1,5 +1,11 @@
 package com.assetiq.services.impl;
 
+import com.assetiq.models.RolePermission;
+import com.assetiq.security.RolePermissionDefaults;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 import com.assetiq.dto.UserDto;
 import com.assetiq.config.CachingConfig;
 import com.assetiq.enums.UserStatus;
@@ -81,6 +87,10 @@ public class UserServiceImpl extends TenantAwareService implements UserService {
             throw new IllegalStateException("A user with this email already exists in the organisation");
         });
 
+        if (dto.getPassword() == null || dto.getPassword().isBlank()) {
+            throw new IllegalArgumentException("A temporary password is required for a new user");
+        }
+
         User user = new User();
         user.setFirstName(dto.getFirstName());
         user.setLastName(dto.getLastName());
@@ -96,6 +106,7 @@ public class UserServiceImpl extends TenantAwareService implements UserService {
         if (dto.getRoleId() != null) {
             Role role = roleRepository.findByIdAndOrganisationAndDeletedAtIsNull(dto.getRoleId(), org)
                     .orElseThrow(() -> new IllegalArgumentException("Role not found in your organisation"));
+            assertCanGrant(role);
             user.setRole(role);
         }
 
@@ -170,17 +181,16 @@ public class UserServiceImpl extends TenantAwareService implements UserService {
         User user = userRepository.findByIdAndOrganisation(id, org)
                 .orElseThrow(() -> new IllegalArgumentException("User not found in your organisation"));
 
+        // PUT replaces the profile: an omitted optional field (department included)
+        // is cleared. Email, role and status have their own flows and are ignored.
         user.setFirstName(dto.getFirstName());
         user.setLastName(dto.getLastName());
         user.setPhone(dto.getPhone());
         user.setEmployeeId(dto.getEmployeeId());
         user.setJobTitle(dto.getJobTitle());
-
-        if (dto.getDepartmentId() != null) {
-            Department dept = departmentRepository.findByIdAndOrganisationAndDeletedAtIsNull(dto.getDepartmentId(), org)
-                    .orElseThrow(() -> new IllegalArgumentException("Department not found in your organisation"));
-            user.setDepartment(dept);
-        }
+        user.setDepartment(dto.getDepartmentId() == null ? null
+                : departmentRepository.findByIdAndOrganisationAndDeletedAtIsNull(dto.getDepartmentId(), org)
+                        .orElseThrow(() -> new IllegalArgumentException("Department not found in your organisation")));
 
         return toDto(userRepository.save(user));
     }
@@ -212,11 +222,11 @@ public class UserServiceImpl extends TenantAwareService implements UserService {
                     .orElseThrow(() -> new IllegalArgumentException("Department not found in your organisation"));
             user.setDepartment(dept);
         }
-        if (dto.getStatus() != null) {
-            if (dto.getStatus() != user.getStatus()) {
-                user.setStatus(dto.getStatus());
-                sessionRevocationService.revokeAll(user);
-            }
+        if (dto.getStatus() != null && dto.getStatus() != user.getStatus()) {
+            // Status changes lock people out or let them back in; they go through
+            // /deactivate and /activate, which require a fresh MFA step-up. PATCH
+            // used to change status with no step-up at all.
+            throw new IllegalArgumentException("Change a user's status with /deactivate or /activate");
         }
 
         return toDto(userRepository.save(user));
@@ -261,9 +271,53 @@ public class UserServiceImpl extends TenantAwareService implements UserService {
         Organisation org = requireTenantOrg();
         User user = userRepository.findByIdAndOrganisation(id, org)
                 .orElseThrow(() -> new IllegalArgumentException("User not found in your organisation"));
+        if (isCurrentUser(user)) {
+            throw new IllegalStateException("You cannot deactivate your own account");
+        }
         user.setStatus(UserStatus.INACTIVE);
         sessionRevocationService.revokeAll(user);
         return toDto(user);
+    }
+
+    @Override
+    @CacheEvict(value = CachingConfig.CacheNames.USERS, allEntries = true)
+    public UserDto activateUser(UUID id) {
+        Organisation org = requireTenantOrg();
+        User user = userRepository.findByIdAndOrganisation(id, org)
+                .orElseThrow(() -> new IllegalArgumentException("User not found in your organisation"));
+        if (user.getStatus() != UserStatus.ACTIVE) {
+            user.setStatus(UserStatus.ACTIVE);
+            userRepository.save(user);
+        }
+        return toDto(user);
+    }
+
+    private boolean isCurrentUser(User user) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        return auth != null && user.getEmail() != null && user.getEmail().equalsIgnoreCase(auth.getName());
+    }
+
+    /**
+     * Privilege-escalation guard: a user manager may only hand out a role whose
+     * permissions they hold themselves. Without it anyone with MANAGE_USERS or
+     * EDIT_USER could assign the grant-all ADMIN role (to themselves via a
+     * helper account, or to anyone). Organisation admins are unrestricted.
+     */
+    void assertCanGrant(Role role) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null) {
+            throw new AccessDeniedException("No authenticated user in security context");
+        }
+        Set<String> held = auth.getAuthorities().stream()
+                .map(GrantedAuthority::getAuthority).collect(Collectors.toSet());
+        if (held.contains("ROLE_ADMIN") || held.contains("ROLE_ORG_ADMIN")) return;
+        Set<String> required = role.isGrantAllPermissions()
+                ? RolePermissionDefaults.allPermissionNames()
+                : role.getRolePermissions().stream().map(RolePermission::getPermission).collect(Collectors.toSet());
+        if (!held.containsAll(required)) {
+            throw new AccessDeniedException("You cannot assign the role '" + role.getName()
+                    + "': it grants permissions you do not hold");
+        }
     }
 
     @Override
@@ -274,6 +328,10 @@ public class UserServiceImpl extends TenantAwareService implements UserService {
                 .orElseThrow(() -> new IllegalArgumentException("User not found in your organisation"));
         Role role = roleRepository.findByIdAndOrganisationAndDeletedAtIsNull(roleId, org)
                 .orElseThrow(() -> new IllegalArgumentException("Role not found in your organisation"));
+        if (isCurrentUser(user) && (user.getRole() == null || !user.getRole().getId().equals(role.getId()))) {
+            throw new IllegalStateException("You cannot change your own role; ask another administrator");
+        }
+        assertCanGrant(role);
         String oldRoleName = user.getRole() == null ? null : user.getRole().getName();
         if (user.getRole() == null || !user.getRole().getId().equals(role.getId())) {
             user.setRole(role);

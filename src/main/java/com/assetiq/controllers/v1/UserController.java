@@ -101,6 +101,13 @@ public class UserController {
         return ResponseEntity.ok(userService.deactivateUser(id));
     }
 
+    @PutMapping("/{id}/activate")
+    @RequireFreshMfa
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_USERS','EDIT_USER','DELETE_USER')")
+    public ResponseEntity<UserDto> activateUser(@PathVariable UUID id) {
+        return ResponseEntity.ok(userService.activateUser(id));
+    }
+
     @PutMapping("/{id}/role")
     @RequireFreshMfa
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_USERS','EDIT_USER','DELETE_USER')")

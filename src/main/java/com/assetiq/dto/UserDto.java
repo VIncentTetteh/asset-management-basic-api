@@ -2,7 +2,9 @@ package com.assetiq.dto;
 
 import com.assetiq.enums.UserStatus;
 import jakarta.validation.constraints.Email;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import lombok.Data;
 
 
@@ -24,7 +26,12 @@ public class UserDto {
 
     private String phone;
 
-    @NotBlank(message = "Password is required")
+    /**
+     * Write-only. Required when creating a user (checked in the service); ignored
+     * on PUT/PATCH, so edits no longer fail validation for want of a password.
+     */
+    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
+    @Size(min = 8, max = 128, message = "Password must be 8 to 128 characters")
     private String password;
 
     private String employeeId;
