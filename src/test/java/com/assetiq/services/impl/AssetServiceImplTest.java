@@ -1,5 +1,8 @@
 package com.assetiq.services.impl;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import com.assetiq.dto.AssetDto;
 import com.assetiq.enums.AssetStatus;
 import com.assetiq.enums.DepreciationMethod;
@@ -377,6 +380,22 @@ class AssetServiceImplTest {
         var history = service.getHistory(asset.getId());
 
         assertThat(history).singleElement().extracting(e -> e.getOccurredAt()).isEqualTo(at);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void listSortsServerSideByTheRequestedColumn() {
+        var pageable = ArgumentCaptor.forClass(Pageable.class);
+        when(assetRepository.findAll(any(Specification.class), pageable.capture()))
+                .thenReturn(Page.empty());
+
+        service.listPaged(new com.assetiq.dto.AssetFilterRequest(null, null, null, null, null, null, null, null,
+                null, null, null, null, 0, 20, "currentBookValue,desc"));
+        assertThat(pageable.getValue().getSort().getOrderFor("currentBookValue").isDescending()).isTrue();
+
+        service.listPaged(new com.assetiq.dto.AssetFilterRequest(null, null, null, null, null, null, null, null,
+                null, null, null, null, 0, 20, "organisation,asc"));
+        assertThat(pageable.getValue().getSort().getOrderFor("name")).isNotNull();
     }
 
     @Test

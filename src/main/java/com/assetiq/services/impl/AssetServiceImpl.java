@@ -712,7 +712,8 @@ public class AssetServiceImpl implements AssetService {
 
     private static final Set<String> SORTABLE_FIELDS = Set.of(
         "name", "assetTag", "serialNumber", "manufacturer", "model",
-        "purchaseCost", "purchaseDate", "createdAt", "updatedAt", "status", "condition"
+        "purchaseCost", "purchaseDate", "createdAt", "updatedAt", "status", "condition",
+        "assetType", "warrantyExpiryDate", "currentBookValue"
     );
 
     @Override
