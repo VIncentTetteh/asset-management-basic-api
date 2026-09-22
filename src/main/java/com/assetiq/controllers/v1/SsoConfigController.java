@@ -50,6 +50,8 @@ public class SsoConfigController {
      * Save or update OAuth2 settings (clientId, clientSecret, issuerUri, scopes,
      * redirectUri).
      * Also sets provider based on dto.provider (defaults to GOOGLE if omitted).
+     * One SSO type per organisation: replacing a SAML configuration needs
+     * {@code ?replaceExisting=true}, otherwise 409.
      */
     @Operation(summary = "Configure OAuth2 SSO for an organisation")
     @PutMapping("/oauth2")
@@ -57,14 +59,16 @@ public class SsoConfigController {
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_SECURITY_SETTINGS','MANAGE_ORGANIZATION_SETTINGS')")
     public ResponseEntity<OrgSsoConfigDto> saveOAuth2Config(
             @PathVariable UUID orgId,
+            @RequestParam(defaultValue = "false") boolean replaceExisting,
             @Valid @RequestBody OrgSsoConfigDto dto) {
-        return ResponseEntity.ok(ssoConfigService.saveOAuth2Config(orgId, dto));
+        return ResponseEntity.ok(ssoConfigService.saveOAuth2Config(orgId, dto, replaceExisting));
     }
 
     /**
      * PUT /api/v1/organisations/{orgId}/sso/saml
      * Save or update SAML settings (idpMetadataUrl, spEntityId,
-     * assertionConsumerServiceUrl).
+     * assertionConsumerServiceUrl). Replacing an OAuth2 configuration needs
+     * {@code ?replaceExisting=true}, otherwise 409.
      */
     @Operation(summary = "Configure SAML SSO for an organisation")
     @PutMapping("/saml")
@@ -72,8 +76,9 @@ public class SsoConfigController {
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_SECURITY_SETTINGS','MANAGE_ORGANIZATION_SETTINGS')")
     public ResponseEntity<OrgSsoConfigDto> saveSamlConfig(
             @PathVariable UUID orgId,
+            @RequestParam(defaultValue = "false") boolean replaceExisting,
             @Valid @RequestBody OrgSsoConfigDto dto) {
-        return ResponseEntity.ok(ssoConfigService.saveSamlConfig(orgId, dto));
+        return ResponseEntity.ok(ssoConfigService.saveSamlConfig(orgId, dto, replaceExisting));
     }
 
     /**

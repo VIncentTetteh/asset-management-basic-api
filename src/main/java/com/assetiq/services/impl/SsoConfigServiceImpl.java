@@ -44,16 +44,18 @@ public class SsoConfigServiceImpl implements SsoConfigService {
     @Override
     @Transactional
     @CacheEvict(value = CachingConfig.CacheNames.SSO_CONFIG_BY_ORG, key = "#orgId.toString()")
-    public OrgSsoConfigDto saveOAuth2Config(UUID orgId, OrgSsoConfigDto dto) {
+    public OrgSsoConfigDto saveOAuth2Config(UUID orgId, OrgSsoConfigDto dto, boolean replaceExisting) {
         Organisation org = requireOrg(orgId);
-        OrgSsoConfig config = ssoConfigRepository.findByOrganisationId(orgId)
-                .orElseGet(() -> {
-                    OrgSsoConfig c = new OrgSsoConfig();
-                    c.setOrganisation(org);
-                    return c;
-                });
-
         SsoProvider provider = dto.getProvider() != null ? dto.getProvider() : SsoProvider.GOOGLE;
+        if (provider == SsoProvider.SAML) {
+            throw new IllegalArgumentException("Use the SAML settings to configure SAML single sign-on");
+        }
+        OrgSsoConfig config = loadOrCreate(org);
+        if (isSaml(config)) {
+            requireReplaceConsent(replaceExisting, "SAML", "OAuth2");
+            clearSamlFields(config);
+            config.setEnabled(false);
+        }
         config.setProvider(provider);
         config.setClientId(dto.getClientId());
         // Only update the secret when a real value is supplied: the form sends ""
@@ -75,15 +77,14 @@ public class SsoConfigServiceImpl implements SsoConfigService {
     @Override
     @Transactional
     @CacheEvict(value = CachingConfig.CacheNames.SSO_CONFIG_BY_ORG, key = "#orgId.toString()")
-    public OrgSsoConfigDto saveSamlConfig(UUID orgId, OrgSsoConfigDto dto) {
+    public OrgSsoConfigDto saveSamlConfig(UUID orgId, OrgSsoConfigDto dto, boolean replaceExisting) {
         Organisation org = requireOrg(orgId);
-        OrgSsoConfig config = ssoConfigRepository.findByOrganisationId(orgId)
-                .orElseGet(() -> {
-                    OrgSsoConfig c = new OrgSsoConfig();
-                    c.setOrganisation(org);
-                    return c;
-                });
-
+        OrgSsoConfig config = loadOrCreate(org);
+        if (!isSaml(config) && hasOAuth2Settings(config)) {
+            requireReplaceConsent(replaceExisting, "OAuth2", "SAML");
+            clearOAuth2Fields(config);
+            config.setEnabled(false);
+        }
         config.setProvider(SsoProvider.SAML);
         config.setIdpMetadataUrl(dto.getIdpMetadataUrl());
         config.setSpEntityId(dto.getSpEntityId());
@@ -106,6 +107,53 @@ public class SsoConfigServiceImpl implements SsoConfigService {
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────
+
+    private OrgSsoConfig loadOrCreate(Organisation org) {
+        return ssoConfigRepository.findByOrganisationId(org.getId())
+                .orElseGet(() -> {
+                    OrgSsoConfig c = new OrgSsoConfig();
+                    c.setOrganisation(org);
+                    return c;
+                });
+    }
+
+    private static boolean isSaml(OrgSsoConfig config) {
+        return config.getProvider() == SsoProvider.SAML;
+    }
+
+    private static boolean hasOAuth2Settings(OrgSsoConfig config) {
+        return notBlank(config.getClientId()) || notBlank(config.getClientSecret())
+                || notBlank(config.getIssuerUri());
+    }
+
+    private static boolean notBlank(String s) {
+        return s != null && !s.isBlank();
+    }
+
+    /**
+     * The config row serves both types, so saving one silently overwrote the other.
+     * Replacing is allowed only when the caller says so explicitly.
+     */
+    private static void requireReplaceConsent(boolean replaceExisting, String existingType, String newType) {
+        if (!replaceExisting) {
+            throw new IllegalStateException("This organisation already uses " + existingType
+                    + " single sign-on. Saving " + newType + " settings replaces it and switches SSO off"
+                    + " until you enable it again. Confirm the replacement to continue.");
+        }
+    }
+
+    private static void clearSamlFields(OrgSsoConfig config) {
+        config.setIdpMetadataUrl(null);
+        config.setSpEntityId(null);
+        config.setAssertionConsumerServiceUrl(null);
+    }
+
+    private static void clearOAuth2Fields(OrgSsoConfig config) {
+        config.setClientId(null);
+        config.setClientSecret(null);
+        config.setIssuerUri(null);
+        config.setRedirectUri(null);
+    }
 
     private Organisation requireOrg(UUID orgId) {
         return organisationRepository.findByIdAndDeletedAtIsNull(orgId)
