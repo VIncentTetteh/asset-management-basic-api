@@ -1,6 +1,8 @@
 package com.assetiq.controllers.v1;
 
 import com.assetiq.dto.DisposalRecordDto;
+import com.assetiq.dto.DisposalRejectRequest;
+import com.assetiq.enums.DisposalStatus;
 import com.assetiq.security.annotation.RequireFreshMfa;
 import com.assetiq.services.DisposalService;
 import com.assetiq.validation.OnCreate;
@@ -12,7 +14,7 @@ import org.springframework.web.bind.annotation.*;
 
 import jakarta.validation.Valid;
 import java.time.LocalDate;
-import java.util.Set;
+import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -40,23 +42,20 @@ public class DisposalController {
         return ResponseEntity.ok(record);
     }
 
+    /**
+     * The organisation's disposals, newest first. Every filter is optional and they
+     * combine (AND): asset, disposal-date range (either end may be open), approver
+     * and status (e.g. {@code PENDING_APPROVAL} for the "awaiting approval" view).
+     */
     @GetMapping
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','DISPOSE_ASSET')")
-    public ResponseEntity<Set<DisposalRecordDto>> getDisposals(
+    public ResponseEntity<List<DisposalRecordDto>> getDisposals(
             @RequestParam(required = false) UUID assetId,
             @RequestParam(required = false) LocalDate startDate,
             @RequestParam(required = false) LocalDate endDate,
-            @RequestParam(required = false) UUID approvedById) {
-
-        if (assetId != null) {
-            return ResponseEntity.ok(disposalService.getDisposalsByAsset(assetId));
-        } else if (startDate != null && endDate != null) {
-            return ResponseEntity.ok(disposalService.getDisposalsByDateRange(startDate, endDate));
-        } else if (approvedById != null) {
-            return ResponseEntity.ok(disposalService.getDisposalsByApprover(approvedById));
-        }
-        // H8: No filter → return all for this tenant org
-        return ResponseEntity.ok(disposalService.getDisposalsByOrganisation(null));
+            @RequestParam(required = false) UUID approvedById,
+            @RequestParam(required = false) DisposalStatus status) {
+        return ResponseEntity.ok(disposalService.searchDisposals(assetId, startDate, endDate, approvedById, status));
     }
 
     @PutMapping("/{id}")
@@ -86,8 +85,9 @@ public class DisposalController {
     /** Refuses a pending disposal (the requester may use it to withdraw). */
     @PostMapping("/{id}/reject")
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','DISPOSE_ASSET')")
-    public ResponseEntity<DisposalRecordDto> rejectDisposal(@PathVariable UUID id) {
-        return ResponseEntity.ok(disposalService.rejectDisposal(id));
+    public ResponseEntity<DisposalRecordDto> rejectDisposal(@PathVariable UUID id,
+            @Valid @RequestBody DisposalRejectRequest request) {
+        return ResponseEntity.ok(disposalService.rejectDisposal(id, request.reason()));
     }
 
     @DeleteMapping("/{id}")

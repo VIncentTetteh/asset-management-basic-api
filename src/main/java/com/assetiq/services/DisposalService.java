@@ -19,6 +19,13 @@ public interface DisposalService {
     /** Checker step: a user other than the requester approves; the asset is disposed. */
     DisposalRecordDto approveDisposal(UUID id);
 
-    /** Refuses (or, by the requester, withdraws) a pending disposal. */
-    DisposalRecordDto rejectDisposal(UUID id);
+    /** Refuses (or, by the requester, withdraws) a pending disposal, recording why. */
+    DisposalRecordDto rejectDisposal(UUID id, String reason);
+
+    /**
+     * The organisation's disposals matching every given filter (null = any), newest
+     * disposal date first. Filters combine with AND.
+     */
+    java.util.List<DisposalRecordDto> searchDisposals(UUID assetId, LocalDate startDate, LocalDate endDate,
+                                                      UUID approvedById, com.assetiq.enums.DisposalStatus status);
 }

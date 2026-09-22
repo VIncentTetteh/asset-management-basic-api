@@ -2,10 +2,12 @@ package com.assetiq.dto;
 
 import com.assetiq.enums.DisposalMethod;
 import com.assetiq.enums.DisposalStatus;
+import com.assetiq.validation.NullOrNotBlank;
 import com.assetiq.validation.OnCreate;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Digits;
+import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
@@ -22,6 +24,13 @@ public class DisposalRecordDto {
 
     @NotNull(groups = OnCreate.class, message = "Asset ID is required")
     private UUID assetId;
+
+    /** The asset's name and tag, so a list needs no separate asset lookup. */
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private String assetName;
+
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private String assetTag;
 
     @NotNull(groups = OnCreate.class, message = "Disposal method is required")
     private DisposalMethod disposalMethod;
@@ -56,6 +65,23 @@ public class DisposalRecordDto {
     @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private Instant rejectedAt;
 
+    /** Why the disposal was rejected or withdrawn; set by the reject endpoint. */
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private String rejectionReason;
+
+    /** Approval trail display names (full name, else email). */
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private String requestedByName;
+
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private String approvedByName;
+
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private String rejectedByName;
+
+    /** Why the asset is being disposed of; required on create. */
+    @NotBlank(groups = OnCreate.class, message = "Disposal reason is required")
+    @NullOrNotBlank
     @Size(max = 5000)
     private String reason;
 

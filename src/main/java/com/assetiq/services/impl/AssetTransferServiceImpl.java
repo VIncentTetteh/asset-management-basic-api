@@ -306,9 +306,7 @@ public class AssetTransferServiceImpl extends TenantAwareService implements Asse
 
     /** A user's full name, or their email when no name is on file. */
     static String displayName(User user) {
-        String name = ((user.getFirstName() == null ? "" : user.getFirstName()) + " "
-                + (user.getLastName() == null ? "" : user.getLastName())).trim();
-        return name.isEmpty() ? user.getEmail() : name;
+        return com.assetiq.services.UserDisplayNames.of(user);
     }
 
     private User resolveCurrentUser(Organisation org) {

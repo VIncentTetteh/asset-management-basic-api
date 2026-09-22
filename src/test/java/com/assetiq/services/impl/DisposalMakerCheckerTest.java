@@ -184,11 +184,60 @@ class DisposalMakerCheckerTest {
     void rejectedDisposalIsClosedAndAssetUntouched() {
         DisposalRecordDto created = request();
         actAs(checker);
-        DisposalRecordDto rejected = service.rejectDisposal(created.getId());
+        DisposalRecordDto rejected = service.rejectDisposal(created.getId(), "  Still under warranty ");
         assertThat(rejected.getStatus()).isEqualTo(DisposalStatus.REJECTED);
         assertThat(rejected.getRejectedById()).isEqualTo(checker.getId());
+        assertThat(rejected.getRejectedByName()).isEqualTo("checker@example.com");
+        assertThat(rejected.getRejectionReason()).isEqualTo("Still under warranty");
         assertThat(asset.getStatus()).isEqualTo(AssetStatus.IN_USE);
         assertThatThrownBy(() -> service.approveDisposal(created.getId())).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void rejectingNeedsAReason() {
+        DisposalRecordDto created = request();
+        actAs(checker);
+        assertThatThrownBy(() -> service.rejectDisposal(created.getId(), " "))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(service.getDisposalById(created.getId()).getStatus()).isEqualTo(DisposalStatus.PENDING_APPROVAL);
+    }
+
+    @Test
+    void recordsCarryTheAssetAndTheRequesterName() {
+        asset.setAssetTag("FL-01");
+        maker.setFirstName("Kofi");
+        maker.setLastName("Boateng");
+        DisposalRecordDto created = request();
+        assertThat(created.getAssetName()).isEqualTo("Forklift");
+        assertThat(created.getAssetTag()).isEqualTo("FL-01");
+        assertThat(created.getRequestedByName()).isEqualTo("Kofi Boateng");
+    }
+
+    @Test
+    void searchCombinesStatusDateAndAssetFilters() {
+        DisposalRecord pendingInRange = record(DisposalStatus.PENDING_APPROVAL, LocalDate.of(2026, 3, 1));
+        DisposalRecord approvedInRange = record(DisposalStatus.APPROVED, LocalDate.of(2026, 3, 2));
+        DisposalRecord pendingOutOfRange = record(DisposalStatus.PENDING_APPROVAL, LocalDate.of(2025, 1, 1));
+        DisposalRecord legacy = record(null, LocalDate.of(2026, 3, 3));
+        when(disposalRepository.findByOrganisationAndDeletedAtIsNull(org))
+                .thenReturn(Set.of(pendingInRange, approvedInRange, pendingOutOfRange, legacy));
+
+        assertThat(service.searchDisposals(null, LocalDate.of(2026, 1, 1), null, null, DisposalStatus.PENDING_APPROVAL))
+                .extracting(DisposalRecordDto::getId).containsExactly(pendingInRange.getId());
+        assertThat(service.searchDisposals(asset.getId(), null, null, null, DisposalStatus.APPROVED))
+                .extracting(DisposalRecordDto::getId).containsExactly(legacy.getId(), approvedInRange.getId());
+        assertThat(service.searchDisposals(UUID.randomUUID(), null, null, null, null)).isEmpty();
+    }
+
+    private DisposalRecord record(DisposalStatus status, LocalDate date) {
+        DisposalRecord r = new DisposalRecord();
+        r.setId(UUID.randomUUID());
+        r.setAsset(asset);
+        r.setOrganisation(org);
+        r.setDisposalMethod(DisposalMethod.SALE);
+        r.setDisposalDate(date);
+        r.setStatus(status);
+        return r;
     }
 
     @Test

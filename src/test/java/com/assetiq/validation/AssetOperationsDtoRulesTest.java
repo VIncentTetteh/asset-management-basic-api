@@ -1,6 +1,10 @@
 package com.assetiq.validation;
 
+import com.assetiq.dto.DisposalRecordDto;
+import com.assetiq.dto.DisposalRejectRequest;
 import com.assetiq.dto.LocationDto;
+import com.assetiq.enums.DisposalMethod;
+import java.time.LocalDate;
 import com.assetiq.dto.MaintenanceRecordDto;
 import com.assetiq.enums.MaintenanceType;
 import jakarta.validation.groups.Default;
@@ -70,5 +74,19 @@ class AssetOperationsDtoRulesTest {
 
         assertThat(invalidFields(dto, Default.class, OnCreate.class)).containsExactlyInAnyOrder("scheduledDate", "cost");
         assertThat(invalidFields(dto)).containsExactly("cost");
+    }
+
+    @Test
+    void disposalNeedsAReasonOnCreateAndRejectionNeedsOne() {
+        DisposalRecordDto dto = new DisposalRecordDto();
+        dto.setAssetId(UUID.randomUUID());
+        dto.setDisposalMethod(DisposalMethod.SALE);
+        dto.setDisposalDate(LocalDate.of(2026, 9, 1));
+        assertThat(invalidFields(dto, Default.class, OnCreate.class)).containsExactly("reason");
+        dto.setReason("x".repeat(5001));
+        assertThat(invalidFields(dto)).containsExactly("reason");
+
+        assertThat(invalidFields(new DisposalRejectRequest(" "))).containsExactly("reason");
+        assertThat(invalidFields(new DisposalRejectRequest("Still under warranty"))).isEmpty();
     }
 }

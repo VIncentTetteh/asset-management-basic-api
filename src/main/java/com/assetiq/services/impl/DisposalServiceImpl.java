@@ -13,6 +13,7 @@ import com.assetiq.repositories.*;
 import com.assetiq.enums.NotificationType;
 import com.assetiq.services.CurrencyResolver;
 import com.assetiq.services.DisposalService;
+import com.assetiq.services.UserDisplayNames;
 import com.assetiq.services.NotificationService;
 import com.assetiq.services.TenantAwareService;
 import org.springframework.security.access.AccessDeniedException;
@@ -133,7 +134,7 @@ public class DisposalServiceImpl extends TenantAwareService implements DisposalS
     }
 
     @Override
-    public DisposalRecordDto rejectDisposal(UUID id) {
+    public DisposalRecordDto rejectDisposal(UUID id, String reason) {
         Organisation org = requireTenantOrg();
         DisposalRecord record = disposalRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
                 .orElseThrow(() -> new IllegalArgumentException("Disposal record not found"));
@@ -141,9 +142,13 @@ public class DisposalServiceImpl extends TenantAwareService implements DisposalS
             throw new IllegalStateException("Only a pending disposal can be rejected (this one is "
                     + record.getStatus() + ")");
         }
+        if (reason == null || reason.isBlank()) {
+            throw new IllegalArgumentException("A rejection reason is required");
+        }
         record.setStatus(DisposalStatus.REJECTED);
         record.setRejectedBy(resolveCurrentUser(org));
         record.setRejectedAt(Instant.now());
+        record.setRejectionReason(reason.trim());
         return mapToDto(disposalRepository.save(record));
     }
 
@@ -175,6 +180,29 @@ public class DisposalServiceImpl extends TenantAwareService implements DisposalS
         return disposalRepository.findByOrganisationAndDeletedAtIsNull(org).stream()
                 .map(this::mapToDto)
                 .collect(Collectors.toSet());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public java.util.List<DisposalRecordDto> searchDisposals(UUID assetId, LocalDate startDate, LocalDate endDate,
+                                                             UUID approvedById, DisposalStatus status) {
+        Organisation org = requireTenantOrg();
+        return disposalRepository.findByOrganisationAndDeletedAtIsNull(org).stream()
+                .filter(r -> assetId == null || assetId.equals(r.getAsset().getId()))
+                .filter(r -> startDate == null || !r.getDisposalDate().isBefore(startDate))
+                .filter(r -> endDate == null || !r.getDisposalDate().isAfter(endDate))
+                .filter(r -> approvedById == null
+                        || (r.getApprovedBy() != null && approvedById.equals(r.getApprovedBy().getId())))
+                .filter(r -> status == null || effectiveStatus(r) == status)
+                .sorted(java.util.Comparator.comparing(DisposalRecord::getDisposalDate,
+                        java.util.Comparator.nullsLast(java.util.Comparator.reverseOrder())))
+                .map(this::mapToDto)
+                .toList();
+    }
+
+    /** Rows from before V44 have no status; they were all effective disposals. */
+    private static DisposalStatus effectiveStatus(DisposalRecord r) {
+        return r.getStatus() != null ? r.getStatus() : DisposalStatus.APPROVED;
     }
 
     @Override
@@ -297,22 +325,28 @@ public class DisposalServiceImpl extends TenantAwareService implements DisposalS
         DisposalRecordDto dto = new DisposalRecordDto();
         dto.setId(record.getId());
         dto.setAssetId(record.getAsset().getId());
+        dto.setAssetName(record.getAsset().getName());
+        dto.setAssetTag(record.getAsset().getAssetTag());
         dto.setDisposalMethod(record.getDisposalMethod());
         dto.setDisposalDate(record.getDisposalDate());
         dto.setSaleValue(record.getSaleValue());
         dto.setCurrency(record.effectiveCurrency());
-        dto.setStatus(record.getStatus() != null ? record.getStatus() : DisposalStatus.APPROVED);
+        dto.setStatus(effectiveStatus(record));
         if (record.getRequestedBy() != null) {
             dto.setRequestedById(record.getRequestedBy().getId());
+            dto.setRequestedByName(UserDisplayNames.of(record.getRequestedBy()));
         }
         if (record.getApprovedBy() != null) {
             dto.setApprovedById(record.getApprovedBy().getId());
+            dto.setApprovedByName(UserDisplayNames.of(record.getApprovedBy()));
         }
         dto.setApprovedAt(record.getApprovedAt());
         if (record.getRejectedBy() != null) {
             dto.setRejectedById(record.getRejectedBy().getId());
+            dto.setRejectedByName(UserDisplayNames.of(record.getRejectedBy()));
         }
         dto.setRejectedAt(record.getRejectedAt());
+        dto.setRejectionReason(record.getRejectionReason());
         dto.setReason(record.getReason());
         dto.setComplianceDocumentUrl(record.getComplianceDocumentUrl());
         dto.setOrganisationId(record.getOrganisation().getId());

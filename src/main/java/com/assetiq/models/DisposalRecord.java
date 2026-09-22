@@ -61,6 +61,10 @@ public class DisposalRecord extends BaseEntity {
 
     private Instant rejectedAt;
 
+    /** Why the disposal was rejected or withdrawn (V49). */
+    @Column(columnDefinition = "TEXT")
+    private String rejectionReason;
+
     /** True when this disposal actually took the asset off the books. */
     public boolean isEffective() {
         return status == null || status == DisposalStatus.APPROVED;
