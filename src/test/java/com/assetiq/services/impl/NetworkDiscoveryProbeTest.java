@@ -3,10 +3,8 @@ package com.assetiq.services.impl;
 import com.assetiq.enums.DeviceStatus;
 import com.assetiq.models.DiscoveredDevice;
 import com.assetiq.models.Organisation;
-import com.assetiq.repositories.AssetRepository;
 import com.assetiq.repositories.DiscoveredDeviceRepository;
 import com.assetiq.repositories.OrganisationRepository;
-import com.assetiq.services.UsageLimitService;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -65,7 +63,7 @@ class NetworkDiscoveryProbeTest {
     void rescanRevivesASoftDeletedDeviceInsteadOfDuplicatingIt() {
         DiscoveredDeviceRepository repo = mock(DiscoveredDeviceRepository.class);
         NetworkDiscoveryServiceImpl service = new NetworkDiscoveryServiceImpl(mock(OrganisationRepository.class),
-                repo, mock(AssetRepository.class), mock(UsageLimitService.class));
+                repo, mock(com.assetiq.services.AssetService.class));
         Organisation org = new Organisation();
         DiscoveredDevice deleted = new DiscoveredDevice();
         deleted.setId(UUID.randomUUID());

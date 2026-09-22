@@ -1,5 +1,7 @@
 package com.assetiq.controllers.v1;
 
+import com.assetiq.enums.DeviceStatus;
+import com.assetiq.dto.PromoteDeviceRequest;
 import jakarta.validation.Valid;
 import com.assetiq.dto.DiscoveredDeviceDto;
 import com.assetiq.dto.NetworkScanRequestDto;
@@ -47,10 +49,12 @@ public class NetworkDiscoveryController {
 
     /**
      * GET /api/v1/discovery/devices
-     * List all discovered devices for the current tenant.
+     * List discovered devices for the current tenant; {@code status} narrows to one
+     * status (the same buckets /summary counts).
      */
     @GetMapping("/devices")
     public ResponseEntity<PagedResponseDto<DiscoveredDeviceDto>> list(
+            @RequestParam(required = false) DeviceStatus status,
             @RequestParam(required = false) Integer limit,
             @RequestParam(required = false) Long offset,
             @PageableDefault(size = 20, sort = "lastSeenAt") Pageable pageable) {
@@ -60,7 +64,7 @@ public class NetworkDiscoveryController {
                 : (long) pageable.getPageNumber() * effectiveLimit;
 
         Pageable effectivePageable = PageRequest.of((int) (effectiveOffset / effectiveLimit), effectiveLimit, pageable.getSort());
-        Page<DiscoveredDeviceDto> page = discoveryService.list(effectivePageable);
+        Page<DiscoveredDeviceDto> page = discoveryService.list(effectivePageable, status);
 
         PagedResponseDto<DiscoveredDeviceDto> response = new PagedResponseDto<>();
         response.setTotal(page.getTotalElements());
@@ -80,12 +84,14 @@ public class NetworkDiscoveryController {
 
     /**
      * POST /api/v1/discovery/devices/{id}/promote
-     * Promote a discovered device to a managed Asset.
+     * Promote a discovered device to a managed Asset. The optional body names the
+     * asset and places it in a category and location.
      */
     @PostMapping("/devices/{id}/promote")
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_NETWORK_DISCOVERY')")
-    public ResponseEntity<Map<String, Object>> promote(@PathVariable UUID id) {
-        return ResponseEntity.ok(discoveryService.promote(id));
+    public ResponseEntity<Map<String, Object>> promote(@PathVariable UUID id,
+            @Valid @RequestBody(required = false) PromoteDeviceRequest request) {
+        return ResponseEntity.ok(discoveryService.promote(id, request));
     }
 
     /**

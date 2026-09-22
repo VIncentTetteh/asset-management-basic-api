@@ -17,6 +17,9 @@ public interface DiscoveredDeviceRepository extends JpaRepository<DiscoveredDevi
     Page<DiscoveredDevice> findByOrganisationAndDeletedAtIsNullOrderByLastSeenAtDesc(
             Organisation organisation, Pageable pageable);
 
+    Page<DiscoveredDevice> findByOrganisationAndStatusAndDeletedAtIsNullOrderByLastSeenAtDesc(
+            Organisation organisation, com.assetiq.enums.DeviceStatus status, Pageable pageable);
+
     Optional<DiscoveredDevice> findByIpAddressAndOrganisationAndDeletedAtIsNull(
             String ipAddress, Organisation organisation);
 

@@ -1,20 +1,20 @@
 package com.assetiq.services.impl;
 
+import com.assetiq.services.AssetService;
+import com.assetiq.dto.PromoteDeviceRequest;
+import com.assetiq.dto.AssetDto;
 import com.assetiq.dto.DiscoveredDeviceDto;
 import com.assetiq.dto.NetworkScanRequestDto;
 import com.assetiq.enums.AssetStatus;
 import com.assetiq.enums.AssetType;
 import com.assetiq.enums.DeviceStatus;
 import com.assetiq.enums.DiscoveryMethod;
-import com.assetiq.models.Asset;
 import com.assetiq.models.DiscoveredDevice;
 import com.assetiq.models.Organisation;
-import com.assetiq.repositories.AssetRepository;
 import com.assetiq.repositories.DiscoveredDeviceRepository;
 import com.assetiq.repositories.OrganisationRepository;
 import com.assetiq.services.NetworkDiscoveryService;
 import com.assetiq.services.TenantAwareService;
-import com.assetiq.services.UsageLimitService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
@@ -44,17 +44,14 @@ public class NetworkDiscoveryServiceImpl extends TenantAwareService implements N
             java.util.regex.Pattern.compile("^(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})$");
 
     private final DiscoveredDeviceRepository deviceRepo;
-    private final AssetRepository assetRepository;
-    private final UsageLimitService usageLimitService;
+    private final AssetService assetService;
 
     public NetworkDiscoveryServiceImpl(OrganisationRepository organisationRepository,
                                        DiscoveredDeviceRepository deviceRepo,
-                                       AssetRepository assetRepository,
-                                       UsageLimitService usageLimitService) {
+                                       AssetService assetService) {
         super(organisationRepository);
         this.deviceRepo = deviceRepo;
-        this.assetRepository = assetRepository;
-        this.usageLimitService = usageLimitService;
+        this.assetService = assetService;
     }
 
     // ── Scan ─────────────────────────────────────────────────────────────────
@@ -291,10 +288,12 @@ public class NetworkDiscoveryServiceImpl extends TenantAwareService implements N
 
     @Override
     @Transactional(readOnly = true)
-    public Page<DiscoveredDeviceDto> list(Pageable pageable) {
+    public Page<DiscoveredDeviceDto> list(Pageable pageable, DeviceStatus status) {
         Organisation org = requireTenantOrg();
-        return deviceRepo.findByOrganisationAndDeletedAtIsNullOrderByLastSeenAtDesc(org, pageable)
-                .map(this::toDto);
+        Page<DiscoveredDevice> page = status == null
+                ? deviceRepo.findByOrganisationAndDeletedAtIsNullOrderByLastSeenAtDesc(org, pageable)
+                : deviceRepo.findByOrganisationAndStatusAndDeletedAtIsNullOrderByLastSeenAtDesc(org, status, pageable);
+        return page.map(this::toDto);
     }
 
     @Override
@@ -307,7 +306,7 @@ public class NetworkDiscoveryServiceImpl extends TenantAwareService implements N
     }
 
     @Override
-    public Map<String, Object> promote(UUID deviceId) {
+    public Map<String, Object> promote(UUID deviceId, PromoteDeviceRequest request) {
         Organisation org = requireTenantOrg();
         DiscoveredDevice device = deviceRepo.findByIdAndOrganisationAndDeletedAtIsNull(deviceId, org)
                 .orElseThrow(() -> new jakarta.persistence.EntityNotFoundException("Discovered device not found: " + deviceId));
@@ -316,16 +315,10 @@ public class NetworkDiscoveryServiceImpl extends TenantAwareService implements N
             throw new IllegalStateException("Device already promoted to asset: " + device.getPromotedAssetId());
         }
 
-        // Promotion creates a real asset, so it counts against the plan's asset limit.
-        usageLimitService.assertCanCreateAsset(org);
-
-        Asset asset = new Asset();
-        asset.setName(device.getHostname() != null ? device.getHostname() : device.getIpAddress());
-        asset.setDescription("Auto-promoted from network discovery. IP: " + device.getIpAddress());
-        asset.setAssetType(AssetType.HARDWARE);
-        asset.setStatus(AssetStatus.IN_USE);
-        asset.setOrganisation(org);
-        asset = assetRepository.save(asset);
+        // Registered through the asset service, so promotion gets the same plan limit,
+        // duplicate-name check, category defaults (prefix tag, warranty), currency and
+        // notifications as any other new asset.
+        AssetDto asset = assetService.create(promotedAsset(device, request));
 
         device.setPromotedAssetId(asset.getId());
         device.setStatus(DeviceStatus.PROMOTED);
@@ -336,6 +329,38 @@ public class NetworkDiscoveryServiceImpl extends TenantAwareService implements N
         result.put("assetName", asset.getName());
         result.put("deviceId", deviceId);
         return result;
+    }
+
+    /**
+     * The asset a device becomes: the requested name (else hostname, else IP), the
+     * chosen category and location, and a description recording what the scan saw.
+     */
+    static AssetDto promotedAsset(DiscoveredDevice device, PromoteDeviceRequest request) {
+        AssetDto dto = new AssetDto();
+        String requested = request == null || request.name() == null ? null : request.name().trim();
+        String fallback = device.getHostname() != null && !device.getHostname().isBlank()
+                ? device.getHostname().trim() : device.getIpAddress();
+        dto.setName(requested != null && !requested.isEmpty() ? requested : fallback);
+        if (request != null) {
+            dto.setCategoryId(request.categoryId());
+            dto.setLocationId(request.locationId());
+        }
+        StringBuilder description = new StringBuilder("Promoted from network discovery.");
+        description.append("\nIP address: ").append(device.getIpAddress());
+        if (device.getHostname() != null && !device.getHostname().isBlank()) {
+            description.append("\nHostname: ").append(device.getHostname().trim());
+        }
+        if (device.getDeviceType() != null && !device.getDeviceType().isBlank()) {
+            description.append("\nDevice type: ").append(device.getDeviceType());
+        }
+        if (device.getOpenPorts() != null && !device.getOpenPorts().isBlank()) {
+            description.append("\nOpen ports: ").append(device.getOpenPorts());
+        }
+        dto.setDescription(description.toString());
+        dto.setAssetType(AssetType.HARDWARE);
+        // Seen live on the network, so in service.
+        dto.setStatus(AssetStatus.IN_USE);
+        return dto;
     }
 
     @Override
@@ -355,12 +380,16 @@ public class NetworkDiscoveryServiceImpl extends TenantAwareService implements N
         long online   = all.stream().filter(d -> DeviceStatus.ONLINE.equals(d.getStatus())).count();
         long offline  = all.stream().filter(d -> DeviceStatus.OFFLINE.equals(d.getStatus())).count();
         long promoted = all.stream().filter(d -> DeviceStatus.PROMOTED.equals(d.getStatus())).count();
+        long unknown  = all.stream().filter(d -> d.getStatus() == null || DeviceStatus.UNKNOWN.equals(d.getStatus())).count();
 
         Map<String, Object> map = new LinkedHashMap<>();
         map.put("total", all.size());
         map.put("online", online);
         map.put("offline", offline);
         map.put("promoted", promoted);
+        // Each device has exactly one status, so the four counts add up to the total
+        // and match what GET /devices?status= returns.
+        map.put("unknown", unknown);
         return map;
     }
 
