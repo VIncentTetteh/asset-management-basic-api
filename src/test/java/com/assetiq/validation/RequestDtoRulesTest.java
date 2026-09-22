@@ -1,11 +1,13 @@
 package com.assetiq.validation;
 
+import com.assetiq.dto.DepreciationPolicyDto;
 import com.assetiq.dto.ExpenseDto;
 import com.assetiq.enums.ExpenseCategory;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
 import jakarta.validation.ValidatorFactory;
+import jakarta.validation.groups.Default;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -64,5 +66,33 @@ class RequestDtoRulesTest {
         dto.setCategory(ExpenseCategory.OTHER);
 
         assertThat(invalidFields(dto)).isEmpty();
+    }
+
+    @Test
+    void depreciationPolicy_createRequiresNameAndMethod() {
+        assertThat(invalidFields(new DepreciationPolicyDto(), Default.class, OnCreate.class))
+                .contains("name", "method");
+    }
+
+    @Test
+    void depreciationPolicy_lifeAtLeastOneMonthAndResidualWithin0To100() {
+        DepreciationPolicyDto dto = new DepreciationPolicyDto();
+        dto.setUsefulLifeMonths(0);
+        dto.setSalvageValuePercent(new BigDecimal("100.01"));
+
+        assertThat(invalidFields(dto)).containsExactlyInAnyOrder("usefulLifeMonths", "salvageValuePercent");
+
+        dto.setUsefulLifeMonths(null);
+        dto.setSalvageValuePercent(new BigDecimal("-1"));
+        assertThat(invalidFields(dto)).containsExactly("salvageValuePercent");
+    }
+
+    @Test
+    void depreciationPolicy_blankLifeAndResidualAreAllowed() {
+        DepreciationPolicyDto dto = new DepreciationPolicyDto();
+        dto.setName("IT");
+        dto.setMethod(com.assetiq.enums.DepreciationMethod.UNITS_OF_PRODUCTION);
+
+        assertThat(invalidFields(dto, Default.class, OnCreate.class)).isEmpty();
     }
 }
