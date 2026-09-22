@@ -75,6 +75,7 @@ class AssetServiceImplTest {
     @Mock NotificationService notificationService;
     @Mock EmailService emailService;
     @Mock CurrencyResolver currencyResolver;
+    @Mock com.assetiq.repositories.CheckoutRecordRepository checkoutRecordRepository;
 
     private AssetServiceImpl service;
     private Organisation org;
@@ -88,7 +89,7 @@ class AssetServiceImplTest {
                 purchaseOrderRepository, entityManager, usageLimitService, auditEventRepository,
                 assetTransferRepository, maintenanceRecordRepository, disposalRecordRepository,
                 notificationService, emailService, currencyResolver,
-                MoneyTestSupport.aggregatorWithRates(Map.of("USD", "15")));
+                MoneyTestSupport.aggregatorWithRates(Map.of("USD", "15")), checkoutRecordRepository);
 
         org = new Organisation();
         org.setId(UUID.randomUUID());
@@ -213,6 +214,58 @@ class AssetServiceImplTest {
             assertThatThrownBy(() -> service.update(asset.getId(), dto))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("cannot be cleared");
+        }
+
+        @Test
+        void optionalScalarsAndCategoryCanBeCleared() {
+            asset.setCategory(entity(new com.assetiq.models.Category()));
+            asset.setAssetTag("LT-1");
+            asset.setSerialNumber("SN");
+            asset.setManufacturer("Dell");
+            asset.setModel("XPS");
+            asset.setDescription("desc");
+            asset.setPurchaseDate(java.time.LocalDate.of(2024, 1, 1));
+            asset.setWarrantyExpiryDate(java.time.LocalDate.of(2026, 1, 1));
+            asset.setDepreciationMethod(com.assetiq.enums.DepreciationMethod.DECLINING_BALANCE);
+            asset.setUsefulLifeMonths(24);
+            asset.setResidualValue(java.math.BigDecimal.TEN);
+            asset.setCostCenter("CC");
+            AssetDto dto = rename("Edited");
+            dto.setClearFields(List.of("categoryId", "assetTag", "serialNumber", "manufacturer", "model",
+                    "description", "purchaseDate", "warrantyExpiryDate", "depreciationMethod",
+                    "usefulLifeMonths", "residualValue", "costCenter"));
+
+            service.update(asset.getId(), dto);
+
+            assertThat(asset.getCategory()).isNull();
+            assertThat(asset.getAssetTag()).isNull();
+            assertThat(asset.getSerialNumber()).isNull();
+            assertThat(asset.getManufacturer()).isNull();
+            assertThat(asset.getModel()).isNull();
+            assertThat(asset.getDescription()).isNull();
+            assertThat(asset.getPurchaseDate()).isNull();
+            assertThat(asset.getWarrantyExpiryDate()).isNull();
+            assertThat(asset.getDepreciationMethod()).isNull();
+            assertThat(asset.getUsefulLifeMonths()).isNull();
+            assertThat(asset.getResidualValue()).isNull();
+            assertThat(asset.getCostCenter()).isNull();
+        }
+
+        @Test
+        void unassignReturnsAnInUseAssetToStock() {
+            when(checkoutRecordRepository.findByAssetAndStatusAndDeletedAtIsNull(any(), any()))
+                    .thenReturn(Optional.empty());
+            service.unassignUser(asset.getId());
+            assertThat(asset.getAssignedUser()).isNull();
+            assertThat(asset.getStatus()).isEqualTo(AssetStatus.IN_STOCK);
+        }
+
+        @Test
+        void unassignKeepsACheckedOutAssetInUse() {
+            when(checkoutRecordRepository.findByAssetAndStatusAndDeletedAtIsNull(any(), any()))
+                    .thenReturn(Optional.of(new com.assetiq.models.CheckoutRecord()));
+            service.unassignUser(asset.getId());
+            assertThat(asset.getStatus()).isEqualTo(AssetStatus.IN_USE);
         }
 
         @Test

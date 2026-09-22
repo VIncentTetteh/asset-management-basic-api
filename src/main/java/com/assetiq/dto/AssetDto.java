@@ -147,11 +147,11 @@ public class AssetDto {
     private BigDecimal effectiveResidualValue;
 
     /**
-     * Update only: optional relations to clear, by DTO field name. A null field in
-     * an update means "leave unchanged", so clearing needs to be explicit. Allowed:
-     * {@code departmentId}, {@code locationId}, {@code supplierId},
-     * {@code purchaseOrderId}, {@code assignedUserId}, {@code parentAssetId},
-     * {@code insurancePremiumPerYear}, {@code downtimeCostPerDay}, {@code insurancePolicyExpiry}.
+     * Update only: optional fields to clear, by DTO field name. A null field in an
+     * update means "leave unchanged", so clearing needs to be explicit. The accepted
+     * names are {@code AssetServiceImpl.CLEARABLE_FIELDS}: every optional relation,
+     * identifier, date, cost, TCO input and depreciation override (clearing one of
+     * those falls back to the category's depreciation policy).
      */
     @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
     private List<String> clearFields;

@@ -14,6 +14,7 @@ import com.assetiq.enums.AssetStatus;
 import com.assetiq.models.*;
 import com.assetiq.multitenancy.TenantContext;
 import com.assetiq.repositories.*;
+import com.assetiq.enums.CheckoutStatus;
 import com.assetiq.enums.NotificationType;
 import com.assetiq.assets.AssetLabels;
 import com.assetiq.exceptions.ResourceNotFoundException;
@@ -75,6 +76,7 @@ public class AssetServiceImpl implements AssetService {
     private final EmailService emailService;
     private final CurrencyResolver currencyResolver;
     private final MoneyAggregator moneyAggregator;
+    private final CheckoutRecordRepository checkoutRecordRepository;
 
     @Value("${app.email.base-url:http://localhost:3000}")
     private String baseUrl;
@@ -96,7 +98,8 @@ public class AssetServiceImpl implements AssetService {
             NotificationService notificationService,
             EmailService emailService,
             CurrencyResolver currencyResolver,
-            MoneyAggregator moneyAggregator) {
+            MoneyAggregator moneyAggregator,
+            CheckoutRecordRepository checkoutRecordRepository) {
         this.assetRepository = assetRepository;
         this.departmentRepository = departmentRepository;
         this.organisationRepository = organisationRepository;
@@ -115,6 +118,7 @@ public class AssetServiceImpl implements AssetService {
         this.emailService = emailService;
         this.currencyResolver = currencyResolver;
         this.moneyAggregator = moneyAggregator;
+        this.checkoutRecordRepository = checkoutRecordRepository;
     }
 
     // ────────────────────────────────────────────────────
@@ -138,10 +142,54 @@ public class AssetServiceImpl implements AssetService {
     static final Set<String> ASSIGN_AUTHORITIES =
             Set.of("ROLE_ADMIN", "ROLE_ORG_ADMIN", "EDIT_ASSET", "TRANSFER_ASSET");
 
-    /** Relations an update may clear explicitly through {@link AssetDto#getClearFields()}. */
-    static final Set<String> CLEARABLE_FIELDS =
-            Set.of("departmentId", "locationId", "supplierId", "purchaseOrderId", "assignedUserId",
-                    "parentAssetId", "insurancePremiumPerYear", "downtimeCostPerDay", "insurancePolicyExpiry");
+    /**
+     * Optional fields an update may clear explicitly through {@link AssetDto#getClearFields()},
+     * each with the DTO value that must not be sent alongside the clear and the setter that
+     * clears it. Clearing a depreciation override (method, life, residual) makes the asset fall
+     * back to its category's depreciation policy.
+     */
+    private static final Map<String, ClearableField> CLEARABLE = Map.ofEntries(
+            Map.entry("departmentId", new ClearableField(AssetDto::getDepartmentId, a -> a.setDepartment(null))),
+            Map.entry("locationId", new ClearableField(AssetDto::getLocationId, a -> a.setLocation(null))),
+            Map.entry("supplierId", new ClearableField(AssetDto::getSupplierId, a -> a.setSupplier(null))),
+            Map.entry("purchaseOrderId", new ClearableField(AssetDto::getPurchaseOrderId, a -> a.setPurchaseOrder(null))),
+            Map.entry("assignedUserId", new ClearableField(AssetDto::getAssignedUserId, a -> a.setAssignedUser(null))),
+            Map.entry("parentAssetId", new ClearableField(AssetDto::getParentAssetId, a -> a.setParentAsset(null))),
+            Map.entry("categoryId", new ClearableField(AssetDto::getCategoryId, a -> a.setCategory(null))),
+            Map.entry("insurancePremiumPerYear",
+                    new ClearableField(AssetDto::getInsurancePremiumPerYear, a -> a.setInsurancePremiumPerYear(null))),
+            Map.entry("downtimeCostPerDay",
+                    new ClearableField(AssetDto::getDowntimeCostPerDay, a -> a.setDowntimeCostPerDay(null))),
+            Map.entry("insurancePolicyExpiry",
+                    new ClearableField(AssetDto::getInsurancePolicyExpiry, a -> a.setInsurancePolicyExpiry(null))),
+            Map.entry("depreciationMethod",
+                    new ClearableField(AssetDto::getDepreciationMethod, a -> a.setDepreciationMethod(null))),
+            Map.entry("usefulLifeMonths",
+                    new ClearableField(AssetDto::getUsefulLifeMonths, a -> a.setUsefulLifeMonths(null))),
+            Map.entry("residualValue", new ClearableField(AssetDto::getResidualValue, a -> a.setResidualValue(null))),
+            Map.entry("purchaseCost", new ClearableField(AssetDto::getPurchaseCost, a -> a.setPurchaseCost(null))),
+            Map.entry("purchaseDate", new ClearableField(AssetDto::getPurchaseDate, a -> a.setPurchaseDate(null))),
+            Map.entry("warrantyExpiryDate",
+                    new ClearableField(AssetDto::getWarrantyExpiryDate, a -> a.setWarrantyExpiryDate(null))),
+            Map.entry("assetTag", new ClearableField(AssetDto::getAssetTag, a -> a.setAssetTag(null))),
+            Map.entry("serialNumber", new ClearableField(AssetDto::getSerialNumber, a -> a.setSerialNumber(null))),
+            Map.entry("manufacturer", new ClearableField(AssetDto::getManufacturer, a -> a.setManufacturer(null))),
+            Map.entry("model", new ClearableField(AssetDto::getModel, a -> a.setModel(null))),
+            Map.entry("description", new ClearableField(AssetDto::getDescription, a -> a.setDescription(null))),
+            Map.entry("invoiceId", new ClearableField(AssetDto::getInvoiceId, a -> a.setInvoiceId(null))),
+            Map.entry("insurancePolicyId",
+                    new ClearableField(AssetDto::getInsurancePolicyId, a -> a.setInsurancePolicyId(null))),
+            Map.entry("costCenter", new ClearableField(AssetDto::getCostCenter, a -> a.setCostCenter(null))),
+            Map.entry("procurementType",
+                    new ClearableField(AssetDto::getProcurementType, a -> a.setProcurementType(null))));
+
+    /** Names accepted in {@link AssetDto#getClearFields()}. */
+    static final Set<String> CLEARABLE_FIELDS = CLEARABLE.keySet();
+
+    /** How one clearable field is read from the request and cleared on the entity. */
+    private record ClearableField(java.util.function.Function<AssetDto, Object> requested,
+                                  java.util.function.Consumer<Asset> clear) {
+    }
 
     private static boolean hasAnyAuthority(Set<String> allowed) {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
@@ -436,6 +484,12 @@ public class AssetServiceImpl implements AssetService {
         Asset asset = assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(assetId, org)
                 .orElseThrow(() -> new IllegalArgumentException("Asset not found"));
         asset.setAssignedUser(null);
+        // Assigning moved an in-stock asset to IN_USE; unassigning moves it back, unless an
+        // active checkout is what keeps it in use.
+        if (asset.getStatus() == AssetStatus.IN_USE
+                && checkoutRecordRepository.findByAssetAndStatusAndDeletedAtIsNull(asset, CheckoutStatus.ACTIVE).isEmpty()) {
+            asset.setStatus(AssetStatus.IN_STOCK);
+        }
         return toDto(assetRepository.save(asset));
     }
 
@@ -531,15 +585,7 @@ public class AssetServiceImpl implements AssetService {
                     .ifPresent(asset::setPurchaseOrder);
         }
 
-        if (clears.contains("departmentId")) asset.setDepartment(null);
-        if (clears.contains("locationId")) asset.setLocation(null);
-        if (clears.contains("supplierId")) asset.setSupplier(null);
-        if (clears.contains("purchaseOrderId")) asset.setPurchaseOrder(null);
-        if (clears.contains("assignedUserId")) asset.setAssignedUser(null);
-        if (clears.contains("parentAssetId")) asset.setParentAsset(null);
-        if (clears.contains("insurancePremiumPerYear")) asset.setInsurancePremiumPerYear(null);
-        if (clears.contains("downtimeCostPerDay")) asset.setDowntimeCostPerDay(null);
-        if (clears.contains("insurancePolicyExpiry")) asset.setInsurancePolicyExpiry(null);
+        clears.forEach(field -> CLEARABLE.get(field).clear().accept(asset));
 
         refreshBookValue(asset);
         Asset saved = assetRepository.save(asset);
@@ -602,18 +648,8 @@ public class AssetServiceImpl implements AssetService {
                         + ". Clearable fields: " + new TreeSet<>(CLEARABLE_FIELDS));
             }
         }
-        Map<String, Object> provided = new HashMap<>();
-        provided.put("departmentId", dto.getDepartmentId());
-        provided.put("locationId", dto.getLocationId());
-        provided.put("supplierId", dto.getSupplierId());
-        provided.put("purchaseOrderId", dto.getPurchaseOrderId());
-        provided.put("assignedUserId", dto.getAssignedUserId());
-        provided.put("parentAssetId", dto.getParentAssetId());
-        provided.put("insurancePremiumPerYear", dto.getInsurancePremiumPerYear());
-        provided.put("downtimeCostPerDay", dto.getDowntimeCostPerDay());
-        provided.put("insurancePolicyExpiry", dto.getInsurancePolicyExpiry());
         for (String field : clears) {
-            if (provided.get(field) != null) {
+            if (CLEARABLE.get(field).requested().apply(dto) != null) {
                 throw new IllegalArgumentException("Field is both set and cleared: " + field);
             }
         }
