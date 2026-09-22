@@ -98,7 +98,6 @@ class DtoColumnConstraintConsistencyTest {
     private static final Map<String, String> NOT_NULL_EXEMPTIONS = Map.ofEntries(
             Map.entry("CheckoutRecordDto.checkedOutAt", "stamped with now() by CheckoutServiceImpl"),
             Map.entry("ExchangeRateDto.effectiveDate", "defaults to today in ExchangeRateServiceImpl"),
-            Map.entry("LeaseRecordDto.status", "create sets ACTIVE; update keeps the stored status when null"),
             Map.entry("OrganisationDto.billingCurrency",
                     "derived from the country on create; update keeps the stored value when blank"),
             Map.entry("RiskRegisterDto.riskScore", "computed from likelihood x impact in @PrePersist/@PreUpdate"));
