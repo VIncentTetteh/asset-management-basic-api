@@ -194,59 +194,50 @@ public class AuthController {
     /**
      * Login user and return JWT token.
      * In multi-tenant deployments the same email can exist in multiple organisations.
-     * Supply {@code organisationId} to disambiguate; it is required when the email
-     * belongs to more than one organisation.
+     * Supply {@code organisationId} to disambiguate. Without it, an email in several
+     * organisations signs in to the one account that accepts the password; if more
+     * than one does, the answer is 409 {@code ORGANISATION_REQUIRED} listing only
+     * those organisations (see {@link #resolveAmongTenants}).
      */
     @PostMapping("/login")
     public ResponseEntity<?> login(@Valid @RequestBody LoginRequest request,
                                    HttpServletResponse servletResponse) {
         User user;
+        boolean passwordVerified = false;
         if (request.getOrganisationId() != null) {
             // Scoped lookup — unambiguous even in multi-tenant deployments
             var userOpt = userRepository.findByEmailAndOrganisationId(
                     request.getEmail(), request.getOrganisationId());
             if (userOpt.isEmpty()) {
-                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                        .body(Map.of("error", "Invalid email or password"));
+                return invalidCredentials();
             }
             user = userOpt.get();
         } else {
-            // No org hint — load all accounts for this email and match by password
             List<User> matches = userRepository.findAllByEmail(request.getEmail());
             if (matches.isEmpty()) {
-                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                        .body(Map.of("error", "Invalid email or password"));
+                return invalidCredentials();
             }
-            if (matches.size() > 1) {
-                return ResponseEntity.status(HttpStatus.CONFLICT)
-                        .body(Map.of("error",
-                                "This email is registered in multiple organisations. " +
-                                "Please include 'organisationId' in your login request."));
+            if (matches.size() == 1) {
+                user = matches.get(0);
+            } else {
+                LoginResolution resolution = resolveAmongTenants(matches, request.getPassword());
+                if (resolution.response() != null) {
+                    return resolution.response();
+                }
+                user = resolution.user();
+                passwordVerified = true;
             }
-            user = matches.get(0);
         }
 
-        // ── Account lockout check ─────────────────────────────────────────────
-        if (user.isLockedOut()) {
-            log.warn("[AUTH] Login rejected — account locked until {} for user {}", user.getLockedUntil(), user.getId());
-            return ResponseEntity.status(HttpStatus.LOCKED)
-                    .body(Map.of("error",
-                            "Account temporarily locked due to too many failed attempts. " +
-                            "Try again after " + user.getLockedUntil()));
-        }
-
-        // Verify password
-        if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
-            // Increment failure counter and lock if threshold reached
-            int attempts = user.getFailedLoginAttempts() + 1;
-            user.setFailedLoginAttempts(attempts);
-            if (attempts >= MAX_FAILED_LOGIN_ATTEMPTS) {
-                user.setLockedUntil(Instant.now().plus(LOCKOUT_DURATION));
-                log.warn("[AUTH] Account locked for user {} after {} failed attempts", user.getId(), attempts);
+        if (!passwordVerified) {
+            // ── Account lockout check ─────────────────────────────────────────
+            if (user.isLockedOut()) {
+                return lockedOut(user);
             }
-            userRepository.save(user);
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("error", "Invalid email or password"));
+            if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
+                recordFailedLogin(user);
+                return invalidCredentials();
+            }
         }
 
         // Check user status
@@ -715,6 +706,79 @@ public class AuthController {
         }
     }
 
+    /** Outcome of picking an account for an email registered in several tenants. */
+    private record LoginResolution(User user, ResponseEntity<?> response) { }
+
+    /**
+     * Picks the account to sign in to when an email exists in several organisations
+     * and the client did not name one.
+     *
+     * <p>The password is checked against every unlocked account first, so the
+     * organisation list in the 409 only ever names tenants whose password the
+     * caller has just proved. A wrong password gets the same 401 as an unknown
+     * email, so an unauthenticated caller learns nothing about tenant membership.
+     * When exactly one account accepts the password (preferring ACTIVE accounts),
+     * the login continues with it and no choice is needed.
+     */
+    private LoginResolution resolveAmongTenants(List<User> matches, String password) {
+        List<User> unlocked = matches.stream().filter(u -> !u.isLockedOut()).toList();
+        if (unlocked.isEmpty()) {
+            return new LoginResolution(null, lockedOut(matches.get(0)));
+        }
+        List<User> verified = new ArrayList<>();
+        for (User candidate : unlocked) {
+            if (passwordEncoder.matches(password, candidate.getPasswordHash())) {
+                verified.add(candidate);
+            }
+        }
+        if (verified.isEmpty()) {
+            unlocked.forEach(this::recordFailedLogin);
+            return new LoginResolution(null, invalidCredentials());
+        }
+        List<User> active = verified.stream().filter(u -> u.getStatus() == UserStatus.ACTIVE).toList();
+        if (active.size() == 1) {
+            return new LoginResolution(active.get(0), null);
+        }
+        if (active.isEmpty()) {
+            // Let the normal status check explain why the account cannot sign in.
+            return new LoginResolution(verified.get(0), null);
+        }
+        List<Map<String, String>> organisations = active.stream()
+                .filter(u -> u.getOrganisation() != null)
+                .map(u -> Map.of(
+                        "id", u.getOrganisation().getId().toString(),
+                        "name", u.getOrganisation().getName()))
+                .sorted(Comparator.comparing(m -> m.get("name").toLowerCase(Locale.ROOT)))
+                .toList();
+        return new LoginResolution(null, ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
+                "error", "This email belongs to several organisations. Choose one to sign in to.",
+                "code", "ORGANISATION_REQUIRED",
+                "organisations", organisations)));
+    }
+
+    private void recordFailedLogin(User user) {
+        int attempts = user.getFailedLoginAttempts() + 1;
+        user.setFailedLoginAttempts(attempts);
+        if (attempts >= MAX_FAILED_LOGIN_ATTEMPTS) {
+            user.setLockedUntil(Instant.now().plus(LOCKOUT_DURATION));
+            log.warn("[AUTH] Account locked for user {} after {} failed attempts", user.getId(), attempts);
+        }
+        userRepository.save(user);
+    }
+
+    private static ResponseEntity<Map<String, String>> invalidCredentials() {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(Map.of("error", "Invalid email or password"));
+    }
+
+    private static ResponseEntity<Map<String, String>> lockedOut(User user) {
+        log.warn("[AUTH] Login rejected — account locked until {} for user {}", user.getLockedUntil(), user.getId());
+        return ResponseEntity.status(HttpStatus.LOCKED)
+                .body(Map.of("error",
+                        "Account temporarily locked due to too many failed attempts. "
+                                + "Try again after " + user.getLockedUntil()));
+    }
+
     public static class LoginRequest {
         @Email(message = "Email must be valid")
         @NotBlank(message = "Email is required")
@@ -724,8 +788,9 @@ public class AuthController {
         public String password;
 
         /**
-         * Optional in single-tenant deployments.
-         * Required when the same email is registered in more than one organisation.
+         * Optional. When the email belongs to several organisations and more than one
+         * accepts the password, login answers 409 ORGANISATION_REQUIRED with the
+         * candidate organisations; the client resends with this set.
          */
         public UUID organisationId;
 
