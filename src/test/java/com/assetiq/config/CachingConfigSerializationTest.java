@@ -106,6 +106,11 @@ class CachingConfigSerializationTest {
         for (Class<?> c = type; c != null && c != Object.class; c = c.getSuperclass()) {
             for (Field f : c.getDeclaredFields()) {
                 if (Modifier.isStatic(f.getModifiers())) continue;
+                // Write-only fields (e.g. UserDto.password) are never serialized, so
+                // never cached; the services do not set them on returned DTOs.
+                com.fasterxml.jackson.annotation.JsonProperty jp =
+                        f.getAnnotation(com.fasterxml.jackson.annotation.JsonProperty.class);
+                if (jp != null && jp.access() == com.fasterxml.jackson.annotation.JsonProperty.Access.WRITE_ONLY) continue;
                 Object v = sample(f.getType());
                 if (v == null) continue;
                 f.setAccessible(true);
