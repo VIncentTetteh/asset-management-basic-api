@@ -1,5 +1,6 @@
 package com.assetiq.dto;
 
+import com.assetiq.validation.HttpUrl;
 import com.assetiq.enums.ContractStatus;
 import com.assetiq.enums.ContractType;
 import com.assetiq.validation.NullOrNotBlank;
@@ -59,6 +60,7 @@ public class ContractDto {
     private Boolean autoRenew;
 
     @Size(max = 500)
+    @HttpUrl
     private String documentUrl;
     private String notes;
 

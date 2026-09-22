@@ -1,5 +1,6 @@
 package com.assetiq.dto;
 
+import com.assetiq.validation.HttpUrl;
 import com.assetiq.enums.DisposalMethod;
 import com.assetiq.enums.DisposalStatus;
 import com.assetiq.validation.NullOrNotBlank;
@@ -87,6 +88,7 @@ public class DisposalRecordDto {
 
     /** VARCHAR(255) column. */
     @Size(max = 255)
+    @HttpUrl(allowPlainText = true)
     private String complianceDocumentUrl;
 
     @JsonProperty(access = JsonProperty.Access.READ_ONLY)

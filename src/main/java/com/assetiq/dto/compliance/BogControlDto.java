@@ -1,5 +1,6 @@
 package com.assetiq.dto.compliance;
 
+import com.assetiq.validation.HttpUrl;
 import com.assetiq.models.compliance.ControlStatus;
 import com.assetiq.validation.NullOrNotBlank;
 import com.assetiq.validation.OnCreate;
@@ -27,6 +28,7 @@ public class BogControlDto {
 
     private ControlStatus status;
     @Size(max = 255)
+    @HttpUrl
     private String evidenceUrl;
     private String gapDescription;
     private String remediationPlan;

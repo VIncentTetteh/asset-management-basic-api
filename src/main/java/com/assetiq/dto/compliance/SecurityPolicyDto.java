@@ -1,5 +1,6 @@
 package com.assetiq.dto.compliance;
 
+import com.assetiq.validation.HttpUrl;
 import com.assetiq.models.compliance.SecurityPolicy;
 import com.assetiq.validation.NullOrNotBlank;
 import com.assetiq.validation.OnCreate;
@@ -24,6 +25,7 @@ public class SecurityPolicyDto {
     @Size(max = 16)
     private String version;
     @Size(max = 255)
+    @HttpUrl
     private String documentUrl;
     private UUID ownerId;
     private String ownerEmail;

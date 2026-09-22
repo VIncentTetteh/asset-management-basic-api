@@ -1,5 +1,6 @@
 package com.assetiq.dto;
 
+import com.assetiq.validation.HttpUrl;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotBlank;
@@ -56,6 +57,7 @@ public class ExpenseDto {
     private Instant approvedAt;
     private String rejectionReason;
     @Size(max = 500)
+    @HttpUrl
     private String receiptUrl;
     private UUID linkedAssetId;
     private UUID linkedBudgetId;

@@ -1,5 +1,6 @@
 package com.assetiq.dto;
 
+import com.assetiq.validation.HttpUrl;
 import com.assetiq.enums.LicenseStatus;
 import com.assetiq.enums.LicenseType;
 import com.assetiq.validation.NullOrNotBlank;
@@ -61,6 +62,7 @@ public class SoftwareLicenseDto {
 
     private Boolean autoRenew;
     @Size(max = 255)
+    @HttpUrl
     private String licenseDocumentUrl;
     private String notes;
 

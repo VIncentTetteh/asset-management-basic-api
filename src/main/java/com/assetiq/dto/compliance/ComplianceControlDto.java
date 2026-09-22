@@ -1,5 +1,6 @@
 package com.assetiq.dto.compliance;
 
+import com.assetiq.validation.HttpUrl;
 import com.assetiq.models.compliance.ComplianceFramework;
 import com.assetiq.models.compliance.ControlStatus;
 import com.assetiq.validation.NullOrNotBlank;
@@ -35,6 +36,7 @@ public class ComplianceControlDto {
     private ControlStatus status;
     private String justification;
     @Size(max = 255)
+    @HttpUrl
     private String evidenceUrl;
     private String gapDescription;
     private String remediationPlan;

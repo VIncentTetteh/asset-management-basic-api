@@ -1,5 +1,6 @@
 package com.assetiq.dto.compliance;
 
+import com.assetiq.validation.HttpUrl;
 import com.assetiq.models.compliance.PciSaqRecord;
 import com.assetiq.validation.NullOrNotBlank;
 import com.assetiq.validation.OnCreate;
@@ -25,6 +26,7 @@ public class PciSaqRecordDto {
     private PciSaqRecord.ComplianceAnswer complianceStatus;
     private String compensatingControl;
     @Size(max = 255)
+    @HttpUrl
     private String evidenceUrl;
     private Instant targetDate;
     private String notes;
