@@ -24,6 +24,14 @@ public class OrganisationStorageConfigServiceImpl implements OrganisationStorage
     private final OrganisationStorageConfigRepository configRepository;
     private final OrganisationRepository organisationRepository;
 
+    /** Server-wide default bucket, used when an organisation sets no override. */
+    @org.springframework.beans.factory.annotation.Value("${app.storage.s3.bucket:}")
+    private String globalBucket;
+
+    void setGlobalBucket(String globalBucket) {
+        this.globalBucket = globalBucket;
+    }
+
     public OrganisationStorageConfigServiceImpl(
             OrganisationStorageConfigRepository configRepository,
             OrganisationRepository organisationRepository) {
@@ -82,7 +90,11 @@ public class OrganisationStorageConfigServiceImpl implements OrganisationStorage
     private void applyDto(OrganisationStorageConfig config, OrganisationStorageConfigDto dto) {
         config.setS3Enabled(dto.isS3Enabled());
 
-        if (dto.getBucketName() != null)  config.setBucketName(dto.getBucketName());
+        // Blank clears the override (the global bucket applies). Saving the global
+        // bucket's name as an override used to pin it to this organisation.
+        if (dto.getBucketName() != null) {
+            config.setBucketName(dto.getBucketName().isBlank() ? null : dto.getBucketName().trim());
+        }
 
         if (dto.getReportPrefix() != null && !dto.getReportPrefix().isBlank()) {
             config.setReportPrefix(dto.getReportPrefix());
@@ -102,7 +114,9 @@ public class OrganisationStorageConfigServiceImpl implements OrganisationStorage
                 .organisationId(org.getId())
                 .organisationName(org.getName())
                 .s3Enabled(config.isS3Enabled())
-                .bucketName(config.getBucketName())
+                .bucketName(hasText(config.getBucketName()) ? config.getBucketName() : defaultBucket())
+                .bucketOverride(hasText(config.getBucketName()) ? config.getBucketName() : null)
+                .defaultBucket(defaultBucket())
                 .reportPrefix(config.getReportPrefix())
                 .importPrefix(config.getImportPrefix())
                 .presignMinutes(config.getPresignMinutes())
@@ -111,6 +125,14 @@ public class OrganisationStorageConfigServiceImpl implements OrganisationStorage
                 .createdBy(config.getCreatedBy())
                 .modifiedBy(config.getModifiedBy())
                 .build();
+    }
+
+    private String defaultBucket() {
+        return hasText(globalBucket) ? globalBucket.trim() : null;
+    }
+
+    private static boolean hasText(String s) {
+        return s != null && !s.isBlank();
     }
 
     private Organisation requireOrg(UUID organisationId) {

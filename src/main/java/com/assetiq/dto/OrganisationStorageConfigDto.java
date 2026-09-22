@@ -2,6 +2,7 @@ package com.assetiq.dto;
 
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
@@ -23,6 +24,8 @@ public class OrganisationStorageConfigDto {
      * {@code app.storage.s3.bucket} is used.
      */
     @Size(max = 255, message = "Bucket name must be at most 255 characters")
+    @Pattern(regexp = "^$|^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$",
+            message = "Use a valid S3 bucket name: 3 to 63 lower-case letters, digits, dots or hyphens")
     private String bucketName;
 
     /** Key prefix for generated reports.  Defaults to {@code "reports"}. */
@@ -33,8 +36,14 @@ public class OrganisationStorageConfigDto {
     @Size(max = 200, message = "Import prefix must be at most 200 characters")
     private String importPrefix;
 
-    /** Presigned URL TTL in minutes (1–10080). */
-    @Min(value = 1,     message = "Presign minutes must be at least 1")
-    @Max(value = 10080, message = "Presign minutes cannot exceed 10080 (7 days)")
+    /**
+     * Presigned URL TTL in minutes, 1 to {@link #MAX_PRESIGN_MINUTES} (12 hours).
+     * A download link valid for days is a leak waiting to happen; the database
+     * CHECK still allows up to 10080 for older rows.
+     */
+    @Min(value = 1, message = "Presign minutes must be at least 1")
+    @Max(value = MAX_PRESIGN_MINUTES, message = "Presign minutes cannot exceed 720 (12 hours)")
     private Integer presignMinutes;
+
+    public static final int MAX_PRESIGN_MINUTES = 720;
 }

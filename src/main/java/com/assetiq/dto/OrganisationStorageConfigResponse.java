@@ -22,6 +22,12 @@ public class OrganisationStorageConfigResponse {
     /** Effective bucket in use (org-specific override, or global if blank). */
     private String bucketName;
 
+    /** The organisation's own bucket, or null when it uses the default. Edit this, not bucketName. */
+    private String bucketOverride;
+
+    /** The server-wide default bucket ({@code app.storage.s3.bucket}), or null if none is set. */
+    private String defaultBucket;
+
     private String reportPrefix;
     private String importPrefix;
     private int presignMinutes;
