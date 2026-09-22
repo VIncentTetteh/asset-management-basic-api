@@ -2,6 +2,7 @@ package com.assetiq.services.impl;
 
 import com.assetiq.dto.SoftwareLicenseDto;
 import com.assetiq.enums.LicenseStatus;
+import com.assetiq.exceptions.FieldValidationException;
 import com.assetiq.models.Organisation;
 import com.assetiq.models.SoftwareLicense;
 import com.assetiq.repositories.AssetRepository;
@@ -111,9 +112,9 @@ public class SoftwareLicenseServiceImpl extends TenantAwareService implements So
         if (dto.getLicenseDocumentUrl() != null) license.setLicenseDocumentUrl(dto.getLicenseDocumentUrl());
         if (dto.getNotes() != null) license.setNotes(dto.getNotes());
         if (dto.getAssetId() != null) {
-            assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(
-                    dto.getAssetId(), org).ifPresent(license::setAsset);
+            license.setAsset(requireAsset(dto.getAssetId(), org));
         }
+        requireExpiryNotBeforePurchase(license);
         return mapToDto(licenseRepository.save(license));
     }
 
@@ -186,9 +187,22 @@ public class SoftwareLicenseServiceImpl extends TenantAwareService implements So
         if (dto.getAutoRenew() != null) license.setAutoRenew(dto.getAutoRenew());
         license.setLicenseDocumentUrl(dto.getLicenseDocumentUrl());
         license.setNotes(dto.getNotes());
-        if (dto.getAssetId() != null) {
-            assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(dto.getAssetId(), org)
-                    .ifPresent(license::setAsset);
+        // Create and PUT are full replacements: a null asset unlinks it; an asset
+        // outside the organisation is refused rather than silently ignored.
+        license.setAsset(dto.getAssetId() != null ? requireAsset(dto.getAssetId(), org) : null);
+        requireExpiryNotBeforePurchase(license);
+    }
+
+    private com.assetiq.models.Asset requireAsset(UUID assetId, Organisation org) {
+        return assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(assetId, org)
+                .orElseThrow(() -> new FieldValidationException("assetId", "Asset not found in your organisation"));
+    }
+
+    /** A licence cannot expire before it was bought (the web form checks this too). */
+    private static void requireExpiryNotBeforePurchase(SoftwareLicense license) {
+        if (license.getPurchaseDate() != null && license.getExpiryDate() != null
+                && license.getExpiryDate().isBefore(license.getPurchaseDate())) {
+            throw new FieldValidationException("expiryDate", "Expiry date must be on or after the purchase date");
         }
     }
 
@@ -213,7 +227,10 @@ public class SoftwareLicenseServiceImpl extends TenantAwareService implements So
         dto.setLicenseDocumentUrl(l.getLicenseDocumentUrl());
         dto.setNotes(l.getNotes());
         dto.setOrganisationId(l.getOrganisation().getId());
-        if (l.getAsset() != null) dto.setAssetId(l.getAsset().getId());
+        if (l.getAsset() != null) {
+            dto.setAssetId(l.getAsset().getId());
+            dto.setAssetName(l.getAsset().getName());
+        }
         // Computed
         if (l.getTotalSeats() != null && l.getUsedSeats() != null) {
             dto.setAvailableSeats(l.getTotalSeats() - l.getUsedSeats());

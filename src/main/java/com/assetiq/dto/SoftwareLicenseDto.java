@@ -9,6 +9,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Data;
 
 import java.math.BigDecimal;
@@ -64,7 +65,17 @@ public class SoftwareLicenseDto {
     private String notes;
 
     private UUID assetId;
+
+    /** The linked asset's name, for display. */
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private String assetName;
+
     private UUID organisationId;
+
+    // licenseKey (SoftwareLicense.licenseKey) is deliberately not part of this DTO:
+    // a product key is a secret, so it is neither returned by list/detail reads nor
+    // accepted from the licence form. Do not add it here without a dedicated,
+    // separately authorised endpoint for reading and setting keys.
 
     // Computed / enrichment fields
     private Integer availableSeats;
