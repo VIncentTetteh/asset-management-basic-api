@@ -1,5 +1,7 @@
 package com.assetiq.services.impl;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
 import com.assetiq.dto.EmployeeChecklistDto;
 import com.assetiq.dto.EmployeeChecklistItemDto;
 import com.assetiq.dto.EmployeeDto;
@@ -107,6 +109,28 @@ class EmployeeServiceImplTest {
         dto.setStatus(EmployeeStatus.TERMINATED);
 
         assertThrows(IllegalStateException.class, () -> employeeService.update(employee.getId(), dto));
+    }
+
+    @Test
+    void update_managerWhoReportsToTheEmployee_isAFieldError() {
+        Organisation org = tenantOrganisation();
+        Employee employee = employeeWithOrg(org);
+        Employee report = employeeWithOrg(org);
+        report.setManager(employee); // report already reports to employee
+        when(employeeRepository.findByIdAndOrganisationAndDeletedAtIsNull(employee.getId(), org))
+                .thenReturn(Optional.of(employee));
+        when(employeeRepository.findByIdAndOrganisationAndDeletedAtIsNull(report.getId(), org))
+                .thenReturn(Optional.of(report));
+
+        EmployeeDto dto = new EmployeeDto();
+        dto.setFirstName("Kofi");
+        dto.setLastName("Boateng");
+        dto.setManagerId(report.getId());
+
+        com.assetiq.exceptions.FieldValidationException ex = assertThrows(
+                com.assetiq.exceptions.FieldValidationException.class,
+                () -> employeeService.update(employee.getId(), dto));
+        assertThat(ex.getField()).isEqualTo("managerId");
     }
 
     @Test

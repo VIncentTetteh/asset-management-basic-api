@@ -27,7 +27,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import com.assetiq.exceptions.FieldValidationException;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -377,6 +380,23 @@ public class EmployeeServiceImpl extends TenantAwareService implements EmployeeS
                 });
     }
 
+    /**
+     * Refuses a manager who already reports, directly or indirectly, to this employee:
+     * such a chain would loop forever in any org-chart walk.
+     */
+    private static void assertNotInOwnReportingLine(Employee employee, Employee manager) {
+        if (employee.getId() == null) {
+            return; // a new employee has no reports yet
+        }
+        Set<UUID> seen = new HashSet<>();
+        for (Employee cursor = manager; cursor != null && seen.add(cursor.getId()); cursor = cursor.getManager()) {
+            if (employee.getId().equals(cursor.getId())) {
+                throw new FieldValidationException("managerId",
+                        "This employee already manages that person, directly or indirectly.");
+            }
+        }
+    }
+
     private void applyDto(Employee employee, EmployeeDto dto, Organisation org) {
         employee.setEmployeeNumber(dto.getEmployeeNumber());
         employee.setFirstName(dto.getFirstName());
@@ -407,6 +427,7 @@ public class EmployeeServiceImpl extends TenantAwareService implements EmployeeS
             Employee manager = employeeRepository.findByIdAndOrganisationAndDeletedAtIsNull(dto.getManagerId(), org)
                     .orElseThrow(() -> new IllegalArgumentException(
                             "Manager employee not found: " + dto.getManagerId()));
+            assertNotInOwnReportingLine(employee, manager);
             employee.setManager(manager);
         } else {
             employee.setManager(null);
