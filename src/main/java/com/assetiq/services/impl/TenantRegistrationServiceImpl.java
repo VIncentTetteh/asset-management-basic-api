@@ -16,6 +16,7 @@ import com.assetiq.repositories.RoleRepository;
 import com.assetiq.repositories.SubscriptionPlanRepository;
 import com.assetiq.repositories.UserRepository;
 import com.assetiq.services.CurrencyResolver;
+import com.assetiq.services.DefaultRoleSeederService;
 import com.assetiq.services.EmailService;
 import com.assetiq.services.EmailVerificationService;
 import com.assetiq.services.TenantRegistrationService;
@@ -39,6 +40,7 @@ public class TenantRegistrationServiceImpl implements TenantRegistrationService 
     private final PasswordEncoder passwordEncoder;
     private final EmailService emailService;
     private final EmailVerificationService emailVerificationService;
+    private final DefaultRoleSeederService defaultRoleSeederService;
 
     @Value("${app.email.base-url:http://localhost:3000}")
     private String emailBaseUrl;
@@ -50,7 +52,8 @@ public class TenantRegistrationServiceImpl implements TenantRegistrationService 
             OrganisationSubscriptionRepository organisationSubscriptionRepository,
             PasswordEncoder passwordEncoder,
             EmailService emailService,
-            EmailVerificationService emailVerificationService) {
+            EmailVerificationService emailVerificationService,
+            DefaultRoleSeederService defaultRoleSeederService) {
         this.organisationRepository = organisationRepository;
         this.roleRepository = roleRepository;
         this.userRepository = userRepository;
@@ -59,6 +62,7 @@ public class TenantRegistrationServiceImpl implements TenantRegistrationService 
         this.passwordEncoder = passwordEncoder;
         this.emailService = emailService;
         this.emailVerificationService = emailVerificationService;
+        this.defaultRoleSeederService = defaultRoleSeederService;
     }
 
     @Override
@@ -140,6 +144,12 @@ public class TenantRegistrationServiceImpl implements TenantRegistrationService 
             });
             return roleRepository.save(r);
         });
+
+        // The standard role set (asset/procurement/finance/compliance/IT/HR
+        // managers, viewer) — organisations created by an operator got these but
+        // self-registered tenants only had ADMIN and USER, so they had no approver
+        // or finance roles to hand out. Create-only; ADMIN/USER above are kept.
+        defaultRoleSeederService.addMissingRoles(savedOrg);
 
         // Create initial admin user
         User user = new User();

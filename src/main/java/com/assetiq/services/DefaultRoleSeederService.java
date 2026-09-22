@@ -107,6 +107,49 @@ public class DefaultRoleSeederService {
         log.info("[ROLE SEED] Completed for organisation: {}", organisation.getName());
     }
 
+    /**
+     * Creates only the standard roles this organisation does not have yet (matched
+     * by name). Unlike {@link #seedRolesForOrganisation} it never modifies an
+     * existing role, so it is safe to run against live tenants: roles a tenant
+     * already has — including customised ones with a standard name — are left
+     * exactly as they are, and running it twice creates nothing the second time.
+     *
+     * @return how many roles were created
+     */
+    @Transactional
+    public int addMissingRoles(Organisation organisation) {
+        int created = 0;
+        for (RoleDefinition def : PLATFORM_ROLES) {
+            if (roleRepository.findByNameAndOrganisationAndDeletedAtIsNull(def.name(), organisation).isPresent()) {
+                continue;
+            }
+            roleRepository.save(newRole(def, organisation));
+            created++;
+        }
+        if (created > 0) {
+            log.info("[ROLE SEED] Added {} missing standard role(s) to organisation {}", created, organisation.getId());
+        }
+        return created;
+    }
+
+    private static Role newRole(RoleDefinition def, Organisation organisation) {
+        Role role = new Role();
+        role.setName(def.name());
+        role.setDescription(def.description());
+        role.setSystemRole(def.systemRole());
+        role.setGrantAllPermissions(def.grantAll());
+        role.setOrganisation(organisation);
+        if (!def.grantAll()) {
+            for (String name : def.parsePermissions()) {
+                RolePermission rp = new RolePermission();
+                rp.setRole(role);
+                rp.setPermission(name);
+                role.getRolePermissions().add(rp);
+            }
+        }
+        return role;
+    }
+
     // ── Role Definitions ──────────────────────────────────────────────────────
 
     /**
