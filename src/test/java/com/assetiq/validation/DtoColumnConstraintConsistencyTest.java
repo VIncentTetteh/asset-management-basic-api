@@ -101,10 +101,7 @@ class DtoColumnConstraintConsistencyTest {
             Map.entry("LeaseRecordDto.status", "create sets ACTIVE; update keeps the stored status when null"),
             Map.entry("OrganisationDto.billingCurrency",
                     "derived from the country on create; update keeps the stored value when blank"),
-            Map.entry("RiskRegisterDto.riskScore", "computed from likelihood x impact in @PrePersist/@PreUpdate"),
-            // Entity says nullable = false, but app_user.employee_id is nullable in the database
-            // and POST /users does not generate one yet (tracked in the forms plan, phase 2).
-            Map.entry("UserDto.employeeId", "server-generated identifier; the column itself is nullable"));
+            Map.entry("RiskRegisterDto.riskScore", "computed from likelihood x impact in @PrePersist/@PreUpdate"));
 
     private static Map<String, Map<String, DbColumn>> schema;
 

@@ -168,7 +168,7 @@ public class AuthController {
         newUser.setPhone(request.getPhone());
         newUser.setPasswordHash(passwordEncoder.encode(request.getPassword()));
         newUser.setJobTitle(request.getJobTitle());
-        newUser.setEmployeeId("USR-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(Locale.ROOT));
+        newUser.setEmployeeId(com.assetiq.models.EmployeeIds.generate());
         newUser.setRole(role);
         newUser.setStatus(UserStatus.ACTIVE);
         newUser.setOrganisation(organisation);
@@ -654,7 +654,7 @@ public class AuthController {
         public String phone;
 
         @NotBlank(message = "Password is required")
-        @Size(min = 8, message = "Password must be at least 8 characters")
+        @com.assetiq.validation.ValidPassword
         public String password;
 
         @Size(max = 255)
@@ -772,7 +772,7 @@ public class AuthController {
         public String token;
 
         @NotBlank(message = "New password is required")
-        @Size(min = 8, message = "Password must be at least 8 characters")
+        @com.assetiq.validation.ValidPassword
         public String newPassword;
 
         public ResetPasswordRequest() {

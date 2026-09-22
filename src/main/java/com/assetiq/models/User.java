@@ -32,8 +32,9 @@ public class User extends BaseEntity {
     @Column(nullable = false)
     private String passwordHash;
 
+    /** Never null: generated unless an administrator supplies one. */
     @Column(nullable = false)
-    private String employeeId;
+    private String employeeId = EmployeeIds.generate();
 
     private String jobTitle;
 

@@ -96,7 +96,9 @@ public class UserServiceImpl extends TenantAwareService implements UserService {
         user.setLastName(dto.getLastName());
         user.setEmail(dto.getEmail());
         user.setPhone(dto.getPhone());
-        user.setEmployeeId(dto.getEmployeeId());
+        // Same generator as tenant registration and /auth/register: users created
+        // here used to get no employee id at all.
+        user.setEmployeeId(com.assetiq.models.EmployeeIds.orGenerate(dto.getEmployeeId()));
         user.setJobTitle(dto.getJobTitle());
         user.setOrganisation(org);
         user.setStatus(UserStatus.ACTIVE);
@@ -186,7 +188,10 @@ public class UserServiceImpl extends TenantAwareService implements UserService {
         user.setFirstName(dto.getFirstName());
         user.setLastName(dto.getLastName());
         user.setPhone(dto.getPhone());
-        user.setEmployeeId(dto.getEmployeeId());
+        // The id is required: a PUT that omits it keeps the current one.
+        if (dto.getEmployeeId() != null && !dto.getEmployeeId().isBlank()) {
+            user.setEmployeeId(dto.getEmployeeId().trim());
+        }
         user.setJobTitle(dto.getJobTitle());
         user.setDepartment(dto.getDepartmentId() == null ? null
                 : departmentRepository.findByIdAndOrganisationAndDeletedAtIsNull(dto.getDepartmentId(), org)
@@ -211,8 +216,8 @@ public class UserServiceImpl extends TenantAwareService implements UserService {
         if (dto.getPhone() != null) {
             user.setPhone(dto.getPhone());
         }
-        if (dto.getEmployeeId() != null) {
-            user.setEmployeeId(dto.getEmployeeId());
+        if (dto.getEmployeeId() != null && !dto.getEmployeeId().isBlank()) {
+            user.setEmployeeId(dto.getEmployeeId().trim());
         }
         if (dto.getJobTitle() != null) {
             user.setJobTitle(dto.getJobTitle());

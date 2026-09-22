@@ -2,6 +2,8 @@ package com.assetiq.validation;
 
 import com.assetiq.dto.DepreciationPolicyDto;
 import com.assetiq.dto.ExpenseDto;
+import com.assetiq.dto.TenantRegisterRequest;
+import com.assetiq.dto.UserDto;
 import com.assetiq.enums.ExpenseCategory;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validation;
@@ -94,5 +96,27 @@ class RequestDtoRulesTest {
         dto.setMethod(com.assetiq.enums.DepreciationMethod.UNITS_OF_PRODUCTION);
 
         assertThat(invalidFields(dto, Default.class, OnCreate.class)).isEmpty();
+    }
+
+    @Test
+    void password_policyIsEightCharactersTo72Bytes() {
+        assertThat(PasswordPolicy.isValid("short")).isFalse();
+        assertThat(PasswordPolicy.isValid("a".repeat(8))).isTrue();
+        assertThat(PasswordPolicy.isValid("a".repeat(72))).isTrue();
+        assertThat(PasswordPolicy.isValid("a".repeat(73))).isFalse();
+        // BCrypt counts bytes: 24 three-byte characters are 72 bytes, 25 are too many.
+        assertThat(PasswordPolicy.isValid("\u20AC".repeat(24))).isTrue();
+        assertThat(PasswordPolicy.isValid("\u20AC".repeat(25))).isFalse();
+    }
+
+    @Test
+    void password_everyEntryPointUsesThePolicy() {
+        UserDto user = new UserDto();
+        user.setPassword("a".repeat(73));
+        assertThat(invalidFields(user)).contains("password");
+
+        TenantRegisterRequest tenant = new TenantRegisterRequest();
+        tenant.setPassword("a".repeat(100));
+        assertThat(invalidFields(tenant)).contains("password");
     }
 }

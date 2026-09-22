@@ -21,6 +21,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentMatchers;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
@@ -164,5 +165,29 @@ class UserServiceImplSecurityTest {
         create.setLastName("User");
         create.setEmail("new@example.com");
         assertThatThrownBy(() -> service.createUser(create)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void usersCreatedHereGetAnEmployeeIdAndPutKeepsIt() {
+        actAs("boss@example.com", "ROLE_ADMIN");
+        when(passwordEncoder.encode(ArgumentMatchers.anyString())).thenReturn("hash");
+        UserDto create = new UserDto();
+        create.setFirstName("New");
+        create.setLastName("User");
+        create.setEmail("new@example.com");
+        create.setPassword("correct horse battery");
+
+        UserDto created = service.createUser(create);
+        assertThat(created.getEmployeeId()).matches("EMP-[0-9A-F]{10}");
+
+        create.setEmail("other@example.com");
+        create.setEmployeeId(" HR-42 ");
+        assertThat(service.createUser(create).getEmployeeId()).isEqualTo("HR-42");
+
+        target.setEmployeeId("EMP-KEEP");
+        UserDto put = new UserDto();
+        put.setFirstName("A");
+        put.setLastName("B");
+        assertThat(service.updateUser(target.getId(), put).getEmployeeId()).isEqualTo("EMP-KEEP");
     }
 }

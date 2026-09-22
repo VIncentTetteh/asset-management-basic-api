@@ -40,7 +40,7 @@ public class UserDto {
      * on PUT/PATCH, so edits no longer fail validation for want of a password.
      */
     @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
-    @Size(min = 8, max = 128, message = "Password must be 8 to 128 characters")
+    @com.assetiq.validation.ValidPassword
     private String password;
 
     @Size(max = 255)

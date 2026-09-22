@@ -2,7 +2,6 @@ package com.assetiq.dto;
 
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Size;
 import lombok.Data;
 
 
@@ -38,6 +37,6 @@ public class TenantRegisterRequest {
     private String adminJobTitle;
 
     @NotBlank(message = "Password is required")
-    @Size(min = 8, message = "Password must be at least 8 characters")
+    @com.assetiq.validation.ValidPassword
     private String password;
 }
