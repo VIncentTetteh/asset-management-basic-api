@@ -364,6 +364,9 @@ class EamIntegrationHarnessTest {
 
     @Test
     void assetImport_excel_createsCustomFieldsFromExtraColumns() throws Exception {
+        // Extra columns become custom fields only with governed custom fields on.
+        when(featureFlagService.isEnabledFor(org.mockito.ArgumentMatchers.eq("commercial.governed-custom-fields"),
+                org.mockito.ArgumentMatchers.any())).thenReturn(true);
         String assetName = "Asset Custom " + Instant.now().toEpochMilli();
         Map<String, String> extraFields = new LinkedHashMap<>();
         extraFields.put("Purchase Source", "Grant");
