@@ -46,6 +46,19 @@ public class NetworkDiscoveryServiceImpl extends TenantAwareService implements N
     private final DiscoveredDeviceRepository deviceRepo;
     private final AssetService assetService;
 
+    /**
+     * A scan is made by THIS server, from wherever it runs. On the hosted service
+     * that is the platform's own private network, so a tenant could sweep it by
+     * asking for a range in it. Off unless a self-hosted deployment, whose server
+     * sits on the customer's own network, turns it on.
+     */
+    @org.springframework.beans.factory.annotation.Value("${app.discovery.enabled:false}")
+    private boolean discoveryEnabled;
+
+    void setDiscoveryEnabled(boolean discoveryEnabled) {
+        this.discoveryEnabled = discoveryEnabled;
+    }
+
     public NetworkDiscoveryServiceImpl(OrganisationRepository organisationRepository,
                                        DiscoveredDeviceRepository deviceRepo,
                                        AssetService assetService) {
@@ -58,6 +71,7 @@ public class NetworkDiscoveryServiceImpl extends TenantAwareService implements N
 
     @Override
     public List<DiscoveredDeviceDto> scan(NetworkScanRequestDto request) {
+        requireDiscoveryEnabled();
         Organisation org = requireTenantOrg();
         List<String> ips = resolveIps(request);
         if (ips.isEmpty()) {
@@ -390,7 +404,20 @@ public class NetworkDiscoveryServiceImpl extends TenantAwareService implements N
         // Each device has exactly one status, so the four counts add up to the total
         // and match what GET /devices?status= returns.
         map.put("unknown", unknown);
+        // So the page can say why the Scan button is gone rather than just hiding it.
+        map.put("scanEnabled", discoveryEnabled);
         return map;
+    }
+
+    /**
+     * Refuses a scan on a deployment that must not make one. Answered as the
+     * standard feature-disabled response (501), exactly like cloud sync, which is
+     * off for the same reason.
+     */
+    private void requireDiscoveryEnabled() {
+        if (!discoveryEnabled) {
+            throw new com.assetiq.services.FeatureDisabledException("network-discovery", true);
+        }
     }
 
     // ── Mapper ────────────────────────────────────────────────────────────────

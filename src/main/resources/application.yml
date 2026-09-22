@@ -290,6 +290,13 @@ app:
       # PROCESSING jobs older than this are considered crashed (seconds).
       processing-timeout-seconds: ${APP_IMPORT_RECOVERY_PROCESSING_TIMEOUT:1800}
 
+  # ── Network discovery (ping sweep / port scan) ───────────────────────────
+  discovery:
+    # A scan is made by THIS server, from wherever it runs: on the hosted service
+    # that is the platform's own private network. Off there; turn it on only for a
+    # self-hosted deployment whose server sits on the customer's own network.
+    enabled: ${APP_DISCOVERY_ENABLED:false}
+
   # ── Multi-cloud asset discovery ──────────────────────────────────────────
   cloud:
     sync:
