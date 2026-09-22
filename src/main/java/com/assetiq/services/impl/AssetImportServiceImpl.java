@@ -8,6 +8,7 @@ import com.assetiq.models.*;
 import com.assetiq.repositories.*;
 import com.assetiq.services.AssetImportService;
 import com.assetiq.services.AssetService;
+import com.assetiq.services.FeatureFlagService;
 import com.assetiq.services.UsageLimitService;
 import com.assetiq.storage.FileStorageService;
 import org.apache.poi.ss.usermodel.*;
@@ -36,7 +37,15 @@ import java.util.stream.Collectors;
  *  purchaseDate | purchaseCost | currency | depreciationMethod | usefulLifeMonths |
  *  residualValue | warrantyExpiryDate | status | condition |
  *  category | location | supplier | department | assignedUserEmail |
- *  invoiceId | insurancePolicyId | ...any extra columns become asset custom fields
+ *  invoiceId | insurancePolicyId | ...extra columns
+ *
+ * Extra columns become asset custom fields when the tenant has
+ * {@code commercial.governed-custom-fields} enabled; otherwise a row with a value in
+ * one is rejected with a row error rather than silently bypassing the flag.
+ *
+ * {@code department} matches a department name or code; {@code assignedUserEmail}
+ * matches a user's email or employee number; category, location and supplier match by
+ * name (all case-insensitive). {@code usefulLifeMonths} must be a whole number.
  *
  * Human-readable names/emails are resolved to IDs server-side — users never
  * need to copy-paste UUIDs.  All lookups are pre-cached once per import run
@@ -73,6 +82,8 @@ public class AssetImportServiceImpl extends com.assetiq.services.TenantAwareServ
     private static final int COL_INVOICE_ID          = 21;
     private static final int COL_INSURANCE_POLICY_ID = 22;
     private static final int STANDARD_COLUMN_COUNT   = COL_INSURANCE_POLICY_ID + 1;
+    /** Flag that governs whether extra import columns may create asset custom fields. */
+    static final String CUSTOM_FIELDS_FLAG = "commercial.governed-custom-fields";
 
     private final AssetService assetService;
     private final AssetRepository assetRepository;
@@ -85,6 +96,7 @@ public class AssetImportServiceImpl extends com.assetiq.services.TenantAwareServ
     private final UsageLimitService usageLimitService;
     private final FileStorageService storageService;
     private final TransactionTemplate transactionTemplate;
+    private final FeatureFlagService featureFlagService;
     private final DataFormatter dataFormatter = new DataFormatter();
 
     @Value("${app.storage.s3.import-prefix:imports}")
@@ -102,7 +114,8 @@ public class AssetImportServiceImpl extends com.assetiq.services.TenantAwareServ
             OrganisationRepository organisationRepository,
             UsageLimitService usageLimitService,
             FileStorageService storageService,
-            TransactionTemplate transactionTemplate) {
+            TransactionTemplate transactionTemplate,
+            FeatureFlagService featureFlagService) {
         super(organisationRepository);
         this.assetService = assetService;
         this.assetRepository = assetRepository;
@@ -115,6 +128,7 @@ public class AssetImportServiceImpl extends com.assetiq.services.TenantAwareServ
         this.usageLimitService = usageLimitService;
         this.storageService = storageService;
         this.transactionTemplate = transactionTemplate;
+        this.featureFlagService = featureFlagService;
     }
 
     @Override
@@ -213,6 +227,9 @@ public class AssetImportServiceImpl extends com.assetiq.services.TenantAwareServ
                 return result;
             }
 
+            boolean customFieldsEnabled = customFieldColumns.isEmpty()
+                    || featureFlagService.isEnabledFor(CUSTOM_FIELDS_FLAG, org.getId());
+
             int lastRow = sheet.getLastRowNum();
             for (int rowIdx = 1; rowIdx <= lastRow; rowIdx++) {
                 Row row = sheet.getRow(rowIdx);
@@ -226,6 +243,11 @@ public class AssetImportServiceImpl extends com.assetiq.services.TenantAwareServ
                 try {
                     AssetDto dto = buildDto(row, name, cache);
                     Map<String, String> customFields = extractCustomFieldValues(row, customFieldColumns);
+                    if (!customFields.isEmpty() && !customFieldsEnabled) {
+                        throw new IllegalArgumentException("Extra column(s) " + customFields.keySet()
+                                + " would become custom fields, which are not enabled for your organisation."
+                                + " Remove them or leave them blank.");
+                    }
                     if (dryRun) {
                         validateDryRunCreate(dto, org, result.getImported());
                     } else {
@@ -289,8 +311,8 @@ public class AssetImportServiceImpl extends com.assetiq.services.TenantAwareServ
             Map<String, UUID> categories,    // lowercase name → id
             Map<String, UUID> locations,     // lowercase name → id
             Map<String, UUID> suppliers,     // lowercase name → id
-            Map<String, UUID> departments,   // lowercase name → id
-            Map<String, UUID> users          // lowercase email → id
+            Map<String, UUID> departments,   // lowercase name or code → id
+            Map<String, UUID> users          // lowercase email or employee number → id
     ) {}
 
     private record CustomFieldColumn(int columnIndex, String fieldName) {}
@@ -315,24 +337,24 @@ public class AssetImportServiceImpl extends com.assetiq.services.TenantAwareServ
                 ));
     }
 
-    private Map<String, UUID> indexDepartmentsByName(Collection<Department> departments) {
-        return departments.stream()
-                .filter(d -> d.getName() != null)
-                .collect(Collectors.toMap(
-                        d -> d.getName().toLowerCase(),
-                        Department::getId,
-                        (a, b) -> a
-                ));
+    /** Departments by name, then by code where the code is not also some department's name. */
+    static Map<String, UUID> indexDepartmentsByName(Collection<Department> departments) {
+        Map<String, UUID> index = new HashMap<>();
+        departments.stream().filter(d -> d.getName() != null)
+                .forEach(d -> index.putIfAbsent(d.getName().toLowerCase().trim(), d.getId()));
+        departments.stream().filter(d -> d.getDepartmentCode() != null && !d.getDepartmentCode().isBlank())
+                .forEach(d -> index.putIfAbsent(d.getDepartmentCode().toLowerCase().trim(), d.getId()));
+        return index;
     }
 
-    private Map<String, UUID> indexUsersByEmail(Collection<User> users) {
-        return users.stream()
-                .filter(u -> u.getEmail() != null)
-                .collect(Collectors.toMap(
-                        u -> u.getEmail().toLowerCase(),
-                        User::getId,
-                        (a, b) -> a
-                ));
+    /** Users by email, then by employee number where it is not also some user's email. */
+    static Map<String, UUID> indexUsersByEmail(Collection<User> users) {
+        Map<String, UUID> index = new HashMap<>();
+        users.stream().filter(u -> u.getEmail() != null)
+                .forEach(u -> index.putIfAbsent(u.getEmail().toLowerCase().trim(), u.getId()));
+        users.stream().filter(u -> u.getEmployeeId() != null && !u.getEmployeeId().isBlank())
+                .forEach(u -> index.putIfAbsent(u.getEmployeeId().toLowerCase().trim(), u.getId()));
+        return index;
     }
 
     /** Resolve the `name` property via reflection-free duck typing. */
@@ -524,7 +546,12 @@ public class AssetImportServiceImpl extends com.assetiq.services.TenantAwareServ
         Cell cell = row.getCell(col, Row.MissingCellPolicy.RETURN_BLANK_AS_NULL);
         if (cell == null) return null;
         if (cell.getCellType() == CellType.NUMERIC) {
-            return (int) cell.getNumericCellValue();
+            double value = cell.getNumericCellValue();
+            if (value != Math.rint(value) || Math.abs(value) > Integer.MAX_VALUE) {
+                throw new IllegalArgumentException(
+                        "Invalid whole number for '" + fieldName + "': '" + dataFormatter.formatCellValue(cell) + "'");
+            }
+            return (int) value;
         }
         String raw = getString(row, col);
         if (raw == null) return null;

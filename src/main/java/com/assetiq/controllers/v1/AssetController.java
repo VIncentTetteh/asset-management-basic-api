@@ -258,9 +258,15 @@ public class AssetController {
      * Expected sheet columns (row 1 = header, data starts at row 2):
      * name | assetTag | serialNumber | description | assetType | manufacturer | model |
      * purchaseDate | purchaseCost | currency | depreciationMethod | usefulLifeMonths |
-     * residualValue | warrantyExpiryDate | status | condition | categoryId | locationId |
-     * supplierId | departmentId | assignedUserId | invoiceId | insurancePolicyId
-     * Any columns appended after the standard template are persisted as asset custom fields.
+     * residualValue | warrantyExpiryDate | status | condition | category | location |
+     * supplier | department | assignedUserEmail | invoiceId | insurancePolicyId
+     * </p>
+     * <p>
+     * References are human-readable, not IDs: category, location and supplier by name,
+     * department by name or code, the assigned user by email or employee number.
+     * Columns after the standard template become asset custom fields only when
+     * {@code commercial.governed-custom-fields} is enabled; otherwise a row with a value
+     * in one is rejected. See {@code AssetImportServiceImpl}.
      * </p>
      */
     @PostMapping(value = "/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
