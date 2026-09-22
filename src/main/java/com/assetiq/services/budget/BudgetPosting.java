@@ -35,10 +35,16 @@ public record BudgetPosting(
                 kind == BudgetLedgerKind.PO_COMMIT);
     }
 
-    /** An expense event. Expenses are not funds-checked (they record money already spent). */
+    /**
+     * An expense event. The commitment made at submit is funds-checked, as a
+     * purchase-order approval is: an expense larger than the budget's available
+     * amount is refused (409) rather than silently pushing the budget over. Later
+     * postings (spend, release, reversal) only move an amount already reserved.
+     */
     public static BudgetPosting forExpense(BudgetLedgerKind kind, Expense expense) {
         return new BudgetPosting(kind, expense.getAmount(), expense.getCurrency(), SOURCE_EXPENSE,
-                expense.getId(), expense.getTitle(), keyFor(kind, expense.getId()), false);
+                expense.getId(), expense.getTitle(), keyFor(kind, expense.getId()),
+                kind == BudgetLedgerKind.EXPENSE_COMMIT);
     }
 
     /** A manual adjustment in the budget's own currency. */

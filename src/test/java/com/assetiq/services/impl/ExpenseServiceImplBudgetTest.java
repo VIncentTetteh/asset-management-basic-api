@@ -184,6 +184,48 @@ class ExpenseServiceImplBudgetTest {
                 .hasMessageContaining("CLOSED");
     }
 
+    @Test
+    @DisplayName("submitting more than the budget has available is refused (409), as PO approval is")
+    void submitOverAvailable_refused() {
+        budget.setCommittedAmount(new BigDecimal("900"));
+        when(budgetRepository.findByIdAndOrganisationAndDeletedAtIsNull(budget.getId(), org))
+                .thenReturn(Optional.of(budget));
+        when(currencyResolver.resolveOrDefault("GHS")).thenReturn("GHS");
+        com.assetiq.dto.ExpenseDto dto = new com.assetiq.dto.ExpenseDto();
+        dto.setTitle("Laptop");
+        dto.setAmount(new BigDecimal("100.01"));
+        dto.setCurrency("GHS");
+        dto.setLinkedBudgetId(budget.getId());
+
+        assertThatThrownBy(() -> service.submit(dto))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Insufficient funds");
+        assertThat(ledger.entries).isEmpty();
+
+        dto.setAmount(new BigDecimal("100.00"));
+        service.submit(dto);
+        assertThat(budget.getCommittedAmount()).isEqualByComparingTo("1000");
+    }
+
+    @Test
+    @DisplayName("an unknown department or asset is a field error, not silently dropped")
+    void submitUnknownLinks_refused() {
+        when(currencyResolver.resolveOrDefault(any())).thenReturn("GHS");
+        com.assetiq.dto.ExpenseDto dto = new com.assetiq.dto.ExpenseDto();
+        dto.setTitle("Fuel");
+        dto.setAmount(new BigDecimal("10"));
+        dto.setDepartmentId(UUID.randomUUID());
+        assertThatThrownBy(() -> service.submit(dto))
+                .isInstanceOf(com.assetiq.exceptions.FieldValidationException.class)
+                .extracting("field").isEqualTo("departmentId");
+
+        dto.setDepartmentId(null);
+        dto.setLinkedAssetId(UUID.randomUUID());
+        assertThatThrownBy(() -> service.submit(dto))
+                .isInstanceOf(com.assetiq.exceptions.FieldValidationException.class)
+                .extracting("field").isEqualTo("linkedAssetId");
+    }
+
     private User user(String email) {
         User user = new User();
         user.setId(UUID.randomUUID());

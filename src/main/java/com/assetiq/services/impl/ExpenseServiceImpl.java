@@ -1,6 +1,7 @@
 package com.assetiq.services.impl;
 
 import com.assetiq.dto.ExpenseDto;
+import com.assetiq.exceptions.FieldValidationException;
 import com.assetiq.dto.ExpenseFilterRequest;
 import com.assetiq.dto.PagedResponseDto;
 import com.assetiq.enums.BudgetLedgerKind;
@@ -86,8 +87,8 @@ public class ExpenseServiceImpl extends TenantAwareService implements ExpenseSer
         expense.setExpenseDate(dto.getExpenseDate() != null ? dto.getExpenseDate() : LocalDate.now());
 
         if (dto.getLinkedAssetId() != null) {
-            assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(dto.getLinkedAssetId(), org)
-                    .ifPresent(expense::setLinkedAsset);
+            expense.setLinkedAsset(assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(dto.getLinkedAssetId(), org)
+                    .orElseThrow(() -> new FieldValidationException("linkedAssetId", "Asset not found in your organisation")));
         }
         if (dto.getLinkedBudgetId() != null) {
             expense.setLinkedBudget(budgetRepository
@@ -95,8 +96,8 @@ public class ExpenseServiceImpl extends TenantAwareService implements ExpenseSer
                     .orElseThrow(() -> new IllegalArgumentException("Budget not found in your organisation")));
         }
         if (dto.getDepartmentId() != null) {
-            departmentRepository.findByIdAndOrganisationAndDeletedAtIsNull(dto.getDepartmentId(), org)
-                    .ifPresent(expense::setDepartment);
+            expense.setDepartment(departmentRepository.findByIdAndOrganisationAndDeletedAtIsNull(dto.getDepartmentId(), org)
+                    .orElseThrow(() -> new FieldValidationException("departmentId", "Department not found in your organisation")));
         }
         if (expense.getLinkedBudget() != null && !sameCurrency(expense, expense.getLinkedBudget())) {
             // Reject rather than convert: a budget's committed/spent figures must stay
