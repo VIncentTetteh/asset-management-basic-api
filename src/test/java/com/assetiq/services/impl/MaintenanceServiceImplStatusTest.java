@@ -159,8 +159,9 @@ class MaintenanceServiceImplStatusTest {
         dto.setAssetId(asset.getId());
         dto.setMaintenanceType(MaintenanceType.ROUTINE);
         dto.setStatus(MaintenanceStatus.COMPLETED);
-        service.createMaintenanceRecord(dto);
+        MaintenanceRecordDto created = service.createMaintenanceRecord(dto);
         assertThat(asset.getStatus()).isEqualTo(AssetStatus.IN_USE);
+        assertThat(created.getPerformedDate()).isEqualTo(java.time.LocalDate.now());
     }
 
     @Test

@@ -26,6 +26,7 @@ public class MaintenanceRecordDto {
 
     private String description;
 
+    @NotNull(groups = OnCreate.class, message = "Scheduled date is required")
     private LocalDate scheduledDate;
 
     private LocalDate performedDate;

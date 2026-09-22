@@ -1,6 +1,11 @@
 package com.assetiq.validation;
 
 import com.assetiq.dto.LocationDto;
+import com.assetiq.dto.MaintenanceRecordDto;
+import com.assetiq.enums.MaintenanceType;
+import jakarta.validation.groups.Default;
+import java.math.BigDecimal;
+import java.util.UUID;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
@@ -54,5 +59,16 @@ class AssetOperationsDtoRulesTest {
 
         dto.setCountry("gh");
         assertThat(invalidFields(dto)).containsExactly("country");
+    }
+
+    @Test
+    void maintenanceNeedsAScheduledDateOnCreateAndACostOfZeroOrMore() {
+        MaintenanceRecordDto dto = new MaintenanceRecordDto();
+        dto.setAssetId(UUID.randomUUID());
+        dto.setMaintenanceType(MaintenanceType.ROUTINE);
+        dto.setCost(new BigDecimal("-1"));
+
+        assertThat(invalidFields(dto, Default.class, OnCreate.class)).containsExactlyInAnyOrder("scheduledDate", "cost");
+        assertThat(invalidFields(dto)).containsExactly("cost");
     }
 }

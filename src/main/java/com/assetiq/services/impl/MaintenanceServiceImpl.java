@@ -66,6 +66,10 @@ public class MaintenanceServiceImpl extends TenantAwareService implements Mainte
         record.setCost(recordDto.getCost());
         record.setCurrency(recordCurrency(recordDto.getCurrency(), asset));
         record.setStatus(recordDto.getStatus() != null ? recordDto.getStatus() : MaintenanceStatus.SCHEDULED);
+        // Work logged as already done was performed today unless the request says when.
+        if (record.getStatus() == MaintenanceStatus.COMPLETED && record.getPerformedDate() == null) {
+            record.setPerformedDate(LocalDate.now());
+        }
         record.setNextDueDate(recordDto.getNextDueDate());
 
         if (recordDto.getVendorId() != null) {
