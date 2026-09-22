@@ -174,11 +174,22 @@ public class DpaServiceImpl implements DpaService {
         DsarRequest dsar = dsarRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
                 .orElseThrow(() -> new ResourceNotFoundException("DSAR request not found: " + id));
 
+        DsarRequest.Status current = dsar.getStatus();
+        boolean closed = current == DsarRequest.Status.COMPLETED || current == DsarRequest.Status.REJECTED;
+        if (closed && newStatus != current) {
+            // A completed or rejected request is the organisation's record of its
+            // statutory response; it is not reopened.
+            throw new IllegalStateException("A " + current + " DSAR request cannot be moved to " + newStatus);
+        }
         dsar.setStatus(newStatus);
         if (responseSummary != null) dsar.setResponseSummary(responseSummary);
-        if (newStatus == DsarRequest.Status.COMPLETED) dsar.setCompletedAt(Instant.now());
+        boolean closing = (newStatus == DsarRequest.Status.COMPLETED || newStatus == DsarRequest.Status.REJECTED)
+                && newStatus != current;
+        if (closing) dsar.setCompletedAt(Instant.now());
         if (assignedToUserId != null) {
-            userRepository.findById(assignedToUserId).ifPresent(dsar::setAssignedTo);
+            // Only a user of the same organisation (was findById: any tenant's user).
+            dsar.setAssignedTo(userRepository.findByIdAndOrganisation(assignedToUserId, org)
+                    .orElseThrow(() -> new IllegalArgumentException("Assignee not found in your organisation")));
         }
 
         log.info("[DPA] DSAR {} updated to status={} org={}", id, newStatus, org.getId());
