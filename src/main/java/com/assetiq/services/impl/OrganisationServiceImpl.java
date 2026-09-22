@@ -119,9 +119,23 @@ public class OrganisationServiceImpl implements OrganisationService {
                 .orElseThrow(() -> new EntityNotFoundException("Organisation not found"));
 
         assertCanManage(o, "update");
+        boolean ownTenant = TenantContext.hasOrganisationId() && o.getId().equals(TenantContext.getOrganisationId());
+        if (ownTenant && dto.getStatus() != null && dto.getStatus() != o.getStatus()) {
+            // Setting your own tenant INACTIVE/SUSPENDED signs everyone out for good
+            // (the JWT filter refuses inactive tenants) with nobody left to undo it.
+            // Suspension is billing's job; closure goes through account deletion.
+            throw new IllegalStateException("Your organisation's status is managed by billing and account closure, "
+                    + "not by this form");
+        }
 
-        if (dto.getName() != null)
-            o.setName(dto.getName());
+        if (dto.getName() != null && !dto.getName().isBlank()) {
+            String name = dto.getName().trim();
+            if (!name.equalsIgnoreCase(o.getName())
+                    && organisationRepository.existsByNameIgnoreCaseAndDeletedAtIsNull(name)) {
+                throw new IllegalStateException("Organisation with the same name already exists");
+            }
+            o.setName(name);
+        }
         if (dto.getRegistrationNumber() != null)
             o.setRegistrationNumber(dto.getRegistrationNumber());
         if (dto.getTaxId() != null)
@@ -158,6 +172,11 @@ public class OrganisationServiceImpl implements OrganisationService {
                 .orElseThrow(() -> new EntityNotFoundException("Organisation not found"));
 
         assertCanManage(o, "delete");
+        if (TenantContext.hasOrganisationId() && o.getId().equals(TenantContext.getOrganisationId())) {
+            // Soft-deleting the tenant you are signed into skipped the account-closure
+            // flow (confirmation, export window, purge schedule) entirely.
+            throw new IllegalStateException("Close your own organisation through account closure, not this endpoint");
+        }
 
         o.setDeletedAt(Instant.now());
         organisationRepository.save(o);
@@ -185,11 +204,16 @@ public class OrganisationServiceImpl implements OrganisationService {
                 .anyMatch(a -> a.getAuthority().equals("ROLE_ADMIN"));
     }
 
+    /**
+     * Readable when it is the caller's tenant, or (platform admins) one they
+     * created. Non-admins used to be allowed to read ANY organisation by id,
+     * leaking other tenants' contact and tax details.
+     */
     private boolean isAuthorized(Organisation o) {
-        if (!isRestrictedAdmin())
-            return true;
         if (o == null)
             return false;
+        if (!isRestrictedAdmin())
+            return TenantContext.hasOrganisationId() && o.getId().equals(TenantContext.getOrganisationId());
 
         String creator = o.getCreatedBy();
         if (creator != null && creator.equals(getCurrentUserEmail()))
