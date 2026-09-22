@@ -73,6 +73,9 @@ public interface AssetRepository extends JpaRepository<Asset, UUID>, JpaSpecific
 
         Set<Asset> findByLocationIdAndDeletedAtIsNull(UUID locationId);
 
+        /** How many live assets sit at this location — the delete guard's count. */
+        long countByLocationIdAndDeletedAtIsNull(UUID locationId);
+
         Set<Asset> findByAssignedUserIdAndDeletedAtIsNull(UUID userId);
 
         Set<Asset> findByStatusAndDeletedAtIsNull(AssetStatus status);

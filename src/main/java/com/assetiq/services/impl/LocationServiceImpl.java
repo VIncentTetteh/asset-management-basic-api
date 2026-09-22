@@ -4,6 +4,7 @@ import com.assetiq.dto.LocationDto;
 import com.assetiq.config.CachingConfig;
 import com.assetiq.models.Location;
 import com.assetiq.models.Organisation;
+import com.assetiq.repositories.AssetRepository;
 import com.assetiq.repositories.LocationRepository;
 import com.assetiq.repositories.OrganisationRepository;
 import com.assetiq.services.LocationService;
@@ -23,11 +24,14 @@ import java.util.stream.Collectors;
 public class LocationServiceImpl extends TenantAwareService implements LocationService {
 
     private final LocationRepository locationRepository;
+    private final AssetRepository assetRepository;
 
     public LocationServiceImpl(LocationRepository locationRepository,
-            OrganisationRepository organisationRepository) {
+            OrganisationRepository organisationRepository,
+            AssetRepository assetRepository) {
         super(organisationRepository);
         this.locationRepository = locationRepository;
+        this.assetRepository = assetRepository;
     }
 
     @Override
@@ -202,6 +206,13 @@ public class LocationServiceImpl extends TenantAwareService implements LocationS
         if (!locationRepository.findByParentLocationIdAndDeletedAtIsNull(id).isEmpty()) {
             throw new IllegalStateException("'" + location.getName()
                     + "' has sub-locations; move or delete them first");
+        }
+        // Deleting a location with assets on it used to leave those assets
+        // pointing at a deleted row. Mirrors the sub-location guard above.
+        long assetsHere = assetRepository.countByLocationIdAndDeletedAtIsNull(id);
+        if (assetsHere > 0) {
+            throw new IllegalStateException("'" + location.getName() + "' has " + assetsHere
+                    + " asset" + (assetsHere == 1 ? "" : "s") + " assigned; move them first");
         }
         location.setDeletedAt(Instant.now());
         locationRepository.save(location);
