@@ -145,6 +145,19 @@ class ComplianceEditIntegrationTest extends BaseIntegrationTest {
         assertThat(listed.get(0).path("assetCount").asInt()).isZero();
     }
 
+    @Test
+    void incidentTimelineAndCompensatingControlRules() throws Exception {
+        send(post(BASE + "/incidents"), Map.of("title", "Phish", "severity", "P3_MEDIUM",
+                "detectedAt", "2026-09-10T12:00:00Z", "resolvedAt", "2026-09-01T12:00:00Z"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.errors.resolvedAt").exists());
+        JsonNode resolved = json(send(post(BASE + "/incidents"), Map.of("title", "Phish", "severity", "P3_MEDIUM",
+                "status", "RESOLVED")).andExpect(status().isCreated()).andReturn());
+        assertThat(resolved.path("resolvedAt").asText()).isNotBlank();
+
+        send(post(BASE + "/pci-saq"), Map.of("requirementNumber", "8.3", "complianceStatus", "COMPENSATING_CONTROL"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.errors.compensatingControl").exists());
+    }
+
     private ResultActions send(MockHttpServletRequestBuilder builder, Map<String, Object> body) throws Exception {
         return mockMvc.perform(auth(builder).contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(body)));

@@ -471,6 +471,7 @@ public class ComplianceServiceImpl extends TenantAwareService implements Complia
         SecurityIncident incident = new SecurityIncident();
         incident.setOrganisation(org);
         applyIncidentFields(incident, dto, false);
+        checkIncidentTimeline(incident);
         return toIncidentDto(securityIncidentRepository.save(incident));
     }
 
@@ -490,6 +491,7 @@ public class ComplianceServiceImpl extends TenantAwareService implements Complia
         SecurityIncident incident = securityIncidentRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
                 .orElseThrow(() -> new IllegalArgumentException("Incident not found"));
         applyIncidentFields(incident, dto, replace);
+        checkIncidentTimeline(incident);
         return toIncidentDto(securityIncidentRepository.save(incident));
     }
 
@@ -500,6 +502,21 @@ public class ComplianceServiceImpl extends TenantAwareService implements Complia
                 .orElseThrow(() -> new IllegalArgumentException("Incident not found"));
         incident.setDeletedAt(Instant.now());
         securityIncidentRepository.save(incident);
+    }
+
+    /**
+     * A resolved or closed incident has a resolution date (stamped now when none was
+     * given), and an incident cannot be resolved before it was detected.
+     */
+    private static void checkIncidentTimeline(SecurityIncident i) {
+        boolean done = i.getStatus() == SecurityIncident.IncidentStatus.RESOLVED
+                || i.getStatus() == SecurityIncident.IncidentStatus.CLOSED;
+        if (done && i.getResolvedAt() == null) {
+            i.setResolvedAt(Instant.now());
+        }
+        if (i.getResolvedAt() != null && i.getDetectedAt() != null && i.getResolvedAt().isBefore(i.getDetectedAt())) {
+            throw new FieldValidationException("resolvedAt", "must be on or after the detection date");
+        }
     }
 
     private void applyIncidentFields(SecurityIncident i, SecurityIncidentDto dto, boolean replace) {
@@ -939,6 +956,7 @@ public class ComplianceServiceImpl extends TenantAwareService implements Complia
                 });
         assertRequirementNumberFree(org, dto.getRequirementNumber(), record.getId());
         applyPciSaqFields(record, dto, false);
+        checkCompensatingControl(record);
         return toPciSaqDto(pciSaqRecordRepository.save(record));
     }
 
@@ -959,6 +977,7 @@ public class ComplianceServiceImpl extends TenantAwareService implements Complia
                 .orElseThrow(() -> new IllegalArgumentException("PCI SAQ record not found"));
         assertRequirementNumberFree(org, dto.getRequirementNumber(), record.getId());
         applyPciSaqFields(record, dto, replace);
+        checkCompensatingControl(record);
         return toPciSaqDto(pciSaqRecordRepository.save(record));
     }
 
@@ -971,6 +990,15 @@ public class ComplianceServiceImpl extends TenantAwareService implements Complia
                     throw new DuplicateFieldException("requirementNumber",
                             "Requirement " + requirementNumber + " is already recorded");
                 });
+    }
+
+    /** An answer of COMPENSATING_CONTROL must say what the compensating control is. */
+    private static void checkCompensatingControl(PciSaqRecord r) {
+        if (r.getComplianceStatus() == PciSaqRecord.ComplianceAnswer.COMPENSATING_CONTROL
+                && (r.getCompensatingControl() == null || r.getCompensatingControl().isBlank())) {
+            throw new FieldValidationException("compensatingControl",
+                    "describe the compensating control for this requirement");
+        }
     }
 
     private void applyPciSaqFields(PciSaqRecord r, PciSaqRecordDto dto, boolean replace) {
