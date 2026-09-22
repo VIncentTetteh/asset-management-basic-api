@@ -26,7 +26,17 @@ import java.util.UUID;
 public class RefreshSessionService {
 
     public record IssuedRefreshToken(String token, Instant expiresAt) {}
-    public record RotatedRefreshToken(User user, String token, Instant expiresAt) {}
+    /**
+     * The rotated session plus everything the caller needs to mint the access token.
+     *
+     * <p>Role, organisation and department are captured here, inside the transaction.
+     * The caller builds the token after this method returns, when the session is closed
+     * (open-in-view is off), so reading those lazy associations there threw
+     * LazyInitializationException: every silent refresh failed with a 500 and users were
+     * logged out when their access token expired.
+     */
+    public record RotatedRefreshToken(User user, String token, Instant expiresAt,
+                                      String roleName, UUID organisationId, UUID departmentId) {}
 
     private static final SecureRandom RANDOM = new SecureRandom();
     private final RefreshSessionRepository repository;
@@ -72,7 +82,10 @@ public class RefreshSessionService {
         current.setRevokedAt(Instant.now());
         current.setReplacedByTokenHash(hash(next.token()));
         repository.save(current);
-        return new RotatedRefreshToken(user, next.token(), next.expiresAt());
+        return new RotatedRefreshToken(user, next.token(), next.expiresAt(),
+                user.getRole() == null ? null : user.getRole().getName(),
+                user.getOrganisation().getId(),
+                user.getDepartment() == null ? null : user.getDepartment().getId());
     }
 
     public void revoke(String rawToken) {

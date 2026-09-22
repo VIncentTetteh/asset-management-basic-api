@@ -365,15 +365,17 @@ public class AuthController {
         claims.put("lastName", user.getLastName());
         claims.put("sessionVersion", user.getSessionVersion());
 
-        if (user.getRole() != null) {
-            String roleName = user.getRole().getName();
+        // Associations were captured inside the rotation transaction; touching the lazy
+        // user.getRole() here (no session) is what made every refresh a 500.
+        if (rotated.roleName() != null) {
+            String roleName = rotated.roleName();
             claims.put("role", roleName.startsWith("ROLE_") ? roleName : "ROLE_" + roleName);
         }
-        if (user.getOrganisation() != null) {
-            claims.put("organisationId", user.getOrganisation().getId().toString());
+        if (rotated.organisationId() != null) {
+            claims.put("organisationId", rotated.organisationId().toString());
         }
-        if (user.getDepartment() != null) {
-            claims.put("departmentId", user.getDepartment().getId().toString());
+        if (rotated.departmentId() != null) {
+            claims.put("departmentId", rotated.departmentId().toString());
         }
 
         String newToken = jwtUtil.generateToken(user.getEmail(), claims, jwtExpirationMillis);
