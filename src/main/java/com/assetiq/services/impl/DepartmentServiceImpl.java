@@ -178,8 +178,11 @@ public class DepartmentServiceImpl implements DepartmentService {
                 d.setName(name);
             }
         }
-        if (dto.getDescription() != null)
-            d.setDescription(dto.getDescription());
+        if (dto.getDescription() != null) {
+            // As with the codes, an empty value clears the description.
+            String description = dto.getDescription().trim();
+            d.setDescription(description.isEmpty() ? null : description);
+        }
         if (dto.getDepartmentCode() != null) {
             if (!dto.getDepartmentCode().isBlank() &&
                     departmentRepository.existsByDepartmentCodeIgnoreCaseAndOrganisationAndDeletedAtIsNullAndIdNot(dto.getDepartmentCode(), org, id)) {

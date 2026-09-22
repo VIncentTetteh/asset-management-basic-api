@@ -92,4 +92,25 @@ class DepartmentServiceImplRenameTest {
         assertThatThrownBy(() -> service.update(dept.getId(), rename("   ")))
                 .isInstanceOf(IllegalArgumentException.class);
     }
+
+    @Test
+    void emptyDescriptionClearsIt() {
+        dept.setDescription("Money matters");
+        DepartmentDto dto = new DepartmentDto();
+        dto.setDescription("");
+
+        service.update(dept.getId(), dto);
+
+        assertThat(dept.getDescription()).isNull();
+    }
+
+    @Test
+    void descriptionIsSavedTrimmed() {
+        DepartmentDto dto = new DepartmentDto();
+        dto.setDescription("  Money matters ");
+
+        service.update(dept.getId(), dto);
+
+        assertThat(dept.getDescription()).isEqualTo("Money matters");
+    }
 }
