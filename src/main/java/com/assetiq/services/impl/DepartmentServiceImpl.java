@@ -163,11 +163,20 @@ public class DepartmentServiceImpl implements DepartmentService {
         Department d = departmentRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
                 .orElseThrow(() -> new com.assetiq.exceptions.ResourceNotFoundException("Department not found in your organisation"));
 
-        if (dto.getName() != null && !dto.getName().equalsIgnoreCase(d.getName())) {
-            if (departmentRepository.existsByNameIgnoreCaseAndOrganisationAndDeletedAtIsNull(dto.getName(), org)) {
-                throw new IllegalStateException("Department with the same name already exists in this organisation");
+        if (dto.getName() != null) {
+            String name = dto.getName().trim();
+            if (name.isEmpty()) {
+                throw new IllegalArgumentException("Department name is required");
             }
-            d.setName(dto.getName());
+            // Compared exactly, so a rename that only changes letter case is saved
+            // (it used to be skipped by an equalsIgnoreCase guard). The duplicate
+            // check excludes this department so it cannot collide with itself.
+            if (!name.equals(d.getName())) {
+                if (departmentRepository.existsByNameIgnoreCaseAndOrganisationAndDeletedAtIsNullAndIdNot(name, org, id)) {
+                    throw new IllegalStateException("Department with the same name already exists in this organisation");
+                }
+                d.setName(name);
+            }
         }
         if (dto.getDescription() != null)
             d.setDescription(dto.getDescription());
