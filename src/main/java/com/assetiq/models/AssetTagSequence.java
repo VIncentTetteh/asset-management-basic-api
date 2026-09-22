@@ -1,15 +1,13 @@
 package com.assetiq.models;
 
 import jakarta.persistence.Column;
-import jakarta.persistence.Embeddable;
-import jakarta.persistence.EmbeddedId;
 import jakarta.persistence.Entity;
+import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import lombok.Getter;
 import lombok.Setter;
 
-import java.io.Serializable;
-import java.util.Objects;
 import java.util.UUID;
 
 /**
@@ -21,39 +19,23 @@ import java.util.UUID;
  * creates for the integration tests, which build the schema from the entities).
  */
 @Entity
-@Table(name = "asset_tag_sequence")
+@Table(name = "asset_tag_sequence",
+        uniqueConstraints = @UniqueConstraint(name = "uq_asset_tag_sequence_org_prefix",
+                columnNames = {"organisation_id", "prefix"}))
 @Getter
 @Setter
 public class AssetTagSequence {
 
-    @EmbeddedId
-    private Key id;
+    @Id
+    @Column(name = "id", nullable = false)
+    private UUID id;
+
+    @Column(name = "organisation_id", nullable = false)
+    private UUID organisationId;
+
+    @Column(name = "prefix", nullable = false, length = 64)
+    private String prefix;
 
     @Column(name = "next_number", nullable = false)
     private long nextNumber;
-
-    /** Organisation plus tag prefix: the natural key of a counter. */
-    @Embeddable
-    @Getter
-    @Setter
-    public static class Key implements Serializable {
-
-        @Column(name = "organisation_id", nullable = false)
-        private UUID organisationId;
-
-        @Column(name = "prefix", nullable = false, length = 64)
-        private String prefix;
-
-        @Override
-        public boolean equals(Object other) {
-            if (this == other) return true;
-            if (!(other instanceof Key key)) return false;
-            return Objects.equals(organisationId, key.organisationId) && Objects.equals(prefix, key.prefix);
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(organisationId, prefix);
-        }
-    }
 }

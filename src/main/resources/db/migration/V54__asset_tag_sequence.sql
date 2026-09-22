@@ -17,10 +17,12 @@
 --    GROUP BY organisation_id, asset_tag
 --   HAVING COUNT(*) > 1;
 CREATE TABLE IF NOT EXISTS asset_tag_sequence (
+    id              UUID         NOT NULL,
     organisation_id UUID         NOT NULL,
     prefix          VARCHAR(64)  NOT NULL,
     next_number     BIGINT       NOT NULL,
-    CONSTRAINT pk_asset_tag_sequence PRIMARY KEY (organisation_id, prefix),
+    CONSTRAINT pk_asset_tag_sequence PRIMARY KEY (id),
+    CONSTRAINT uq_asset_tag_sequence_org_prefix UNIQUE (organisation_id, prefix),
     CONSTRAINT fk_asset_tag_sequence_org FOREIGN KEY (organisation_id)
         REFERENCES organisation (id) ON DELETE CASCADE
 );

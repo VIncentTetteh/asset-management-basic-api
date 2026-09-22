@@ -42,8 +42,9 @@ public class AssetTagCounterSeeder {
                 Integer.class, organisationId, prefix);
         if (existing != null && existing > 0) return;
         try {
-            jdbc.update("INSERT INTO asset_tag_sequence (organisation_id, prefix, next_number) VALUES (?, ?, ?)",
-                    organisationId, prefix, highestExisting);
+            jdbc.update("INSERT INTO asset_tag_sequence (id, organisation_id, prefix, next_number) "
+                            + "VALUES (?, ?, ?, ?)",
+                    UUID.randomUUID(), organisationId, prefix, highestExisting);
         } catch (DataIntegrityViolationException raced) {
             // Another request seeded the same counter first; theirs is as good as ours.
             log.debug("Asset tag counter {}/{} was seeded concurrently", organisationId, prefix);
