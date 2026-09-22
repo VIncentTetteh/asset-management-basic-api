@@ -127,4 +127,66 @@ class CategoryServiceImplTest {
         assertThatThrownBy(() -> service.patchCategory(category.getId(), dto))
                 .isInstanceOf(IllegalArgumentException.class);
     }
+
+    private Category child(Category parent, String name) {
+        Category c = new Category();
+        c.setId(UUID.randomUUID());
+        c.setName(name);
+        c.setOrganisation(org);
+        c.setParentCategory(parent);
+        when(categoryRepository.findByIdAndOrganisationAndDeletedAtIsNull(c.getId(), org)).thenReturn(Optional.of(c));
+        return c;
+    }
+
+    @Test
+    void parentCannotBeADescendant() {
+        Category sub = child(category, "Ultrabooks");
+        Category subSub = child(sub, "13-inch");
+        CategoryDto dto = new CategoryDto();
+        dto.setParentCategoryId(subSub.getId());
+
+        assertThatThrownBy(() -> service.patchCategory(category.getId(), dto))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("own sub-categories");
+        assertThatThrownBy(() -> service.updateCategory(category.getId(), fullReplace(sub.getId())))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(category.getParentCategory()).isNull();
+    }
+
+    @Test
+    void parentCannotBeItself() {
+        CategoryDto dto = new CategoryDto();
+        dto.setParentCategoryId(category.getId());
+
+        assertThatThrownBy(() -> service.patchCategory(category.getId(), dto))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("its own parent");
+    }
+
+    @Test
+    void unrelatedParentIsAccepted() {
+        Category hardware = child(null, "Hardware");
+        CategoryDto dto = new CategoryDto();
+        dto.setParentCategoryId(hardware.getId());
+
+        assertThat(service.patchCategory(category.getId(), dto).getParentCategoryId()).isEqualTo(hardware.getId());
+    }
+
+    @Test
+    void fullReplaceSetsAndClearsTheParent() {
+        Category hardware = child(null, "Hardware");
+
+        service.updateCategory(category.getId(), fullReplace(hardware.getId()));
+        assertThat(category.getParentCategory()).isEqualTo(hardware);
+
+        service.updateCategory(category.getId(), fullReplace(null));
+        assertThat(category.getParentCategory()).isNull();
+    }
+
+    private static CategoryDto fullReplace(UUID parentId) {
+        CategoryDto dto = new CategoryDto();
+        dto.setName("Laptops");
+        dto.setParentCategoryId(parentId);
+        return dto;
+    }
 }

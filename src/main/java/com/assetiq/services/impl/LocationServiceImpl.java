@@ -213,13 +213,9 @@ public class LocationServiceImpl extends TenantAwareService implements LocationS
      * every tree walk over locations.
      */
     static void assertNotDescendant(Location proposedParent, UUID selfId) {
-        java.util.Set<UUID> seen = new java.util.HashSet<>();
-        for (Location cursor = proposedParent; cursor != null; cursor = cursor.getParentLocation()) {
-            if (selfId.equals(cursor.getId())) {
-                throw new IllegalArgumentException("A location cannot be placed under one of its own sub-locations");
-            }
-            if (!seen.add(cursor.getId())) return; // existing cycle; stop walking
-        }
+        com.assetiq.services.HierarchyGuard.assertNotDescendant(proposedParent, selfId,
+                Location::getParentLocation, Location::getId,
+                "A location cannot be placed under one of its own sub-locations");
     }
 
     private LocationDto mapToDto(Location location) {

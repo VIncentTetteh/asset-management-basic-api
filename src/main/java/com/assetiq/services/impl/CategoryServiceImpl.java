@@ -13,6 +13,7 @@ import com.assetiq.repositories.DepreciationPolicyRepository;
 import com.assetiq.repositories.OrganisationRepository;
 import com.assetiq.services.finance.DepreciationCalculator;
 import com.assetiq.services.CategoryService;
+import com.assetiq.services.HierarchyGuard;
 import com.assetiq.services.TenantAwareService;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
@@ -61,10 +62,7 @@ public class CategoryServiceImpl extends TenantAwareService implements CategoryS
         category.setOrganisation(org);
 
         if (categoryDto.getParentCategoryId() != null) {
-            Category parentCategory = categoryRepository.findByIdAndOrganisationAndDeletedAtIsNull(
-                    categoryDto.getParentCategoryId(), org)
-                    .orElseThrow(() -> new IllegalArgumentException("Parent category not found in your organisation"));
-            category.setParentCategory(parentCategory);
+            category.setParentCategory(requireParent(categoryDto.getParentCategoryId(), null, org));
         }
         if (categoryDto.getDepreciationPolicyId() != null) {
             category.setDepreciationPolicy(requirePolicy(categoryDto.getDepreciationPolicyId(), org));
@@ -117,6 +115,11 @@ public class CategoryServiceImpl extends TenantAwareService implements CategoryS
         category.setDescription(categoryDto.getDescription());
         category.setAssetPrefixCode(categoryDto.getAssetPrefixCode());
         category.setDefaultWarrantyPeriodMonths(categoryDto.getDefaultWarrantyPeriodMonths());
+        // Full replace: the parent is set from the body, and a missing one moves the
+        // category to the top level (PUT used to ignore the parent entirely).
+        category.setParentCategory(categoryDto.getParentCategoryId() != null
+                ? requireParent(categoryDto.getParentCategoryId(), id, org)
+                : null);
         applyDepreciationPolicyAndClears(category, categoryDto, org);
 
         return mapToDto(categoryRepository.save(category));
@@ -142,10 +145,7 @@ public class CategoryServiceImpl extends TenantAwareService implements CategoryS
             category.setDefaultWarrantyPeriodMonths(categoryDto.getDefaultWarrantyPeriodMonths());
         }
         if (categoryDto.getParentCategoryId() != null) {
-            Category parentCategory = categoryRepository.findByIdAndOrganisationAndDeletedAtIsNull(
-                    categoryDto.getParentCategoryId(), org)
-                    .orElseThrow(() -> new IllegalArgumentException("Parent category not found in your organisation"));
-            category.setParentCategory(parentCategory);
+            category.setParentCategory(requireParent(categoryDto.getParentCategoryId(), id, org));
         }
         applyDepreciationPolicyAndClears(category, categoryDto, org);
 
@@ -189,6 +189,21 @@ public class CategoryServiceImpl extends TenantAwareService implements CategoryS
                 }
             }
         }
+    }
+
+    /**
+     * Loads a parent category and refuses one that is the category itself or one of
+     * its sub-categories, which would make a cycle.
+     */
+    private Category requireParent(UUID parentId, UUID selfId, Organisation org) {
+        Category parent = categoryRepository.findByIdAndOrganisationAndDeletedAtIsNull(parentId, org)
+                .orElseThrow(() -> new IllegalArgumentException("Parent category not found in your organisation"));
+        if (parent.getId().equals(selfId)) {
+            throw new IllegalArgumentException("A category cannot be its own parent");
+        }
+        HierarchyGuard.assertNotDescendant(parent, selfId, Category::getParentCategory, Category::getId,
+                "A category cannot be placed under one of its own sub-categories");
+        return parent;
     }
 
     private DepreciationPolicy requirePolicy(UUID policyId, Organisation org) {
