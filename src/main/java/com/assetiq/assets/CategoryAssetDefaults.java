@@ -32,8 +32,17 @@ public final class CategoryAssetDefaults {
      * The next tag after the highest {@code PREFIX-<number>} among {@code existingTags}.
      * Tags that only share the leading characters (e.g. {@code LAPTOP-7} for prefix
      * {@code LAP}) or have a non-numeric suffix are ignored.
+     *
+     * <p>Reading the tags and adding one is not safe against a concurrent save:
+     * {@link AssetTagAllocator} claims the number instead, and this is only used
+     * to seed its counter. Kept for callers that generate tags outside a request.
      */
     public static String nextTag(String prefix, Collection<String> existingTags) {
+        return formatTag(prefix, highestNumber(prefix, existingTags) + 1);
+    }
+
+    /** The highest {@code PREFIX-<number>} among {@code existingTags}, or 0 for none. */
+    public static long highestNumber(String prefix, Collection<String> existingTags) {
         Pattern own = Pattern.compile("^" + Pattern.quote(prefix) + "-(\\d+)$");
         long max = 0;
         for (String tag : existingTags) {
@@ -47,7 +56,12 @@ public final class CategoryAssetDefaults {
                 }
             }
         }
-        return prefix + "-" + String.format("%0" + TAG_NUMBER_WIDTH + "d", max + 1);
+        return max;
+    }
+
+    /** {@code PREFIX-0007}: the number zero-padded to {@link #TAG_NUMBER_WIDTH}. */
+    public static String formatTag(String prefix, long number) {
+        return prefix + "-" + String.format("%0" + TAG_NUMBER_WIDTH + "d", number);
     }
 
     /**

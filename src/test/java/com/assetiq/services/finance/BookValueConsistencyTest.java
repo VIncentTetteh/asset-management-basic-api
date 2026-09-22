@@ -88,7 +88,8 @@ class BookValueConsistencyTest {
                 mock(AuditEventRepository.class), mock(AssetTransferRepository.class), maintenanceRecordRepository,
                 disposalRecordRepository, mock(NotificationService.class), mock(EmailService.class),
                 mock(CurrencyResolver.class), money,
-                mock(com.assetiq.repositories.CheckoutRecordRepository.class));
+                mock(com.assetiq.repositories.CheckoutRecordRepository.class),
+                mock(com.assetiq.assets.AssetTagAllocator.class));
 
         Category laptops = category("Laptops", policy(DepreciationMethod.DECLINING_BALANCE, 36, "10"));
         Category furniture = category("Furniture", null);

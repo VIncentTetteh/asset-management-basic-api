@@ -85,6 +85,8 @@ class AssetServiceImplTest {
     private Asset asset;
     private PurchaseOrder purchaseOrder;
 
+    @Mock com.assetiq.assets.AssetTagAllocator assetTagAllocator;
+
     @BeforeEach
     void setUp() {
         service = new AssetServiceImpl(assetRepository, departmentRepository, organisationRepository,
@@ -92,7 +94,8 @@ class AssetServiceImplTest {
                 purchaseOrderRepository, entityManager, usageLimitService, auditEventRepository,
                 assetTransferRepository, maintenanceRecordRepository, disposalRecordRepository,
                 notificationService, emailService, currencyResolver,
-                MoneyTestSupport.aggregatorWithRates(Map.of("USD", "15")), checkoutRecordRepository);
+                MoneyTestSupport.aggregatorWithRates(Map.of("USD", "15")), checkoutRecordRepository,
+                assetTagAllocator);
 
         org = new Organisation();
         org.setId(UUID.randomUUID());
@@ -526,6 +529,8 @@ class AssetServiceImplTest {
             when(categoryRepository.findByIdAndOrganisationAndDeletedAtIsNull(laptops.getId(), org))
                     .thenReturn(Optional.of(laptops));
             when(assetRepository.findAssetTagsStartingWith(org, "LAP-")).thenReturn(List.of("LAP-0004"));
+            // The number comes from the counter, seeded from the highest tag in use.
+            when(assetTagAllocator.claimNext(org.getId(), "LAP", 4L)).thenReturn(5L);
         }
 
         private AssetDto newAsset() {

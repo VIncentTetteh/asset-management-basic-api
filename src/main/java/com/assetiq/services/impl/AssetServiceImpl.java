@@ -77,6 +77,7 @@ public class AssetServiceImpl implements AssetService {
     private final CurrencyResolver currencyResolver;
     private final MoneyAggregator moneyAggregator;
     private final CheckoutRecordRepository checkoutRecordRepository;
+    private final com.assetiq.assets.AssetTagAllocator assetTagAllocator;
 
     @Value("${app.email.base-url:http://localhost:3000}")
     private String baseUrl;
@@ -99,7 +100,8 @@ public class AssetServiceImpl implements AssetService {
             EmailService emailService,
             CurrencyResolver currencyResolver,
             MoneyAggregator moneyAggregator,
-            CheckoutRecordRepository checkoutRecordRepository) {
+            CheckoutRecordRepository checkoutRecordRepository,
+            com.assetiq.assets.AssetTagAllocator assetTagAllocator) {
         this.assetRepository = assetRepository;
         this.departmentRepository = departmentRepository;
         this.organisationRepository = organisationRepository;
@@ -118,6 +120,7 @@ public class AssetServiceImpl implements AssetService {
         this.emailService = emailService;
         this.currencyResolver = currencyResolver;
         this.moneyAggregator = moneyAggregator;
+        this.assetTagAllocator = assetTagAllocator;
         this.checkoutRecordRepository = checkoutRecordRepository;
     }
 
@@ -362,7 +365,10 @@ public class AssetServiceImpl implements AssetService {
 
             return result;
         } catch (DataIntegrityViolationException ex) {
-            throw new IllegalStateException("Asset with the same name already exists in this department");
+            // Rethrown so DataIntegrityViolationClassifier names the field that
+            // actually clashed (assetTag, serialNumber, ...). It used to be
+            // reported as a duplicate name, which no constraint even checks.
+            throw ex;
         }
     }
 
@@ -376,8 +382,13 @@ public class AssetServiceImpl implements AssetService {
         if (category == null) return;
         String prefix = CategoryAssetDefaults.prefixOf(category);
         if (prefix != null && (asset.getAssetTag() == null || asset.getAssetTag().isBlank())) {
-            asset.setAssetTag(CategoryAssetDefaults.nextTag(prefix,
-                    assetRepository.findAssetTagsStartingWith(organisation, prefix + "-")));
+            // The number is claimed from a counter rather than read from the
+            // existing tags: two saves at once used to read the same highest
+            // number and build the same tag.
+            long highestExisting = CategoryAssetDefaults.highestNumber(prefix,
+                    assetRepository.findAssetTagsStartingWith(organisation, prefix + "-"));
+            long number = assetTagAllocator.claimNext(organisation.getId(), prefix, highestExisting);
+            asset.setAssetTag(CategoryAssetDefaults.formatTag(prefix, number));
         }
         if (asset.getWarrantyExpiryDate() == null) {
             asset.setWarrantyExpiryDate(CategoryAssetDefaults.warrantyExpiry(category, asset.getPurchaseDate()));
