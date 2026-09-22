@@ -19,8 +19,9 @@ public class AssetTransfer extends BaseEntity {
     @JoinColumn(nullable = false)
     private Asset asset;
 
+    /** The asset's department when the transfer was requested; null when it had none. */
     @ManyToOne
-    @JoinColumn(nullable = false)
+    @JoinColumn
     private Department fromDepartment;
 
     @ManyToOne

@@ -66,15 +66,17 @@ public class AssetTransferServiceImpl extends TenantAwareService implements Asse
         Asset asset = assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(transferDto.getAssetId(), org)
                 .orElseThrow(() -> new IllegalArgumentException("Asset not found in your organisation"));
 
-        Department fromDept = departmentRepository.findByIdAndOrganisationAndDeletedAtIsNull(
-                transferDto.getFromDepartmentId(), org)
-                .orElseThrow(() -> new IllegalArgumentException("From-department not found in your organisation"));
+        // The origin is where the asset is now, read from the asset itself. It used
+        // to be taken from the request, so a client could record any origin; an
+        // asset with no department could not be transferred at all.
+        Department fromDept = asset.getDepartment();
+        Location fromLoc = asset.getLocation();
 
         Department toDept = departmentRepository.findByIdAndOrganisationAndDeletedAtIsNull(
                 transferDto.getToDepartmentId(), org)
                 .orElseThrow(() -> new IllegalArgumentException("To-department not found in your organisation"));
 
-        if (fromDept.getId().equals(toDept.getId())) {
+        if (fromDept != null && fromDept.getId().equals(toDept.getId())) {
             throw new IllegalArgumentException("The destination department must differ from the source department");
         }
         if (asset.getStatus() == AssetStatus.DISPOSED || asset.getStatus() == AssetStatus.RETIRED) {
@@ -98,12 +100,7 @@ public class AssetTransferServiceImpl extends TenantAwareService implements Asse
         transfer.setStatus(TransferStatus.REQUESTED);
         transfer.setReason(transferDto.getReason());
 
-        if (transferDto.getFromLocationId() != null) {
-            Location fromLoc = locationRepository.findByIdAndOrganisationAndDeletedAtIsNull(
-                    transferDto.getFromLocationId(), org)
-                    .orElseThrow(() -> new IllegalArgumentException("From-location not found in your organisation"));
-            transfer.setFromLocation(fromLoc);
-        }
+        transfer.setFromLocation(fromLoc);
 
         if (transferDto.getToLocationId() != null) {
             Location toLoc = locationRepository.findByIdAndOrganisationAndDeletedAtIsNull(
@@ -117,7 +114,7 @@ public class AssetTransferServiceImpl extends TenantAwareService implements Asse
         notificationService.notifyOrgAdmins(org, NotificationType.TRANSFER,
                 "Asset Transfer Requested",
                 "A transfer request has been submitted for asset '" + asset.getName() + "' from "
-                        + fromDept.getName() + " to " + toDept.getName() + ".",
+                        + (fromDept != null ? fromDept.getName() : "no department") + " to " + toDept.getName() + ".",
                 savedTransfer.getId(), "/transfers");
         return mapToDto(savedTransfer);
     }
@@ -280,7 +277,9 @@ public class AssetTransferServiceImpl extends TenantAwareService implements Asse
         AssetTransferDto dto = new AssetTransferDto();
         dto.setId(transfer.getId());
         dto.setAssetId(transfer.getAsset().getId());
-        dto.setFromDepartmentId(transfer.getFromDepartment().getId());
+        if (transfer.getFromDepartment() != null) {
+            dto.setFromDepartmentId(transfer.getFromDepartment().getId());
+        }
         dto.setToDepartmentId(transfer.getToDepartment().getId());
         if (transfer.getFromLocation() != null) {
             dto.setFromLocationId(transfer.getFromLocation().getId());

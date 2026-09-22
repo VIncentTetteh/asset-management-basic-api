@@ -70,6 +70,7 @@ class AssetTransferWorkflowTest {
         asset.setStatus(AssetStatus.IN_USE);
         from = dept("Finance");
         to = dept("IT");
+        asset.setDepartment(from);
         requester = user("maker@example.com");
         approver = user("checker@example.com");
         when(assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(asset.getId(), org)).thenReturn(Optional.of(asset));
@@ -188,5 +189,37 @@ class AssetTransferWorkflowTest {
                 .isAnnotationPresent(RequireFreshMfa.class)).isTrue();
         assertThat(AssetTransferController.class.getMethod("completeTransfer", UUID.class)
                 .isAnnotationPresent(RequireFreshMfa.class)).isTrue();
+    }
+
+    @Test
+    void originIsDerivedFromTheAssetNotTheRequest() {
+        actAs(requester);
+        Location store = new Location();
+        store.setId(UUID.randomUUID());
+        asset.setLocation(store);
+        AssetTransferDto dto = new AssetTransferDto();
+        dto.setAssetId(asset.getId());
+        dto.setFromDepartmentId(to.getId()); // a forged origin
+        dto.setFromLocationId(UUID.randomUUID());
+        dto.setToDepartmentId(to.getId());
+
+        AssetTransferDto created = service.createTransferRequest(dto);
+
+        assertThat(created.getFromDepartmentId()).isEqualTo(from.getId());
+        assertThat(created.getFromLocationId()).isEqualTo(store.getId());
+    }
+
+    @Test
+    void assetWithoutDepartmentCanBeTransferred() {
+        actAs(requester);
+        asset.setDepartment(null);
+        AssetTransferDto dto = new AssetTransferDto();
+        dto.setAssetId(asset.getId());
+        dto.setToDepartmentId(to.getId());
+
+        AssetTransferDto created = service.createTransferRequest(dto);
+
+        assertThat(created.getFromDepartmentId()).isNull();
+        assertThat(created.getToDepartmentId()).isEqualTo(to.getId());
     }
 }

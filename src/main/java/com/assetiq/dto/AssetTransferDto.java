@@ -17,12 +17,15 @@ public class AssetTransferDto {
     @NotNull(message = "Asset ID is required")
     private UUID assetId;
 
-    @NotNull(message = "From department ID is required")
+    /** Derived from the asset on create; a value sent by the client is ignored. */
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private UUID fromDepartmentId;
 
     @NotNull(message = "To department ID is required")
     private UUID toDepartmentId;
 
+    /** Derived from the asset on create; a value sent by the client is ignored. */
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private UUID fromLocationId;
 
     private UUID toLocationId;
