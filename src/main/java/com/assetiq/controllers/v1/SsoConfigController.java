@@ -1,6 +1,7 @@
 package com.assetiq.controllers.v1;
 
 import com.assetiq.dto.OrgSsoConfigDto;
+import com.assetiq.dto.SsoDomainStatusDto;
 import com.assetiq.services.SsoConfigService;
 import com.assetiq.security.annotation.RequireFreshMfa;
 import io.swagger.v3.oas.annotations.Operation;
@@ -98,5 +99,30 @@ public class SsoConfigController {
             throw new IllegalArgumentException("enabled is required");
         }
         return ResponseEntity.ok(ssoConfigService.setEnabled(orgId, enabled));
+    }
+
+    /**
+     * GET /api/v1/organisations/{orgId}/sso/domain
+     * The claimed email domain, whether it is verified, and the TXT record to
+     * publish. SSO discovery routes on the domain only once it is verified.
+     */
+    @Operation(summary = "Email domain claim and its verification state")
+    @GetMapping("/domain")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_SECURITY_SETTINGS','MANAGE_ORGANIZATION_SETTINGS')")
+    public ResponseEntity<SsoDomainStatusDto> getDomainStatus(@PathVariable UUID orgId) {
+        return ResponseEntity.ok(ssoConfigService.getDomainStatus(orgId));
+    }
+
+    /**
+     * POST /api/v1/organisations/{orgId}/sso/domain/verify
+     * Looks for the TXT record on the domain. 409 with the reason when it is not
+     * there (or the domain is a public provider, which nobody may claim).
+     */
+    @Operation(summary = "Verify the email domain claim through DNS")
+    @PostMapping("/domain/verify")
+    @RequireFreshMfa
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_SECURITY_SETTINGS','MANAGE_ORGANIZATION_SETTINGS')")
+    public ResponseEntity<SsoDomainStatusDto> verifyDomain(@PathVariable UUID orgId) {
+        return ResponseEntity.ok(ssoConfigService.verifyDomain(orgId));
     }
 }

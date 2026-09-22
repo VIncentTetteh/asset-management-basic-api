@@ -68,6 +68,23 @@ public class Organisation extends BaseEntity {
     @Column(name = "email_domain", unique = true, nullable = true)
     private String emailDomain;
 
+    /**
+     * When {@link #emailDomain} was proved to belong to this organisation. Null
+     * means unverified: the domain is stored but SSO discovery never routes on
+     * it, so one tenant cannot claim another's domain (or a public provider's)
+     * and capture its users at the login screen.
+     */
+    @Column(name = "email_domain_verified_at")
+    private java.time.Instant emailDomainVerifiedAt;
+
+    /**
+     * The token to publish as a DNS TXT record on {@link #emailDomain}
+     * ({@code assetiq-verify=<token>}). Generated when the domain is set or
+     * changed, cleared once verification succeeds.
+     */
+    @Column(name = "email_domain_token", length = 64)
+    private String emailDomainToken;
+
     /** Data protection officer (Ghana DPA 2012 / GDPR), V11. */
     @Column(name = "dpo_name")
     private String dpoName;

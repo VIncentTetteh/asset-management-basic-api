@@ -1,6 +1,7 @@
 package com.assetiq.services.impl;
 
 import com.assetiq.dto.OrgSsoConfigDto;
+import com.assetiq.dto.SsoDomainStatusDto;
 import com.assetiq.config.CachingConfig;
 import com.assetiq.enums.SsoProvider;
 import com.assetiq.models.Organisation;
@@ -9,6 +10,8 @@ import com.assetiq.repositories.OrgSsoConfigRepository;
 import com.assetiq.repositories.OrganisationRepository;
 import com.assetiq.services.SsoConfigService;
 import com.assetiq.security.SecretCryptoService;
+import com.assetiq.security.sso.DnsTxtResolver;
+import com.assetiq.security.sso.EmailDomains;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.http.HttpStatus;
@@ -16,6 +19,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.Instant;
+import java.util.Locale;
 import java.util.UUID;
 
 @Service
@@ -24,13 +29,19 @@ public class SsoConfigServiceImpl implements SsoConfigService {
     private final OrgSsoConfigRepository ssoConfigRepository;
     private final OrganisationRepository organisationRepository;
     private final SecretCryptoService secretCryptoService;
+    private final DnsTxtResolver dnsTxtResolver;
+
+    /** The TXT record's prefix; the whole value is {@code assetiq-verify=<token>}. */
+    static final String TXT_PREFIX = "assetiq-verify=";
 
     public SsoConfigServiceImpl(OrgSsoConfigRepository ssoConfigRepository,
             OrganisationRepository organisationRepository,
-            SecretCryptoService secretCryptoService) {
+            SecretCryptoService secretCryptoService,
+            DnsTxtResolver dnsTxtResolver) {
         this.ssoConfigRepository = ssoConfigRepository;
         this.organisationRepository = organisationRepository;
         this.secretCryptoService = secretCryptoService;
+        this.dnsTxtResolver = dnsTxtResolver;
     }
 
     @Override
@@ -160,11 +171,105 @@ public class SsoConfigServiceImpl implements SsoConfigService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Organisation not found"));
     }
 
+    /**
+     * Stores the claimed domain. A new or changed domain starts unverified with a
+     * fresh token: SSO discovery routes on a domain only once its owner has proved
+     * the claim, so setting one here grants nothing by itself.
+     */
     private void persistEmailDomain(Organisation org, String raw) {
         if (raw == null) return;
-        String domain = raw.trim().toLowerCase();
-        org.setEmailDomain(domain.isEmpty() ? null : domain);
+        String domain = EmailDomains.normalise(raw);
+        String current = EmailDomains.normalise(org.getEmailDomain());
+        if (java.util.Objects.equals(domain, current)) return;
+
+        org.setEmailDomain(domain);
+        org.setEmailDomainVerifiedAt(null);
+        org.setEmailDomainToken(domain == null ? null : newToken());
         organisationRepository.save(org);
+    }
+
+    private static String newToken() {
+        return UUID.randomUUID().toString().replace("-", "");
+    }
+
+    @Override
+    @Transactional
+    public SsoDomainStatusDto getDomainStatus(UUID orgId) {
+        Organisation org = requireOrg(orgId);
+        // A domain stored before verification existed (or before this call) has no
+        // token yet; mint one so the settings screen has something to show.
+        if (org.getEmailDomain() != null && org.getEmailDomainToken() == null
+                && org.getEmailDomainVerifiedAt() == null) {
+            org.setEmailDomainToken(newToken());
+            organisationRepository.save(org);
+        }
+        return domainStatus(org);
+    }
+
+    @Override
+    @Transactional
+    @CacheEvict(value = CachingConfig.CacheNames.SSO_CONFIG_BY_ORG, key = "#orgId.toString()")
+    public SsoDomainStatusDto verifyDomain(UUID orgId) {
+        Organisation org = requireOrg(orgId);
+        String domain = requireClaimableDomain(org);
+        if (org.getEmailDomainVerifiedAt() != null) return domainStatus(org);
+
+        String token = org.getEmailDomainToken();
+        if (token == null) {
+            org.setEmailDomainToken(token = newToken());
+            organisationRepository.save(org);
+        }
+        String expected = TXT_PREFIX + token;
+        boolean found = dnsTxtResolver.txtRecords(domain).stream()
+                .map(r -> r == null ? "" : r.trim().toLowerCase(Locale.ROOT))
+                .anyMatch(expected.toLowerCase(Locale.ROOT)::equals);
+        if (!found) {
+            throw new IllegalStateException("No \"" + expected + "\" TXT record found on " + domain
+                    + ". Publish it in your DNS and try again (changes can take a few minutes).");
+        }
+        return markVerified(org);
+    }
+
+    @Override
+    @Transactional
+    @CacheEvict(value = CachingConfig.CacheNames.SSO_CONFIG_BY_ORG, key = "#orgId.toString()")
+    public SsoDomainStatusDto approveDomain(UUID orgId) {
+        Organisation org = requireOrg(orgId);
+        requireClaimableDomain(org);
+        return markVerified(org);
+    }
+
+    private SsoDomainStatusDto markVerified(Organisation org) {
+        org.setEmailDomainVerifiedAt(Instant.now());
+        org.setEmailDomainToken(null);
+        organisationRepository.save(org);
+        return domainStatus(org);
+    }
+
+    /** The domain, if there is one an organisation is allowed to own. */
+    private String requireClaimableDomain(Organisation org) {
+        String domain = EmailDomains.normalise(org.getEmailDomain());
+        if (domain == null) {
+            throw new IllegalStateException("Set an email domain in the SSO settings first");
+        }
+        if (EmailDomains.isPublicProvider(domain)) {
+            throw new IllegalStateException(domain + " is a public email provider and cannot be "
+                    + "claimed by an organisation. Use a domain your organisation owns.");
+        }
+        return domain;
+    }
+
+    private SsoDomainStatusDto domainStatus(Organisation org) {
+        String domain = EmailDomains.normalise(org.getEmailDomain());
+        boolean publicProvider = EmailDomains.isPublicProvider(domain);
+        boolean verified = org.getEmailDomainVerifiedAt() != null && !publicProvider;
+        String token = org.getEmailDomainToken();
+        return new SsoDomainStatusDto(
+                domain,
+                verified,
+                publicProvider,
+                domain == null ? null : domain,
+                verified || token == null ? null : TXT_PREFIX + token);
     }
 
     private OrgSsoConfigDto toDto(OrgSsoConfig config) {

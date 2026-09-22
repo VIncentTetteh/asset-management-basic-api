@@ -162,7 +162,9 @@ public class SsoController {
             return ResponseEntity.ok(new SsoDiscoverResponse(false, null, null));
         }
         String domain = email.substring(email.lastIndexOf('@') + 1).trim().toLowerCase();
-        if (domain.isEmpty()) {
+        // A shared mailbox provider belongs to nobody, so it never routes even if
+        // some organisation managed to get it marked verified.
+        if (domain.isEmpty() || com.assetiq.security.sso.EmailDomains.isPublicProvider(domain)) {
             return ResponseEntity.ok(new SsoDiscoverResponse(false, null, null));
         }
         return ssoConfigRepository

@@ -32,10 +32,11 @@ class SsoConfigServiceImplSecretTest {
     @Mock OrgSsoConfigRepository ssoConfigRepository;
     @Mock OrganisationRepository organisationRepository;
     @Mock SecretCryptoService secretCryptoService;
+    @Mock com.assetiq.security.sso.DnsTxtResolver dnsTxtResolver;
 
     @Test
     void blankSecretKeepsTheStoredOne() {
-        SsoConfigServiceImpl service = new SsoConfigServiceImpl(ssoConfigRepository, organisationRepository, secretCryptoService);
+        SsoConfigServiceImpl service = new SsoConfigServiceImpl(ssoConfigRepository, organisationRepository, secretCryptoService, dnsTxtResolver);
         UUID orgId = UUID.randomUUID();
         Organisation org = new Organisation();
         org.setId(orgId);
@@ -60,7 +61,7 @@ class SsoConfigServiceImplSecretTest {
         when(organisationRepository.findByIdAndDeletedAtIsNull(org.getId())).thenReturn(Optional.of(org));
         when(ssoConfigRepository.findByOrganisationId(org.getId())).thenReturn(Optional.ofNullable(existing));
         when(ssoConfigRepository.save(any(OrgSsoConfig.class))).thenAnswer(inv -> inv.getArgument(0));
-        return new SsoConfigServiceImpl(ssoConfigRepository, organisationRepository, secretCryptoService);
+        return new SsoConfigServiceImpl(ssoConfigRepository, organisationRepository, secretCryptoService, dnsTxtResolver);
     }
 
     private static Organisation org() {

@@ -23,7 +23,13 @@ public interface OrgSsoConfigRepository extends JpaRepository<OrgSsoConfig, UUID
     @Query("SELECT c FROM OrgSsoConfig c JOIN FETCH c.organisation WHERE c.enabled = true")
     List<OrgSsoConfig> findAllEnabledWithOrganisation();
 
+    /**
+     * The SSO config that an email domain routes to. Only a <em>verified</em>
+     * domain routes: any tenant could otherwise claim any domain (a competitor's,
+     * or gmail.com) and capture its users at SSO discovery.
+     */
     @Query("SELECT c FROM OrgSsoConfig c JOIN FETCH c.organisation o " +
-           "WHERE o.emailDomain = :domain AND c.enabled = true AND o.deletedAt IS NULL")
+           "WHERE o.emailDomain = :domain AND c.enabled = true AND o.deletedAt IS NULL " +
+           "AND o.emailDomainVerifiedAt IS NOT NULL")
     Optional<OrgSsoConfig> findEnabledByOrganisationEmailDomain(@Param("domain") String domain);
 }
