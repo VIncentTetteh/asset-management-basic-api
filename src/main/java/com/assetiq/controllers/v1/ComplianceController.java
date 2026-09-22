@@ -64,6 +64,14 @@ public class ComplianceController {
         return ResponseEntity.ok(complianceService.updateControl(id, dto));
     }
 
+    /** Full replace: every optional field absent from the body is cleared. */
+    @PutMapping("/controls/{id}")
+    @PreAuthorize(WRITE)
+    public ResponseEntity<ComplianceControlDto> replaceControl(
+            @PathVariable UUID id, @Validated(OnCreate.class) @RequestBody ComplianceControlDto dto) {
+        return ResponseEntity.ok(complianceService.replaceControl(id, dto));
+    }
+
     @DeleteMapping("/controls/{id}")
     @PreAuthorize(WRITE)
     public ResponseEntity<Void> deleteControl(@PathVariable UUID id) {
@@ -95,6 +103,14 @@ public class ComplianceController {
     public ResponseEntity<BogControlDto> updateBogControl(
             @PathVariable UUID id, @Valid @RequestBody BogControlDto dto) {
         return ResponseEntity.ok(complianceService.updateBogControl(id, dto));
+    }
+
+    /** Full replace: every optional field absent from the body is cleared. */
+    @PutMapping("/bog-controls/{id}")
+    @PreAuthorize(WRITE)
+    public ResponseEntity<BogControlDto> replaceBogControl(
+            @PathVariable UUID id, @Validated(OnCreate.class) @RequestBody BogControlDto dto) {
+        return ResponseEntity.ok(complianceService.replaceBogControl(id, dto));
     }
 
     @DeleteMapping("/bog-controls/{id}")
@@ -146,6 +162,14 @@ public class ComplianceController {
         return ResponseEntity.ok(complianceService.updateRisk(id, dto));
     }
 
+    /** Full replace: every optional field absent from the body is cleared. */
+    @PutMapping("/risks/{id}")
+    @PreAuthorize(WRITE)
+    public ResponseEntity<RiskRegisterDto> replaceRisk(
+            @PathVariable UUID id, @Validated(OnCreate.class) @RequestBody RiskRegisterDto dto) {
+        return ResponseEntity.ok(complianceService.replaceRisk(id, dto));
+    }
+
     @DeleteMapping("/risks/{id}")
     @PreAuthorize(WRITE)
     public ResponseEntity<Void> deleteRisk(@PathVariable UUID id) {
@@ -194,6 +218,14 @@ public class ComplianceController {
         return ResponseEntity.ok(complianceService.updateIncident(id, dto));
     }
 
+    /** Full replace: every optional field absent from the body is cleared. */
+    @PutMapping("/incidents/{id}")
+    @PreAuthorize(WRITE)
+    public ResponseEntity<SecurityIncidentDto> replaceIncident(
+            @PathVariable UUID id, @Validated(OnCreate.class) @RequestBody SecurityIncidentDto dto) {
+        return ResponseEntity.ok(complianceService.replaceIncident(id, dto));
+    }
+
     @DeleteMapping("/incidents/{id}")
     @PreAuthorize(WRITE)
     public ResponseEntity<Void> deleteIncident(@PathVariable UUID id) {
@@ -224,6 +256,14 @@ public class ComplianceController {
     public ResponseEntity<SecurityPolicyDto> updatePolicy(
             @PathVariable UUID id, @Valid @RequestBody SecurityPolicyDto dto) {
         return ResponseEntity.ok(complianceService.updatePolicy(id, dto));
+    }
+
+    /** Full replace: every optional field absent from the body is cleared. */
+    @PutMapping("/policies/{id}")
+    @PreAuthorize(WRITE)
+    public ResponseEntity<SecurityPolicyDto> replacePolicy(
+            @PathVariable UUID id, @Validated(OnCreate.class) @RequestBody SecurityPolicyDto dto) {
+        return ResponseEntity.ok(complianceService.replacePolicy(id, dto));
     }
 
     @DeleteMapping("/policies/{id}")
@@ -258,6 +298,14 @@ public class ComplianceController {
         return ResponseEntity.ok(complianceService.updateSecurityZone(id, dto));
     }
 
+    /** Full replace: every optional field absent from the body is cleared. */
+    @PutMapping("/security-zones/{id}")
+    @PreAuthorize(WRITE)
+    public ResponseEntity<SecurityZoneDto> replaceSecurityZone(
+            @PathVariable UUID id, @Validated(OnCreate.class) @RequestBody SecurityZoneDto dto) {
+        return ResponseEntity.ok(complianceService.replaceSecurityZone(id, dto));
+    }
+
     @DeleteMapping("/security-zones/{id}")
     @PreAuthorize(WRITE)
     public ResponseEntity<Void> deleteSecurityZone(@PathVariable UUID id) {
@@ -288,6 +336,14 @@ public class ComplianceController {
     public ResponseEntity<IcsAssetDto> updateIcsAsset(
             @PathVariable UUID id, @Valid @RequestBody IcsAssetDto dto) {
         return ResponseEntity.ok(complianceService.updateIcsAsset(id, dto));
+    }
+
+    /** Full replace: every optional field absent from the body is cleared. */
+    @PutMapping("/ics-assets/{id}")
+    @PreAuthorize(WRITE)
+    public ResponseEntity<IcsAssetDto> replaceIcsAsset(
+            @PathVariable UUID id, @Validated(OnCreate.class) @RequestBody IcsAssetDto dto) {
+        return ResponseEntity.ok(complianceService.replaceIcsAsset(id, dto));
     }
 
     @DeleteMapping("/ics-assets/{id}")
@@ -339,6 +395,14 @@ public class ComplianceController {
         return ResponseEntity.ok(complianceService.updatePatchRecord(id, dto));
     }
 
+    /** Full replace: every optional field absent from the body is cleared. */
+    @PutMapping("/patch-records/{id}")
+    @PreAuthorize(WRITE)
+    public ResponseEntity<PatchRecordDto> replacePatchRecord(
+            @PathVariable UUID id, @Validated(OnCreate.class) @RequestBody PatchRecordDto dto) {
+        return ResponseEntity.ok(complianceService.replacePatchRecord(id, dto));
+    }
+
     @DeleteMapping("/patch-records/{id}")
     @PreAuthorize(WRITE)
     public ResponseEntity<Void> deletePatchRecord(@PathVariable UUID id) {
@@ -371,6 +435,14 @@ public class ComplianceController {
         return ResponseEntity.ok(complianceService.updatePciSaqRecord(id, dto));
     }
 
+    /** Full replace: every optional field absent from the body is cleared. */
+    @PutMapping("/pci-saq/{id}")
+    @PreAuthorize(WRITE)
+    public ResponseEntity<PciSaqRecordDto> replacePciSaqRecord(
+            @PathVariable UUID id, @Validated(OnCreate.class) @RequestBody PciSaqRecordDto dto) {
+        return ResponseEntity.ok(complianceService.replacePciSaqRecord(id, dto));
+    }
+
     // ── SlaMetric ────────────────────────────────────────────────────────────
 
     @GetMapping("/sla-metrics")
@@ -394,6 +466,14 @@ public class ComplianceController {
     public ResponseEntity<SlaMetricDto> updateSlaMetric(
             @PathVariable UUID id, @Valid @RequestBody SlaMetricDto dto) {
         return ResponseEntity.ok(complianceService.updateSlaMetric(id, dto));
+    }
+
+    /** Full replace: every optional field absent from the body is cleared. */
+    @PutMapping("/sla-metrics/{id}")
+    @PreAuthorize(WRITE)
+    public ResponseEntity<SlaMetricDto> replaceSlaMetric(
+            @PathVariable UUID id, @Validated(OnCreate.class) @RequestBody SlaMetricDto dto) {
+        return ResponseEntity.ok(complianceService.replaceSlaMetric(id, dto));
     }
 
     // ── VulnerabilityScan ────────────────────────────────────────────────────
@@ -438,6 +518,14 @@ public class ComplianceController {
         return ResponseEntity.ok(complianceService.updateVulnerabilityScan(id, dto));
     }
 
+    /** Full replace: every optional field absent from the body is cleared. */
+    @PutMapping("/vulnerability-scans/{id}")
+    @PreAuthorize(WRITE)
+    public ResponseEntity<VulnerabilityScanDto> replaceVulnerabilityScan(
+            @PathVariable UUID id, @Validated(OnCreate.class) @RequestBody VulnerabilityScanDto dto) {
+        return ResponseEntity.ok(complianceService.replaceVulnerabilityScan(id, dto));
+    }
+
     @DeleteMapping("/vulnerability-scans/{id}")
     @PreAuthorize(WRITE)
     public ResponseEntity<Void> deleteVulnerabilityScan(@PathVariable UUID id) {
@@ -470,6 +558,14 @@ public class ComplianceController {
     public ResponseEntity<RegulatoryFilingDto> updateRegulatoryFiling(
             @PathVariable UUID id, @Valid @RequestBody RegulatoryFilingDto dto) {
         return ResponseEntity.ok(complianceService.updateRegulatoryFiling(id, dto));
+    }
+
+    /** Full replace: every optional field absent from the body is cleared. */
+    @PutMapping("/regulatory-filings/{id}")
+    @PreAuthorize(WRITE)
+    public ResponseEntity<RegulatoryFilingDto> replaceRegulatoryFiling(
+            @PathVariable UUID id, @Validated(OnCreate.class) @RequestBody RegulatoryFilingDto dto) {
+        return ResponseEntity.ok(complianceService.replaceRegulatoryFiling(id, dto));
     }
 
     @DeleteMapping("/regulatory-filings/{id}")

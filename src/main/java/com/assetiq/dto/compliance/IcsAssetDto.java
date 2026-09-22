@@ -15,6 +15,7 @@ public class IcsAssetDto {
     private UUID id;
     private UUID organisationId;
 
+    /** Fixed at create; ignored by PATCH and PUT. */
     @NotNull(groups = OnCreate.class, message = "Asset ID is required")
     private UUID assetId;
 

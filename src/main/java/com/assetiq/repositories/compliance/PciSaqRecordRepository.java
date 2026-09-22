@@ -16,4 +16,7 @@ public interface PciSaqRecordRepository extends JpaRepository<PciSaqRecord, UUID
             Organisation organisation, PciSaqRecord.ComplianceAnswer status);
 
     Optional<PciSaqRecord> findByIdAndOrganisationAndDeletedAtIsNull(UUID id, Organisation organisation);
+
+    Optional<PciSaqRecord> findByOrganisationAndRequirementNumberAndDeletedAtIsNull(
+            Organisation organisation, String requirementNumber);
 }

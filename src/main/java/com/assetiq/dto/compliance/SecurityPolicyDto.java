@@ -29,6 +29,7 @@ public class SecurityPolicyDto {
     private String documentUrl;
     private UUID ownerId;
     private String ownerEmail;
+    /** Email of the approving user; must belong to this organisation. Blank clears it. */
     @Size(max = 255)
     private String approvedByEmail;
     private Instant effectiveDate;

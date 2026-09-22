@@ -44,6 +44,7 @@ public class ComplianceControlDto {
     private String ownerEmail;
     private Instant reviewDueDate;
     private Instant lastReviewedAt;
+    /** Read-only: stamped from the signed-in user when lastReviewedAt changes. */
     @Size(max = 255)
     private String lastReviewedByEmail;
     private Instant createdAt;

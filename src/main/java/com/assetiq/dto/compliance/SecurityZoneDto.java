@@ -31,6 +31,7 @@ public class SecurityZoneDto {
     private String description;
     @Size(max = 255)
     private String allowedProtocols;
+    /** Read-only: the number of live ICS assets in the zone; ignored on write. */
     @PositiveOrZero
     private Integer assetCount;
     @Size(max = 255)

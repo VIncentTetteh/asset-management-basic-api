@@ -14,12 +14,17 @@ import com.assetiq.services.TenantAwareService;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import com.assetiq.exceptions.DuplicateFieldException;
+import com.assetiq.exceptions.FieldValidationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 @Service
@@ -76,17 +81,53 @@ public class ComplianceServiceImpl extends TenantAwareService implements Complia
 
     // ── Helpers ─────────────────────────────────────────────────────────────
 
-    private User resolveUser(UUID userId) {
-        if (userId == null) return null;
-        Organisation org = requireTenantOrg();
-        return userRepository.findByIdAndOrganisationAndDeletedAtIsNull(userId, org)
-                .orElseThrow(() -> new IllegalArgumentException("User not found: " + userId));
-    }
-
     private Asset resolveAsset(UUID assetId) {
         Organisation org = requireTenantOrg();
         return assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(assetId, org)
                 .orElseThrow(() -> new IllegalArgumentException("Asset not found: " + assetId));
+    }
+
+    // ── Field writers (PATCH vs PUT) ─────────────────────────────────────────
+
+    /** Sets {@code value} when present; on a full replace an absent value clears the field. */
+    private static <T> void put(boolean replace, T value, Consumer<T> setter) {
+        if (value != null || replace) {
+            setter.accept(value);
+        }
+    }
+
+    /** Like {@link #put}, but a cleared NOT NULL column takes {@code whenCleared} instead of null. */
+    private static <T> void putOr(boolean replace, T value, T whenCleared, Consumer<T> setter) {
+        if (value != null) {
+            setter.accept(value);
+        } else if (replace) {
+            setter.accept(whenCleared);
+        }
+    }
+
+    /** Links a user of this organisation by id (a field error when unknown); a full replace unlinks. */
+    private void putUser(boolean replace, String field, UUID userId, Consumer<User> setter) {
+        if (userId != null) {
+            Organisation org = requireTenantOrg();
+            setter.accept(userRepository.findByIdAndOrganisationAndDeletedAtIsNull(userId, org)
+                    .orElseThrow(() -> new FieldValidationException(field, "User not found in this organisation")));
+        } else if (replace) {
+            setter.accept(null);
+        }
+    }
+
+    /** The email of a user in this organisation, as stored (a field error when no such user). */
+    private String requireOrgUserEmail(String field, String email) {
+        Organisation org = requireTenantOrg();
+        return userRepository.findByEmailAndOrganisationId(email.trim(), org.getId())
+                .map(User::getEmail)
+                .orElseThrow(() -> new FieldValidationException(field, "No user with this email in this organisation"));
+    }
+
+    /** The signed-in user's email, recorded as the actor on reviews and applied patches. */
+    private static String currentUserEmail() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        return auth != null && auth.isAuthenticated() ? auth.getName() : null;
     }
 
     // ── ComplianceControl ────────────────────────────────────────────────────
@@ -123,16 +164,26 @@ public class ComplianceServiceImpl extends TenantAwareService implements Complia
         Organisation org = requireTenantOrg();
         ComplianceControl control = new ComplianceControl();
         control.setOrganisation(org);
-        applyControlFields(control, dto);
+        applyControlFields(control, dto, false);
         return toControlDto(complianceControlRepository.save(control));
     }
 
     @Override
     public ComplianceControlDto updateControl(UUID id, ComplianceControlDto dto) {
+        return writeControl(id, dto, false);
+    }
+
+    @Override
+    public ComplianceControlDto replaceControl(UUID id, ComplianceControlDto dto) {
+        return writeControl(id, dto, true);
+    }
+
+    /** PATCH ({@code replace} false: null leaves a field unchanged) or PUT (null clears it). */
+    private ComplianceControlDto writeControl(UUID id, ComplianceControlDto dto, boolean replace) {
         Organisation org = requireTenantOrg();
         ComplianceControl control = complianceControlRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
                 .orElseThrow(() -> new IllegalArgumentException("Compliance control not found"));
-        applyControlFields(control, dto);
+        applyControlFields(control, dto, replace);
         return toControlDto(complianceControlRepository.save(control));
     }
 
@@ -145,20 +196,27 @@ public class ComplianceServiceImpl extends TenantAwareService implements Complia
         complianceControlRepository.save(control);
     }
 
-    private void applyControlFields(ComplianceControl c, ComplianceControlDto dto) {
+    private void applyControlFields(ComplianceControl c, ComplianceControlDto dto, boolean replace) {
         if (dto.getFramework() != null) c.setFramework(dto.getFramework());
         if (dto.getControlRef() != null) c.setControlRef(dto.getControlRef());
         if (dto.getControlName() != null) c.setControlName(dto.getControlName());
-        if (dto.getControlDescription() != null) c.setControlDescription(dto.getControlDescription());
+        put(replace, dto.getControlDescription(), c::setControlDescription);
         if (dto.getStatus() != null) c.setStatus(dto.getStatus());
-        if (dto.getJustification() != null) c.setJustification(dto.getJustification());
-        if (dto.getEvidenceUrl() != null) c.setEvidenceUrl(dto.getEvidenceUrl());
-        if (dto.getGapDescription() != null) c.setGapDescription(dto.getGapDescription());
-        if (dto.getRemediationPlan() != null) c.setRemediationPlan(dto.getRemediationPlan());
-        if (dto.getOwnerId() != null) c.setOwner(resolveUser(dto.getOwnerId()));
-        if (dto.getReviewDueDate() != null) c.setReviewDueDate(dto.getReviewDueDate());
-        if (dto.getLastReviewedAt() != null) c.setLastReviewedAt(dto.getLastReviewedAt());
-        if (dto.getLastReviewedByEmail() != null) c.setLastReviewedByEmail(dto.getLastReviewedByEmail());
+        put(replace, dto.getJustification(), c::setJustification);
+        put(replace, dto.getEvidenceUrl(), c::setEvidenceUrl);
+        put(replace, dto.getGapDescription(), c::setGapDescription);
+        put(replace, dto.getRemediationPlan(), c::setRemediationPlan);
+        putUser(replace, "ownerId", dto.getOwnerId(), c::setOwner);
+        put(replace, dto.getReviewDueDate(), c::setReviewDueDate);
+        // Who reviewed is the signed-in user who recorded the review, never client input.
+        Instant reviewed = dto.getLastReviewedAt();
+        if (reviewed != null && !reviewed.equals(c.getLastReviewedAt())) {
+            c.setLastReviewedAt(reviewed);
+            c.setLastReviewedByEmail(currentUserEmail());
+        } else if (reviewed == null && replace) {
+            c.setLastReviewedAt(null);
+            c.setLastReviewedByEmail(null);
+        }
     }
 
     private ComplianceControlDto toControlDto(ComplianceControl c) {
@@ -209,18 +267,30 @@ public class ComplianceServiceImpl extends TenantAwareService implements Complia
     @Override
     public BogControlDto createBogControl(BogControlDto dto) {
         Organisation org = requireTenantOrg();
+        assertDirectiveRefFree(org, dto.getDirectiveRef(), null);
         BogControl control = new BogControl();
         control.setOrganisation(org);
-        applyBogControlFields(control, dto);
+        applyBogControlFields(control, dto, false);
         return toBogControlDto(bogControlRepository.save(control));
     }
 
     @Override
     public BogControlDto updateBogControl(UUID id, BogControlDto dto) {
+        return writeBogControl(id, dto, false);
+    }
+
+    @Override
+    public BogControlDto replaceBogControl(UUID id, BogControlDto dto) {
+        return writeBogControl(id, dto, true);
+    }
+
+    /** PATCH ({@code replace} false: null leaves a field unchanged) or PUT (null clears it). */
+    private BogControlDto writeBogControl(UUID id, BogControlDto dto, boolean replace) {
         Organisation org = requireTenantOrg();
         BogControl control = bogControlRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
                 .orElseThrow(() -> new IllegalArgumentException("BOG control not found"));
-        applyBogControlFields(control, dto);
+        assertDirectiveRefFree(org, dto.getDirectiveRef(), control.getId());
+        applyBogControlFields(control, dto, replace);
         return toBogControlDto(bogControlRepository.save(control));
     }
 
@@ -233,15 +303,26 @@ public class ComplianceServiceImpl extends TenantAwareService implements Complia
         bogControlRepository.save(control);
     }
 
-    private void applyBogControlFields(BogControl c, BogControlDto dto) {
+    /** A BoG directive reference appears once per organisation (V46 uq_bog_control_org_ref_live). */
+    private void assertDirectiveRefFree(Organisation org, String directiveRef, UUID selfId) {
+        if (directiveRef == null) return;
+        bogControlRepository.findByOrganisationAndDirectiveRefAndDeletedAtIsNull(org, directiveRef)
+                .filter(existing -> !existing.getId().equals(selfId))
+                .ifPresent(existing -> {
+                    throw new DuplicateFieldException("directiveRef",
+                            "A BoG control with directive " + directiveRef + " already exists");
+                });
+    }
+
+    private void applyBogControlFields(BogControl c, BogControlDto dto, boolean replace) {
         if (dto.getDirectiveRef() != null) c.setDirectiveRef(dto.getDirectiveRef());
         if (dto.getRequirement() != null) c.setRequirement(dto.getRequirement());
         if (dto.getStatus() != null) c.setStatus(dto.getStatus());
-        if (dto.getEvidenceUrl() != null) c.setEvidenceUrl(dto.getEvidenceUrl());
-        if (dto.getGapDescription() != null) c.setGapDescription(dto.getGapDescription());
-        if (dto.getRemediationPlan() != null) c.setRemediationPlan(dto.getRemediationPlan());
-        if (dto.getTargetDate() != null) c.setTargetDate(dto.getTargetDate());
-        if (dto.getOwnerId() != null) c.setOwner(resolveUser(dto.getOwnerId()));
+        put(replace, dto.getEvidenceUrl(), c::setEvidenceUrl);
+        put(replace, dto.getGapDescription(), c::setGapDescription);
+        put(replace, dto.getRemediationPlan(), c::setRemediationPlan);
+        put(replace, dto.getTargetDate(), c::setTargetDate);
+        putUser(replace, "ownerId", dto.getOwnerId(), c::setOwner);
     }
 
     private BogControlDto toBogControlDto(BogControl c) {
@@ -294,16 +375,26 @@ public class ComplianceServiceImpl extends TenantAwareService implements Complia
         Organisation org = requireTenantOrg();
         RiskRegister risk = new RiskRegister();
         risk.setOrganisation(org);
-        applyRiskFields(risk, dto);
+        applyRiskFields(risk, dto, false);
         return toRiskDto(riskRegisterRepository.save(risk));
     }
 
     @Override
     public RiskRegisterDto updateRisk(UUID id, RiskRegisterDto dto) {
+        return writeRisk(id, dto, false);
+    }
+
+    @Override
+    public RiskRegisterDto replaceRisk(UUID id, RiskRegisterDto dto) {
+        return writeRisk(id, dto, true);
+    }
+
+    /** PATCH ({@code replace} false: null leaves a field unchanged) or PUT (null clears it). */
+    private RiskRegisterDto writeRisk(UUID id, RiskRegisterDto dto, boolean replace) {
         Organisation org = requireTenantOrg();
         RiskRegister risk = riskRegisterRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
                 .orElseThrow(() -> new IllegalArgumentException("Risk not found"));
-        applyRiskFields(risk, dto);
+        applyRiskFields(risk, dto, replace);
         return toRiskDto(riskRegisterRepository.save(risk));
     }
 
@@ -316,19 +407,19 @@ public class ComplianceServiceImpl extends TenantAwareService implements Complia
         riskRegisterRepository.save(risk);
     }
 
-    private void applyRiskFields(RiskRegister r, RiskRegisterDto dto) {
-        if (dto.getFramework() != null) r.setFramework(dto.getFramework());
-        if (dto.getRiskId() != null) r.setRiskId(dto.getRiskId());
+    private void applyRiskFields(RiskRegister r, RiskRegisterDto dto, boolean replace) {
+        put(replace, dto.getFramework(), r::setFramework);
+        put(replace, dto.getRiskId(), r::setRiskId);
         if (dto.getTitle() != null) r.setTitle(dto.getTitle());
-        if (dto.getDescription() != null) r.setDescription(dto.getDescription());
+        put(replace, dto.getDescription(), r::setDescription);
         if (dto.getLikelihood() != null) r.setLikelihood(dto.getLikelihood());
         if (dto.getImpact() != null) r.setImpact(dto.getImpact());
-        if (dto.getTreatment() != null) r.setTreatment(dto.getTreatment());
-        if (dto.getMitigationPlan() != null) r.setMitigationPlan(dto.getMitigationPlan());
-        if (dto.getResidualRisk() != null) r.setResidualRisk(dto.getResidualRisk());
+        put(replace, dto.getTreatment(), r::setTreatment);
+        put(replace, dto.getMitigationPlan(), r::setMitigationPlan);
+        put(replace, dto.getResidualRisk(), r::setResidualRisk);
         if (dto.getStatus() != null) r.setStatus(dto.getStatus());
-        if (dto.getOwnerId() != null) r.setOwner(resolveUser(dto.getOwnerId()));
-        if (dto.getReviewDate() != null) r.setReviewDate(dto.getReviewDate());
+        putUser(replace, "ownerId", dto.getOwnerId(), r::setOwner);
+        put(replace, dto.getReviewDate(), r::setReviewDate);
     }
 
     private RiskRegisterDto toRiskDto(RiskRegister r) {
@@ -379,16 +470,26 @@ public class ComplianceServiceImpl extends TenantAwareService implements Complia
         Organisation org = requireTenantOrg();
         SecurityIncident incident = new SecurityIncident();
         incident.setOrganisation(org);
-        applyIncidentFields(incident, dto);
+        applyIncidentFields(incident, dto, false);
         return toIncidentDto(securityIncidentRepository.save(incident));
     }
 
     @Override
     public SecurityIncidentDto updateIncident(UUID id, SecurityIncidentDto dto) {
+        return writeIncident(id, dto, false);
+    }
+
+    @Override
+    public SecurityIncidentDto replaceIncident(UUID id, SecurityIncidentDto dto) {
+        return writeIncident(id, dto, true);
+    }
+
+    /** PATCH ({@code replace} false: null leaves a field unchanged) or PUT (null clears it). */
+    private SecurityIncidentDto writeIncident(UUID id, SecurityIncidentDto dto, boolean replace) {
         Organisation org = requireTenantOrg();
         SecurityIncident incident = securityIncidentRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
                 .orElseThrow(() -> new IllegalArgumentException("Incident not found"));
-        applyIncidentFields(incident, dto);
+        applyIncidentFields(incident, dto, replace);
         return toIncidentDto(securityIncidentRepository.save(incident));
     }
 
@@ -401,17 +502,17 @@ public class ComplianceServiceImpl extends TenantAwareService implements Complia
         securityIncidentRepository.save(incident);
     }
 
-    private void applyIncidentFields(SecurityIncident i, SecurityIncidentDto dto) {
+    private void applyIncidentFields(SecurityIncident i, SecurityIncidentDto dto, boolean replace) {
         if (dto.getTitle() != null) i.setTitle(dto.getTitle());
-        if (dto.getDescription() != null) i.setDescription(dto.getDescription());
+        put(replace, dto.getDescription(), i::setDescription);
         if (dto.getSeverity() != null) i.setSeverity(dto.getSeverity());
-        if (dto.getCategory() != null) i.setCategory(dto.getCategory());
-        if (dto.getReportedById() != null) i.setReportedBy(resolveUser(dto.getReportedById()));
-        if (dto.getAssignedToId() != null) i.setAssignedTo(resolveUser(dto.getAssignedToId()));
-        if (dto.getDetectedAt() != null) i.setDetectedAt(dto.getDetectedAt());
-        if (dto.getResolvedAt() != null) i.setResolvedAt(dto.getResolvedAt());
-        if (dto.getRootCause() != null) i.setRootCause(dto.getRootCause());
-        if (dto.getLessonsLearned() != null) i.setLessonsLearned(dto.getLessonsLearned());
+        put(replace, dto.getCategory(), i::setCategory);
+        putUser(replace, "reportedById", dto.getReportedById(), i::setReportedBy);
+        putUser(replace, "assignedToId", dto.getAssignedToId(), i::setAssignedTo);
+        put(replace, dto.getDetectedAt(), i::setDetectedAt);
+        put(replace, dto.getResolvedAt(), i::setResolvedAt);
+        put(replace, dto.getRootCause(), i::setRootCause);
+        put(replace, dto.getLessonsLearned(), i::setLessonsLearned);
         if (dto.getStatus() != null) i.setStatus(dto.getStatus());
     }
 
@@ -463,16 +564,26 @@ public class ComplianceServiceImpl extends TenantAwareService implements Complia
         Organisation org = requireTenantOrg();
         SecurityPolicy policy = new SecurityPolicy();
         policy.setOrganisation(org);
-        applyPolicyFields(policy, dto);
+        applyPolicyFields(policy, dto, false);
         return toPolicyDto(securityPolicyRepository.save(policy));
     }
 
     @Override
     public SecurityPolicyDto updatePolicy(UUID id, SecurityPolicyDto dto) {
+        return writePolicy(id, dto, false);
+    }
+
+    @Override
+    public SecurityPolicyDto replacePolicy(UUID id, SecurityPolicyDto dto) {
+        return writePolicy(id, dto, true);
+    }
+
+    /** PATCH ({@code replace} false: null leaves a field unchanged) or PUT (null clears it). */
+    private SecurityPolicyDto writePolicy(UUID id, SecurityPolicyDto dto, boolean replace) {
         Organisation org = requireTenantOrg();
         SecurityPolicy policy = securityPolicyRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
                 .orElseThrow(() -> new IllegalArgumentException("Policy not found"));
-        applyPolicyFields(policy, dto);
+        applyPolicyFields(policy, dto, replace);
         return toPolicyDto(securityPolicyRepository.save(policy));
     }
 
@@ -485,14 +596,19 @@ public class ComplianceServiceImpl extends TenantAwareService implements Complia
         securityPolicyRepository.save(policy);
     }
 
-    private void applyPolicyFields(SecurityPolicy p, SecurityPolicyDto dto) {
+    private void applyPolicyFields(SecurityPolicy p, SecurityPolicyDto dto, boolean replace) {
         if (dto.getTitle() != null) p.setTitle(dto.getTitle());
-        if (dto.getVersion() != null) p.setVersion(dto.getVersion());
-        if (dto.getDocumentUrl() != null) p.setDocumentUrl(dto.getDocumentUrl());
-        if (dto.getOwnerId() != null) p.setOwner(resolveUser(dto.getOwnerId()));
-        if (dto.getApprovedByEmail() != null) p.setApprovedByEmail(dto.getApprovedByEmail());
-        if (dto.getEffectiveDate() != null) p.setEffectiveDate(dto.getEffectiveDate());
-        if (dto.getReviewDueDate() != null) p.setReviewDueDate(dto.getReviewDueDate());
+        put(replace, dto.getVersion(), p::setVersion);
+        put(replace, dto.getDocumentUrl(), p::setDocumentUrl);
+        putUser(replace, "ownerId", dto.getOwnerId(), p::setOwner);
+        String approver = dto.getApprovedByEmail();
+        if (approver != null && !approver.isBlank()) {
+            p.setApprovedByEmail(requireOrgUserEmail("approvedByEmail", approver));
+        } else if (approver != null || replace) {
+            p.setApprovedByEmail(null);
+        }
+        put(replace, dto.getEffectiveDate(), p::setEffectiveDate);
+        put(replace, dto.getReviewDueDate(), p::setReviewDueDate);
         if (dto.getStatus() != null) p.setStatus(dto.getStatus());
     }
 
@@ -538,16 +654,26 @@ public class ComplianceServiceImpl extends TenantAwareService implements Complia
         Organisation org = requireTenantOrg();
         SecurityZone zone = new SecurityZone();
         zone.setOrganisation(org);
-        applyZoneFields(zone, dto);
+        applyZoneFields(zone, dto, false);
         return toZoneDto(securityZoneRepository.save(zone));
     }
 
     @Override
     public SecurityZoneDto updateSecurityZone(UUID id, SecurityZoneDto dto) {
+        return writeSecurityZone(id, dto, false);
+    }
+
+    @Override
+    public SecurityZoneDto replaceSecurityZone(UUID id, SecurityZoneDto dto) {
+        return writeSecurityZone(id, dto, true);
+    }
+
+    /** PATCH ({@code replace} false: null leaves a field unchanged) or PUT (null clears it). */
+    private SecurityZoneDto writeSecurityZone(UUID id, SecurityZoneDto dto, boolean replace) {
         Organisation org = requireTenantOrg();
         SecurityZone zone = securityZoneRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
                 .orElseThrow(() -> new IllegalArgumentException("Security zone not found"));
-        applyZoneFields(zone, dto);
+        applyZoneFields(zone, dto, replace);
         return toZoneDto(securityZoneRepository.save(zone));
     }
 
@@ -560,13 +686,13 @@ public class ComplianceServiceImpl extends TenantAwareService implements Complia
         securityZoneRepository.save(zone);
     }
 
-    private void applyZoneFields(SecurityZone z, SecurityZoneDto dto) {
+    private void applyZoneFields(SecurityZone z, SecurityZoneDto dto, boolean replace) {
         if (dto.getName() != null) z.setName(dto.getName());
         if (dto.getPurdueLevel() != null) z.setPurdueLevel(dto.getPurdueLevel());
-        if (dto.getDescription() != null) z.setDescription(dto.getDescription());
-        if (dto.getAllowedProtocols() != null) z.setAllowedProtocols(dto.getAllowedProtocols());
-        if (dto.getAssetCount() != null) z.setAssetCount(dto.getAssetCount());
-        if (dto.getNetworkRange() != null) z.setNetworkRange(dto.getNetworkRange());
+        put(replace, dto.getDescription(), z::setDescription);
+        put(replace, dto.getAllowedProtocols(), z::setAllowedProtocols);
+        // assetCount is derived from the ICS assets in the zone (toZoneDto); client input is ignored.
+        put(replace, dto.getNetworkRange(), z::setNetworkRange);
     }
 
     private SecurityZoneDto toZoneDto(SecurityZone z) {
@@ -577,7 +703,8 @@ public class ComplianceServiceImpl extends TenantAwareService implements Complia
         dto.setPurdueLevel(z.getPurdueLevel());
         dto.setDescription(z.getDescription());
         dto.setAllowedProtocols(z.getAllowedProtocols());
-        dto.setAssetCount(z.getAssetCount());
+        // Derived: the live ICS assets placed in this zone (the stored column is no longer written).
+        dto.setAssetCount(z.getId() == null ? 0 : (int) icsAssetRepository.countBySecurityZoneAndDeletedAtIsNull(z));
         dto.setNetworkRange(z.getNetworkRange());
         dto.setCreatedAt(z.getCreatedAt());
         dto.setUpdatedAt(z.getUpdatedAt());
@@ -605,21 +732,31 @@ public class ComplianceServiceImpl extends TenantAwareService implements Complia
     public IcsAssetDto createIcsAsset(IcsAssetDto dto) {
         Organisation org = requireTenantOrg();
         if (icsAssetRepository.findByAssetIdAndDeletedAtIsNull(dto.getAssetId()).isPresent()) {
-            throw new IllegalArgumentException("ICS metadata already exists for this asset");
+            throw new DuplicateFieldException("assetId", "ICS metadata already exists for this asset");
         }
         IcsAsset icsAsset = new IcsAsset();
         icsAsset.setOrganisation(org);
         icsAsset.setAsset(resolveAsset(dto.getAssetId()));
-        applyIcsAssetFields(icsAsset, dto);
+        applyIcsAssetFields(icsAsset, dto, false);
         return toIcsAssetDto(icsAssetRepository.save(icsAsset));
     }
 
     @Override
     public IcsAssetDto updateIcsAsset(UUID id, IcsAssetDto dto) {
+        return writeIcsAsset(id, dto, false);
+    }
+
+    @Override
+    public IcsAssetDto replaceIcsAsset(UUID id, IcsAssetDto dto) {
+        return writeIcsAsset(id, dto, true);
+    }
+
+    /** PATCH ({@code replace} false: null leaves a field unchanged) or PUT (null clears it). */
+    private IcsAssetDto writeIcsAsset(UUID id, IcsAssetDto dto, boolean replace) {
         Organisation org = requireTenantOrg();
         IcsAsset icsAsset = icsAssetRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
                 .orElseThrow(() -> new IllegalArgumentException("ICS asset not found"));
-        applyIcsAssetFields(icsAsset, dto);
+        applyIcsAssetFields(icsAsset, dto, replace);
         return toIcsAssetDto(icsAssetRepository.save(icsAsset));
     }
 
@@ -632,20 +769,23 @@ public class ComplianceServiceImpl extends TenantAwareService implements Complia
         icsAssetRepository.save(icsAsset);
     }
 
-    private void applyIcsAssetFields(IcsAsset a, IcsAssetDto dto) {
+    private void applyIcsAssetFields(IcsAsset a, IcsAssetDto dto, boolean replace) {
+        // The linked asset is fixed at create: assetId is ignored here.
         if (dto.getSecurityZoneId() != null) {
             SecurityZone zone = securityZoneRepository.findByIdAndOrganisationAndDeletedAtIsNull(
                     dto.getSecurityZoneId(), a.getOrganisation())
-                    .orElseThrow(() -> new IllegalArgumentException("Security zone not found"));
+                    .orElseThrow(() -> new FieldValidationException("securityZoneId", "Security zone not found"));
             a.setSecurityZone(zone);
+        } else if (replace) {
+            a.setSecurityZone(null);
         }
-        if (dto.getFirmwareVersion() != null) a.setFirmwareVersion(dto.getFirmwareVersion());
-        if (dto.getProtocol() != null) a.setProtocol(dto.getProtocol());
-        if (dto.getVendorSupportStatus() != null) a.setVendorSupportStatus(dto.getVendorSupportStatus());
-        if (dto.getLastPatchedAt() != null) a.setLastPatchedAt(dto.getLastPatchedAt());
-        if (dto.getKnownVulnerabilities() != null) a.setKnownVulnerabilities(dto.getKnownVulnerabilities());
-        if (dto.getIsolated() != null) a.setIsolated(dto.getIsolated());
-        if (dto.getNotes() != null) a.setNotes(dto.getNotes());
+        put(replace, dto.getFirmwareVersion(), a::setFirmwareVersion);
+        put(replace, dto.getProtocol(), a::setProtocol);
+        putOr(replace, dto.getVendorSupportStatus(), IcsAsset.VendorSupportStatus.UNKNOWN, a::setVendorSupportStatus);
+        put(replace, dto.getLastPatchedAt(), a::setLastPatchedAt);
+        put(replace, dto.getKnownVulnerabilities(), a::setKnownVulnerabilities);
+        putOr(replace, dto.getIsolated(), Boolean.FALSE, a::setIsolated);
+        put(replace, dto.getNotes(), a::setNotes);
     }
 
     private IcsAssetDto toIcsAssetDto(IcsAsset a) {
@@ -699,16 +839,26 @@ public class ComplianceServiceImpl extends TenantAwareService implements Complia
         PatchRecord record = new PatchRecord();
         record.setOrganisation(org);
         record.setAsset(resolveAsset(dto.getAssetId()));
-        applyPatchRecordFields(record, dto);
+        applyPatchRecordFields(record, dto, false);
         return toPatchRecordDto(patchRecordRepository.save(record));
     }
 
     @Override
     public PatchRecordDto updatePatchRecord(UUID id, PatchRecordDto dto) {
+        return writePatchRecord(id, dto, false);
+    }
+
+    @Override
+    public PatchRecordDto replacePatchRecord(UUID id, PatchRecordDto dto) {
+        return writePatchRecord(id, dto, true);
+    }
+
+    /** PATCH ({@code replace} false: null leaves a field unchanged) or PUT (null clears it). */
+    private PatchRecordDto writePatchRecord(UUID id, PatchRecordDto dto, boolean replace) {
         Organisation org = requireTenantOrg();
         PatchRecord record = patchRecordRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
                 .orElseThrow(() -> new IllegalArgumentException("Patch record not found"));
-        applyPatchRecordFields(record, dto);
+        applyPatchRecordFields(record, dto, replace);
         return toPatchRecordDto(patchRecordRepository.save(record));
     }
 
@@ -721,15 +871,23 @@ public class ComplianceServiceImpl extends TenantAwareService implements Complia
         patchRecordRepository.save(record);
     }
 
-    private void applyPatchRecordFields(PatchRecord r, PatchRecordDto dto) {
+    private void applyPatchRecordFields(PatchRecord r, PatchRecordDto dto, boolean replace) {
+        // The linked asset is fixed at create: assetId is ignored here.
         if (dto.getPatchName() != null) r.setPatchName(dto.getPatchName());
-        if (dto.getVersion() != null) r.setVersion(dto.getVersion());
-        if (dto.getAppliedAt() != null) r.setAppliedAt(dto.getAppliedAt());
-        if (dto.getAppliedByEmail() != null) r.setAppliedByEmail(dto.getAppliedByEmail());
-        if (dto.getTestEnvironmentValidated() != null) r.setTestEnvironmentValidated(dto.getTestEnvironmentValidated());
-        if (dto.getRollbackPlan() != null) r.setRollbackPlan(dto.getRollbackPlan());
-        if (dto.getStatus() != null) r.setStatus(dto.getStatus());
-        if (dto.getNotes() != null) r.setNotes(dto.getNotes());
+        put(replace, dto.getVersion(), r::setVersion);
+        put(replace, dto.getAppliedAt(), r::setAppliedAt);
+        putOr(replace, dto.getTestEnvironmentValidated(), Boolean.FALSE, r::setTestEnvironmentValidated);
+        put(replace, dto.getRollbackPlan(), r::setRollbackPlan);
+        // Who applied the patch is the signed-in user who recorded it as applied,
+        // never client input.
+        if (dto.getStatus() != null) {
+            if (dto.getStatus() == PatchRecord.PatchStatus.APPLIED
+                    && (r.getStatus() != PatchRecord.PatchStatus.APPLIED || r.getAppliedByEmail() == null)) {
+                r.setAppliedByEmail(currentUserEmail());
+            }
+            r.setStatus(dto.getStatus());
+        }
+        put(replace, dto.getNotes(), r::setNotes);
     }
 
     private PatchRecordDto toPatchRecordDto(PatchRecord r) {
@@ -779,27 +937,50 @@ public class ComplianceServiceImpl extends TenantAwareService implements Complia
                     r.setOrganisation(org);
                     return r;
                 });
-        applyPciSaqFields(record, dto);
+        assertRequirementNumberFree(org, dto.getRequirementNumber(), record.getId());
+        applyPciSaqFields(record, dto, false);
         return toPciSaqDto(pciSaqRecordRepository.save(record));
     }
 
     @Override
     public PciSaqRecordDto updatePciSaqRecord(UUID id, PciSaqRecordDto dto) {
+        return writePciSaqRecord(id, dto, false);
+    }
+
+    @Override
+    public PciSaqRecordDto replacePciSaqRecord(UUID id, PciSaqRecordDto dto) {
+        return writePciSaqRecord(id, dto, true);
+    }
+
+    /** PATCH ({@code replace} false: null leaves a field unchanged) or PUT (null clears it). */
+    private PciSaqRecordDto writePciSaqRecord(UUID id, PciSaqRecordDto dto, boolean replace) {
         Organisation org = requireTenantOrg();
         PciSaqRecord record = pciSaqRecordRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
                 .orElseThrow(() -> new IllegalArgumentException("PCI SAQ record not found"));
-        applyPciSaqFields(record, dto);
+        assertRequirementNumberFree(org, dto.getRequirementNumber(), record.getId());
+        applyPciSaqFields(record, dto, replace);
         return toPciSaqDto(pciSaqRecordRepository.save(record));
     }
 
-    private void applyPciSaqFields(PciSaqRecord r, PciSaqRecordDto dto) {
+    /** A PCI requirement is recorded once per organisation (V46 uq_pci_saq_org_requirement_live). */
+    private void assertRequirementNumberFree(Organisation org, String requirementNumber, UUID selfId) {
+        if (requirementNumber == null) return;
+        pciSaqRecordRepository.findByOrganisationAndRequirementNumberAndDeletedAtIsNull(org, requirementNumber)
+                .filter(existing -> !existing.getId().equals(selfId))
+                .ifPresent(existing -> {
+                    throw new DuplicateFieldException("requirementNumber",
+                            "Requirement " + requirementNumber + " is already recorded");
+                });
+    }
+
+    private void applyPciSaqFields(PciSaqRecord r, PciSaqRecordDto dto, boolean replace) {
         if (dto.getRequirementNumber() != null) r.setRequirementNumber(dto.getRequirementNumber());
-        if (dto.getRequirementText() != null) r.setRequirementText(dto.getRequirementText());
+        put(replace, dto.getRequirementText(), r::setRequirementText);
         if (dto.getComplianceStatus() != null) r.setComplianceStatus(dto.getComplianceStatus());
-        if (dto.getCompensatingControl() != null) r.setCompensatingControl(dto.getCompensatingControl());
-        if (dto.getEvidenceUrl() != null) r.setEvidenceUrl(dto.getEvidenceUrl());
-        if (dto.getTargetDate() != null) r.setTargetDate(dto.getTargetDate());
-        if (dto.getNotes() != null) r.setNotes(dto.getNotes());
+        put(replace, dto.getCompensatingControl(), r::setCompensatingControl);
+        put(replace, dto.getEvidenceUrl(), r::setEvidenceUrl);
+        put(replace, dto.getTargetDate(), r::setTargetDate);
+        put(replace, dto.getNotes(), r::setNotes);
     }
 
     private PciSaqRecordDto toPciSaqDto(PciSaqRecord r) {
@@ -838,37 +1019,58 @@ public class ComplianceServiceImpl extends TenantAwareService implements Complia
     @Override
     public SlaMetricDto createSlaMetric(SlaMetricDto dto) {
         Organisation org = requireTenantOrg();
-        slaMetricRepository.findByOrganisationAndYearAndMonthAndDeletedAtIsNull(org, dto.getYear(), dto.getMonth())
-                .ifPresent(existing -> {
-                    throw new IllegalArgumentException(
-                            "SLA metric already exists for " + dto.getYear() + "-" + dto.getMonth());
-                });
+        assertPeriodFree(org, dto.getYear(), dto.getMonth(), null);
         SlaMetric metric = new SlaMetric();
         metric.setOrganisation(org);
-        applySlaMetricFields(metric, dto);
+        applySlaMetricFields(metric, dto, false);
         return toSlaMetricDto(slaMetricRepository.save(metric));
     }
 
     @Override
     public SlaMetricDto updateSlaMetric(UUID id, SlaMetricDto dto) {
+        return writeSlaMetric(id, dto, false);
+    }
+
+    @Override
+    public SlaMetricDto replaceSlaMetric(UUID id, SlaMetricDto dto) {
+        return writeSlaMetric(id, dto, true);
+    }
+
+    /** PATCH ({@code replace} false: null leaves a field unchanged) or PUT (null clears it). */
+    private SlaMetricDto writeSlaMetric(UUID id, SlaMetricDto dto, boolean replace) {
         Organisation org = requireTenantOrg();
         SlaMetric metric = slaMetricRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
                 .orElseThrow(() -> new IllegalArgumentException("SLA metric not found"));
-        applySlaMetricFields(metric, dto);
+        assertPeriodFree(org,
+                dto.getYear() != null ? dto.getYear() : metric.getYear(),
+                dto.getMonth() != null ? dto.getMonth() : metric.getMonth(),
+                metric.getId());
+        applySlaMetricFields(metric, dto, replace);
         return toSlaMetricDto(slaMetricRepository.save(metric));
     }
 
-    private void applySlaMetricFields(SlaMetric m, SlaMetricDto dto) {
+    /** One SLA metric per organisation and month (V46 uq_sla_metric_org_period_live). */
+    private void assertPeriodFree(Organisation org, Integer year, Integer month, UUID selfId) {
+        if (year == null || month == null) return;
+        slaMetricRepository.findByOrganisationAndYearAndMonthAndDeletedAtIsNull(org, year, month)
+                .filter(existing -> !existing.getId().equals(selfId))
+                .ifPresent(existing -> {
+                    throw new DuplicateFieldException("month",
+                            "An SLA metric for " + year + "-" + String.format("%02d", month) + " already exists");
+                });
+    }
+
+    private void applySlaMetricFields(SlaMetric m, SlaMetricDto dto, boolean replace) {
         if (dto.getMonth() != null) m.setMonth(dto.getMonth());
         if (dto.getYear() != null) m.setYear(dto.getYear());
         if (dto.getUptimePercent() != null) m.setUptimePercent(dto.getUptimePercent());
-        if (dto.getPlannedDowntimeMinutes() != null) m.setPlannedDowntimeMinutes(dto.getPlannedDowntimeMinutes());
-        if (dto.getUnplannedDowntimeMinutes() != null) m.setUnplannedDowntimeMinutes(dto.getUnplannedDowntimeMinutes());
-        if (dto.getIncidentCount() != null) m.setIncidentCount(dto.getIncidentCount());
-        if (dto.getRtoMinutes() != null) m.setRtoMinutes(dto.getRtoMinutes());
-        if (dto.getRpoMinutes() != null) m.setRpoMinutes(dto.getRpoMinutes());
-        if (dto.getSlaBreached() != null) m.setSlaBreached(dto.getSlaBreached());
-        if (dto.getNotes() != null) m.setNotes(dto.getNotes());
+        put(replace, dto.getPlannedDowntimeMinutes(), m::setPlannedDowntimeMinutes);
+        put(replace, dto.getUnplannedDowntimeMinutes(), m::setUnplannedDowntimeMinutes);
+        put(replace, dto.getIncidentCount(), m::setIncidentCount);
+        put(replace, dto.getRtoMinutes(), m::setRtoMinutes);
+        put(replace, dto.getRpoMinutes(), m::setRpoMinutes);
+        putOr(replace, dto.getSlaBreached(), Boolean.FALSE, m::setSlaBreached);
+        put(replace, dto.getNotes(), m::setNotes);
     }
 
     private SlaMetricDto toSlaMetricDto(SlaMetric m) {
@@ -912,16 +1114,26 @@ public class ComplianceServiceImpl extends TenantAwareService implements Complia
         Organisation org = requireTenantOrg();
         VulnerabilityScan scan = new VulnerabilityScan();
         scan.setOrganisation(org);
-        applyVulnScanFields(scan, dto);
+        applyVulnScanFields(scan, dto, false);
         return toVulnScanDto(vulnerabilityScanRepository.save(scan));
     }
 
     @Override
     public VulnerabilityScanDto updateVulnerabilityScan(UUID id, VulnerabilityScanDto dto) {
+        return writeVulnerabilityScan(id, dto, false);
+    }
+
+    @Override
+    public VulnerabilityScanDto replaceVulnerabilityScan(UUID id, VulnerabilityScanDto dto) {
+        return writeVulnerabilityScan(id, dto, true);
+    }
+
+    /** PATCH ({@code replace} false: null leaves a field unchanged) or PUT (null clears it). */
+    private VulnerabilityScanDto writeVulnerabilityScan(UUID id, VulnerabilityScanDto dto, boolean replace) {
         Organisation org = requireTenantOrg();
         VulnerabilityScan scan = vulnerabilityScanRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
                 .orElseThrow(() -> new IllegalArgumentException("Vulnerability scan not found"));
-        applyVulnScanFields(scan, dto);
+        applyVulnScanFields(scan, dto, replace);
         return toVulnScanDto(vulnerabilityScanRepository.save(scan));
     }
 
@@ -934,18 +1146,18 @@ public class ComplianceServiceImpl extends TenantAwareService implements Complia
         vulnerabilityScanRepository.save(scan);
     }
 
-    private void applyVulnScanFields(VulnerabilityScan s, VulnerabilityScanDto dto) {
+    private void applyVulnScanFields(VulnerabilityScan s, VulnerabilityScanDto dto, boolean replace) {
         if (dto.getScanDate() != null) s.setScanDate(dto.getScanDate());
-        if (dto.getScannerTool() != null) s.setScannerTool(dto.getScannerTool());
+        put(replace, dto.getScannerTool(), s::setScannerTool);
         if (dto.getScanType() != null) s.setScanType(dto.getScanType());
-        if (dto.getCriticalCount() != null) s.setCriticalCount(dto.getCriticalCount());
-        if (dto.getHighCount() != null) s.setHighCount(dto.getHighCount());
-        if (dto.getMediumCount() != null) s.setMediumCount(dto.getMediumCount());
-        if (dto.getLowCount() != null) s.setLowCount(dto.getLowCount());
+        putOr(replace, dto.getCriticalCount(), 0, s::setCriticalCount);
+        putOr(replace, dto.getHighCount(), 0, s::setHighCount);
+        putOr(replace, dto.getMediumCount(), 0, s::setMediumCount);
+        putOr(replace, dto.getLowCount(), 0, s::setLowCount);
         if (dto.getStatus() != null) s.setStatus(dto.getStatus());
-        if (dto.getReportUrl() != null) s.setReportUrl(dto.getReportUrl());
-        if (dto.getNextScanDue() != null) s.setNextScanDue(dto.getNextScanDue());
-        if (dto.getNotes() != null) s.setNotes(dto.getNotes());
+        put(replace, dto.getReportUrl(), s::setReportUrl);
+        put(replace, dto.getNextScanDue(), s::setNextScanDue);
+        put(replace, dto.getNotes(), s::setNotes);
     }
 
     private VulnerabilityScanDto toVulnScanDto(VulnerabilityScan s) {
@@ -994,16 +1206,26 @@ public class ComplianceServiceImpl extends TenantAwareService implements Complia
         Organisation org = requireTenantOrg();
         RegulatoryFiling filing = new RegulatoryFiling();
         filing.setOrganisation(org);
-        applyFilingFields(filing, dto);
+        applyFilingFields(filing, dto, false);
         return toFilingDto(regulatoryFilingRepository.save(filing));
     }
 
     @Override
     public RegulatoryFilingDto updateRegulatoryFiling(UUID id, RegulatoryFilingDto dto) {
+        return writeRegulatoryFiling(id, dto, false);
+    }
+
+    @Override
+    public RegulatoryFilingDto replaceRegulatoryFiling(UUID id, RegulatoryFilingDto dto) {
+        return writeRegulatoryFiling(id, dto, true);
+    }
+
+    /** PATCH ({@code replace} false: null leaves a field unchanged) or PUT (null clears it). */
+    private RegulatoryFilingDto writeRegulatoryFiling(UUID id, RegulatoryFilingDto dto, boolean replace) {
         Organisation org = requireTenantOrg();
         RegulatoryFiling filing = regulatoryFilingRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
                 .orElseThrow(() -> new IllegalArgumentException("Regulatory filing not found"));
-        applyFilingFields(filing, dto);
+        applyFilingFields(filing, dto, replace);
         return toFilingDto(regulatoryFilingRepository.save(filing));
     }
 
@@ -1016,14 +1238,14 @@ public class ComplianceServiceImpl extends TenantAwareService implements Complia
         regulatoryFilingRepository.save(filing);
     }
 
-    private void applyFilingFields(RegulatoryFiling f, RegulatoryFilingDto dto) {
+    private void applyFilingFields(RegulatoryFiling f, RegulatoryFilingDto dto, boolean replace) {
         if (dto.getFilingType() != null) f.setFilingType(dto.getFilingType());
         if (dto.getRegulator() != null) f.setRegulator(dto.getRegulator());
         if (dto.getDueDate() != null) f.setDueDate(dto.getDueDate());
-        if (dto.getSubmittedAt() != null) f.setSubmittedAt(dto.getSubmittedAt());
-        if (dto.getReference() != null) f.setReference(dto.getReference());
+        put(replace, dto.getSubmittedAt(), f::setSubmittedAt);
+        put(replace, dto.getReference(), f::setReference);
         if (dto.getStatus() != null) f.setStatus(dto.getStatus());
-        if (dto.getNotes() != null) f.setNotes(dto.getNotes());
+        put(replace, dto.getNotes(), f::setNotes);
     }
 
     private RegulatoryFilingDto toFilingDto(RegulatoryFiling f) {
