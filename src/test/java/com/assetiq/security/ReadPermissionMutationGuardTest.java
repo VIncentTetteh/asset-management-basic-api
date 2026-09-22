@@ -51,10 +51,14 @@ class ReadPermissionMutationGuardTest {
         for (BeanDefinition def : scanner.findCandidateComponents("com.assetiq")) {
             Class<?> controller = Class.forName(def.getBeanClassName());
             for (Method m : controller.getDeclaredMethods()) {
-                if (!isMutation(m) || !m.isAnnotationPresent(PreAuthorize.class)) continue;
+                if (!isMutation(m)) continue;
+                // A method without its own @PreAuthorize inherits the class-level one.
+                PreAuthorize rule = m.isAnnotationPresent(PreAuthorize.class)
+                        ? m.getAnnotation(PreAuthorize.class) : controller.getAnnotation(PreAuthorize.class);
+                if (rule == null) continue;
                 String key = controller.getSimpleName() + "." + m.getName();
                 if (ALLOWED.contains(key)) continue;
-                for (String authority : literals(m.getAnnotation(PreAuthorize.class).value())) {
+                for (String authority : literals(rule.value())) {
                     if (authority.startsWith("VIEW_")) offenders.add(key + " accepts " + authority);
                 }
             }
