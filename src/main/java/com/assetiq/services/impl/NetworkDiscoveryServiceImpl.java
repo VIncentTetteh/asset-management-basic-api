@@ -115,26 +115,55 @@ public class NetworkDiscoveryServiceImpl extends TenantAwareService implements N
         }
         long elapsed = System.currentTimeMillis() - start;
 
-        // Upsert: find existing record or create new
-        DiscoveredDevice device = deviceRepo
-                .findByIpAddressAndOrganisationAndDeletedAtIsNull(ip, org)
-                .orElse(new DiscoveredDevice());
+        DiscoveredDevice device = findOrReviveDevice(ip, org);
 
-        device.setIpAddress(ip);
-        device.setHostname(hostname.equals(ip) ? null : hostname);
-        device.setOrganisation(org);
-        device.setStatus(reachable ? DeviceStatus.ONLINE : DeviceStatus.OFFLINE);
-        device.setResponseTimeMs(reachable ? elapsed : null);
-        device.setLastSeenAt(Instant.now());
-        device.setDiscoveryMethod(portScan ? DiscoveryMethod.PORT_SCAN : DiscoveryMethod.PING);
-
-        if (reachable && portScan) {
-            List<Integer> open = scanPorts(ip, ports, timeoutMs);
-            device.setOpenPorts(open.stream().map(String::valueOf).collect(Collectors.joining(",")));
-            device.setDeviceType(inferDeviceType(open));
-        }
+        List<Integer> open = reachable && portScan ? scanPorts(ip, ports, timeoutMs) : null;
+        applyProbe(device, reachable, hostname.equals(ip) ? null : hostname, elapsed, portScan, open, Instant.now());
 
         return deviceRepo.save(device);
+    }
+
+    /**
+     * The live record for this address, else the last deleted one revived (a rescan
+     * used to insert a duplicate row), else a new record.
+     */
+    DiscoveredDevice findOrReviveDevice(String ip, Organisation org) {
+        DiscoveredDevice device = deviceRepo
+                .findByIpAddressAndOrganisationAndDeletedAtIsNull(ip, org)
+                .or(() -> deviceRepo.findFirstByIpAddressAndOrganisationAndDeletedAtIsNotNullOrderByDeletedAtDesc(ip, org))
+                .orElseGet(DiscoveredDevice::new);
+        device.setDeletedAt(null);
+        device.setIpAddress(ip);
+        device.setOrganisation(org);
+        return device;
+    }
+
+    /**
+     * Records one probe on a device. A device already promoted to an asset stays
+     * PROMOTED (a rescan used to flip it back to ONLINE, offering Promote again,
+     * which then failed). Open ports and the inferred type describe only this probe:
+     * they are cleared when the host is unreachable or ports were not scanned, so
+     * stale results do not linger.
+     */
+    static void applyProbe(DiscoveredDevice device, boolean reachable, String hostname, long elapsedMs,
+                           boolean portScan, List<Integer> openPorts, Instant seenAt) {
+        device.setHostname(hostname);
+        if (device.getPromotedAssetId() != null) {
+            device.setStatus(DeviceStatus.PROMOTED);
+        } else {
+            device.setStatus(reachable ? DeviceStatus.ONLINE : DeviceStatus.OFFLINE);
+        }
+        device.setResponseTimeMs(reachable ? elapsedMs : null);
+        device.setLastSeenAt(seenAt);
+        device.setDiscoveryMethod(portScan ? DiscoveryMethod.PORT_SCAN : DiscoveryMethod.PING);
+
+        if (reachable && portScan && openPorts != null) {
+            device.setOpenPorts(openPorts.stream().map(String::valueOf).collect(Collectors.joining(",")));
+            device.setDeviceType(inferDeviceType(openPorts));
+        } else {
+            device.setOpenPorts(null);
+            device.setDeviceType(null);
+        }
     }
 
     private List<Integer> scanPorts(String ip, List<Integer> ports, int timeoutMs) {
@@ -149,7 +178,7 @@ public class NetworkDiscoveryServiceImpl extends TenantAwareService implements N
         return open;
     }
 
-    private String inferDeviceType(List<Integer> openPorts) {
+    private static String inferDeviceType(List<Integer> openPorts) {
         if (openPorts.contains(3389)) return "Windows Workstation/Server";
         if (openPorts.contains(22) && openPorts.contains(80)) return "Linux Server";
         if (openPorts.contains(3306) || openPorts.contains(5432) || openPorts.contains(27017)) return "Database Server";

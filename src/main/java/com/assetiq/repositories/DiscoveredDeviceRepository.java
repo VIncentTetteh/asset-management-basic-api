@@ -21,4 +21,8 @@ public interface DiscoveredDeviceRepository extends JpaRepository<DiscoveredDevi
             String ipAddress, Organisation organisation);
 
     Optional<DiscoveredDevice> findByIdAndOrganisationAndDeletedAtIsNull(UUID id, Organisation organisation);
+
+    /** The most recently deleted record for an address, revived by a rescan instead of duplicated. */
+    Optional<DiscoveredDevice> findFirstByIpAddressAndOrganisationAndDeletedAtIsNotNullOrderByDeletedAtDesc(
+            String ipAddress, Organisation organisation);
 }
