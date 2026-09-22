@@ -63,6 +63,19 @@ class DpaControllerIntegrationTest {
         String id = created.path("id").asText();
         assertThat(created.path("dueAt").asText()).isNotBlank();
 
+        // The summary travels in a JSON body (it may hold personal data), and "" clears it.
+        JsonNode drafted = body(mockMvc.perform(auth(patch("/api/v1/dpa/dsar/" + id + "/status"), token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("status", "IN_PROGRESS", "responseSummary", "Draft"))))
+                .andExpect(status().isOk()).andReturn());
+        assertThat(drafted.path("responseSummary").asText()).isEqualTo("Draft");
+        JsonNode cleared = body(mockMvc.perform(auth(patch("/api/v1/dpa/dsar/" + id + "/status"), token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("status", "IN_PROGRESS", "responseSummary", ""))))
+                .andExpect(status().isOk()).andReturn());
+        JsonNode clearedSummary = cleared.path("responseSummary");
+        assertThat(clearedSummary.isMissingNode() || clearedSummary.isNull()).isTrue();
+        // The legacy query-parameter form still works.
         mockMvc.perform(auth(patch("/api/v1/dpa/dsar/" + id + "/status?status=COMPLETED&responseSummary=Sent"), token))
                 .andExpect(status().isOk());
         mockMvc.perform(auth(patch("/api/v1/dpa/dsar/" + id + "/status?status=PENDING"), token))

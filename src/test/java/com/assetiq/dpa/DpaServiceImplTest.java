@@ -62,14 +62,14 @@ class DpaServiceImplTest {
     @Test
     @DisplayName("recordConsent — grants consent and persists a new record")
     void recordConsent_grant_savesRecord() {
-        CreateConsentRequest req = new CreateConsentRequest("marketing", true, "127.0.0.1", "TestAgent/1.0");
+        CreateConsentRequest req = new CreateConsentRequest("marketing", true);
         when(consentRepository.findByOrganisationAndUserAndPurposeAndDeletedAtIsNull(org, user, "marketing"))
                 .thenReturn(Optional.empty());
 
         ConsentRecord saved = stubConsentRecord(user, "marketing", true);
         when(consentRepository.save(any())).thenReturn(saved);
 
-        ConsentRecordDto result = service.recordConsent(org, user, req);
+        ConsentRecordDto result = service.recordConsent(org, user, req, "203.0.113.7", "TestAgent/1.0");
 
         assertThat(result.purpose()).isEqualTo("marketing");
         assertThat(result.granted()).isTrue();
@@ -79,7 +79,7 @@ class DpaServiceImplTest {
     @Test
     @DisplayName("recordConsent — revokes consent and sets revokedAt")
     void recordConsent_revoke_setsRevokedAt() {
-        CreateConsentRequest req = new CreateConsentRequest("marketing", false, null, null);
+        CreateConsentRequest req = new CreateConsentRequest("marketing", false);
         ConsentRecord existing = stubConsentRecord(user, "marketing", true);
         when(consentRepository.findByOrganisationAndUserAndPurposeAndDeletedAtIsNull(org, user, "marketing"))
                 .thenReturn(Optional.of(existing));
@@ -87,7 +87,7 @@ class DpaServiceImplTest {
         ConsentRecord revoked = stubConsentRecord(user, "marketing", false);
         when(consentRepository.save(any())).thenReturn(revoked);
 
-        ConsentRecordDto result = service.recordConsent(org, user, req);
+        ConsentRecordDto result = service.recordConsent(org, user, req, "203.0.113.7", "TestAgent/1.0");
 
         assertThat(result.granted()).isFalse();
     }
@@ -171,7 +171,7 @@ class DpaServiceImplTest {
                 .thenReturn(Optional.of(record));
         when(dsarRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        DsarRequestDto result = service.updateDsarStatus(id, org, DsarRequest.Status.COMPLETED, "Done", null);
+        DsarRequestDto result = service.updateDsarStatus(id, org, DsarRequest.Status.COMPLETED, "Done", null, false);
 
         assertThat(result.status()).isEqualTo(DsarRequest.Status.COMPLETED);
         assertThat(result.completedAt()).isNotNull();
@@ -184,8 +184,38 @@ class DpaServiceImplTest {
         when(dsarRepository.findByIdAndOrganisationAndDeletedAtIsNull(unknownId, org))
                 .thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.updateDsarStatus(unknownId, org, DsarRequest.Status.COMPLETED, null, null))
+        assertThatThrownBy(() -> service.updateDsarStatus(unknownId, org, DsarRequest.Status.COMPLETED, null, null, false))
                 .isInstanceOf(ResourceNotFoundException.class);
+    }
+
+    @Test
+    @DisplayName("recordConsent — stores the server-resolved IP and user agent as evidence")
+    void recordConsent_storesRequestEvidence() {
+        when(consentRepository.findByOrganisationAndUserAndPurposeAndDeletedAtIsNull(org, user, "marketing"))
+                .thenReturn(Optional.empty());
+        when(consentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        ArgumentCaptor<ConsentRecord> saved = ArgumentCaptor.forClass(ConsentRecord.class);
+
+        service.recordConsent(org, user, new CreateConsentRequest("marketing", true), "203.0.113.7", "Agent/2");
+
+        verify(consentRepository).save(saved.capture());
+        assertThat(saved.getValue().getIpAddress()).isEqualTo("203.0.113.7");
+        assertThat(saved.getValue().getUserAgent()).isEqualTo("Agent/2");
+    }
+
+    @Test
+    @DisplayName("updateDsarStatus — a blank summary clears it and the assignee can be removed")
+    void updateDsarStatus_clearsSummaryAndAssignee() {
+        DsarRequest record = stubDsarRequest(DsarRequest.Status.IN_PROGRESS);
+        record.setResponseSummary("Draft");
+        record.setAssignedTo(user);
+        when(dsarRepository.findByIdAndOrganisationAndDeletedAtIsNull(record.getId(), org)).thenReturn(Optional.of(record));
+        when(dsarRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        DsarRequestDto result = service.updateDsarStatus(record.getId(), org, DsarRequest.Status.IN_PROGRESS, "", null, true);
+
+        assertThat(result.responseSummary()).isNull();
+        assertThat(record.getAssignedTo()).isNull();
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

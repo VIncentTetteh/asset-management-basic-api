@@ -4,6 +4,8 @@ import com.assetiq.dpa.dto.ConsentRecordDto;
 import com.assetiq.dpa.dto.CreateConsentRequest;
 import com.assetiq.dpa.dto.CreateDsarRequest;
 import com.assetiq.dpa.dto.DsarRequestDto;
+import com.assetiq.dpa.dto.UpdateDsarStatusRequest;
+import jakarta.servlet.http.HttpServletRequest;
 import com.assetiq.dpa.model.DsarRequest;
 import com.assetiq.dpa.service.DpaService;
 import com.assetiq.models.Organisation;
@@ -44,6 +46,7 @@ public class DpaController {
     private final DpaService dpaService;
     private final OrganisationRepository organisationRepository;
     private final UserRepository userRepository;
+    private final com.assetiq.config.ClientIpResolver clientIpResolver;
 
     /*
      * Every endpoint used to take @RequestAttribute("currentUser"/"currentOrg"),
@@ -74,8 +77,12 @@ public class DpaController {
     @PostMapping("/consent")
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<ConsentRecordDto> recordConsent(
-            @Valid @RequestBody CreateConsentRequest request) {
-        return ResponseEntity.ok(dpaService.recordConsent(currentOrg(), currentUser(), request));
+            @Valid @RequestBody CreateConsentRequest request,
+            HttpServletRequest http) {
+        // Evidence of the decision comes from the request, not the body: the
+        // client could put any address there.
+        return ResponseEntity.ok(dpaService.recordConsent(currentOrg(), currentUser(), request,
+                clientIpResolver.resolve(http), http.getHeader("User-Agent")));
     }
 
     @DeleteMapping("/consent/{purpose}")
@@ -128,10 +135,16 @@ public class DpaController {
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_COMPLIANCE')")
     public ResponseEntity<DsarRequestDto> updateDsarStatus(
             @PathVariable UUID id,
-            @RequestParam DsarRequest.Status status,
+            // Query parameters are the legacy form, still accepted; the JSON body wins.
+            @RequestParam(required = false) DsarRequest.Status status,
             @RequestParam(required = false) String responseSummary,
-            @RequestParam(required = false) UUID assignedToUserId) {
+            @RequestParam(required = false) UUID assignedToUserId,
+            @RequestBody(required = false) UpdateDsarStatusRequest body) {
+        DsarRequest.Status newStatus = body != null && body.status() != null ? body.status() : status;
+        String summary = body != null && body.responseSummary() != null ? body.responseSummary() : responseSummary;
+        UUID assignee = body != null && body.assignedToUserId() != null ? body.assignedToUserId() : assignedToUserId;
+        boolean clearAssignee = body != null && Boolean.TRUE.equals(body.clearAssignee());
         return ResponseEntity.ok(
-                dpaService.updateDsarStatus(id, currentOrg(), status, responseSummary, assignedToUserId));
+                dpaService.updateDsarStatus(id, currentOrg(), newStatus, summary, assignee, clearAssignee));
     }
 }

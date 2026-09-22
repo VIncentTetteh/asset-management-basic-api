@@ -21,7 +21,12 @@ public interface DpaService {
     // ── Consent ──────────────────────────────────────────────────────────────
 
     /** Record or update a consent decision for a given purpose. */
-    ConsentRecordDto recordConsent(Organisation org, User user, CreateConsentRequest request);
+    /**
+     * Records a consent decision. {@code clientIp} and {@code userAgent} come from
+     * the HTTP request (see {@code ClientIpResolver}) as evidence of the decision.
+     */
+    ConsentRecordDto recordConsent(Organisation org, User user, CreateConsentRequest request,
+                                   String clientIp, String userAgent);
 
     /** Revoke an existing active consent for a given purpose. */
     ConsentRecordDto revokeConsent(Organisation org, User user, String purpose);
@@ -43,7 +48,11 @@ public interface DpaService {
     /** Get a single DSAR by ID, scoped to the organisation. */
     DsarRequestDto getDsarRequest(UUID id, Organisation org);
 
-    /** Update a DSAR's status, response summary, and/or assigned handler. */
+    /**
+     * Moves a DSAR request to {@code newStatus}. {@code responseSummary}: null keeps
+     * it, blank clears it. {@code assignedToUserId}: null keeps the assignee unless
+     * {@code clearAssignee}.
+     */
     DsarRequestDto updateDsarStatus(UUID id, Organisation org, DsarRequest.Status newStatus,
-                                    String responseSummary, UUID assignedToUserId);
+                                    String responseSummary, UUID assignedToUserId, boolean clearAssignee);
 }

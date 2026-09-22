@@ -53,7 +53,8 @@ public class DpaServiceImpl implements DpaService {
 
     @Override
     @Transactional
-    public ConsentRecordDto recordConsent(Organisation org, User user, CreateConsentRequest req) {
+    public ConsentRecordDto recordConsent(Organisation org, User user, CreateConsentRequest req,
+                                          String clientIp, String userAgent) {
         ConsentRecord record = consentRepository
                 .findByOrganisationAndUserAndPurposeAndDeletedAtIsNull(org, user, req.purpose())
                 .orElseGet(ConsentRecord::new);
@@ -62,8 +63,8 @@ public class DpaServiceImpl implements DpaService {
         record.setUser(user);
         record.setPurpose(req.purpose());
         record.setGranted(req.granted());
-        record.setIpAddress(req.ipAddress());
-        record.setUserAgent(req.userAgent());
+        record.setIpAddress(truncate(clientIp, 50));
+        record.setUserAgent(truncate(userAgent, 500));
 
         if (req.granted()) {
             record.setGrantedAt(Instant.now());
@@ -170,7 +171,10 @@ public class DpaServiceImpl implements DpaService {
     @Override
     @Transactional
     public DsarRequestDto updateDsarStatus(UUID id, Organisation org, DsarRequest.Status newStatus,
-                                           String responseSummary, UUID assignedToUserId) {
+                                           String responseSummary, UUID assignedToUserId, boolean clearAssignee) {
+        if (newStatus == null) {
+            throw new IllegalArgumentException("status is required");
+        }
         DsarRequest dsar = dsarRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
                 .orElseThrow(() -> new ResourceNotFoundException("DSAR request not found: " + id));
 
@@ -182,11 +186,13 @@ public class DpaServiceImpl implements DpaService {
             throw new IllegalStateException("A " + current + " DSAR request cannot be moved to " + newStatus);
         }
         dsar.setStatus(newStatus);
-        if (responseSummary != null) dsar.setResponseSummary(responseSummary);
+        if (responseSummary != null) dsar.setResponseSummary(responseSummary.isBlank() ? null : responseSummary.trim());
         boolean closing = (newStatus == DsarRequest.Status.COMPLETED || newStatus == DsarRequest.Status.REJECTED)
                 && newStatus != current;
         if (closing) dsar.setCompletedAt(Instant.now());
-        if (assignedToUserId != null) {
+        if (clearAssignee) {
+            dsar.setAssignedTo(null);
+        } else if (assignedToUserId != null) {
             // Only a user of the same organisation (was findById: any tenant's user).
             dsar.setAssignedTo(userRepository.findByIdAndOrganisation(assignedToUserId, org)
                     .orElseThrow(() -> new IllegalArgumentException("Assignee not found in your organisation")));
@@ -194,6 +200,11 @@ public class DpaServiceImpl implements DpaService {
 
         log.info("[DPA] DSAR {} updated to status={} org={}", id, newStatus, org.getId());
         return toDto(dsarRepository.save(dsar));
+    }
+
+    private static String truncate(String value, int max) {
+        if (value == null || value.isBlank()) return null;
+        return value.length() <= max ? value : value.substring(0, max);
     }
 
     // ── Mappers ───────────────────────────────────────────────────────────────
