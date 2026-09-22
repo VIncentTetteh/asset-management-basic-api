@@ -32,6 +32,8 @@ import java.util.*;
 @Service
 public class TenantRegistrationServiceImpl implements TenantRegistrationService {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(TenantRegistrationServiceImpl.class);
+
     private final OrganisationRepository organisationRepository;
     private final RoleRepository roleRepository;
     private final UserRepository userRepository;
@@ -73,14 +75,12 @@ public class TenantRegistrationServiceImpl implements TenantRegistrationService 
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Organisation name already exists");
         }
 
-        // Ensure admin email not used in any existing org with same name check is
-        // enough because org is new,
-        // but we can still enforce global uniqueness if desired (here we just check
-        // globally).
-        userRepository.findByEmail(request.getAdminEmail()).ifPresent(u -> {
-            // Allow same email across different orgs? Existing code allows same email per
-            // org unique. We'll allow.
-        });
+        // The same person may administer several tenants, so an email already used
+        // elsewhere is allowed. This used findByEmail, whose Optional result threw
+        // (a 500) once the email existed in two or more tenants.
+        if (userRepository.existsByEmailIgnoreCase(request.getAdminEmail())) {
+            log.info("Tenant registration for an email already used in another organisation");
+        }
 
         // Create organisation
         Organisation org = new Organisation();

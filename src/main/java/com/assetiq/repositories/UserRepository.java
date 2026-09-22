@@ -22,6 +22,9 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     @EntityGraph(attributePaths = {"role", "organisation", "department"})
     Optional<User> findByEmail(String email);
 
+    /** True when any tenant has a user with this email (safe when several do). */
+    boolean existsByEmailIgnoreCase(String email);
+
     @EntityGraph(attributePaths = {"role", "organisation", "department"})
     Optional<User> findByEmailAndOrganisationId(String email, UUID organisationId);
 
