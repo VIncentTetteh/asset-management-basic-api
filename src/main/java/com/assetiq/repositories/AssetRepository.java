@@ -60,6 +60,10 @@ public interface AssetRepository extends JpaRepository<Asset, UUID>, JpaSpecific
         // Asset-specific queries
         Optional<Asset> findByAssetTagAndDeletedAtIsNull(String assetTag);
 
+        /** Tenant-scoped tag lookup: an asset tag is only unique within an organisation (V46). */
+        Optional<Asset> findByAssetTagIgnoreCaseAndOrganisationAndDeletedAtIsNull(String assetTag,
+                        Organisation organisation);
+
         /**
          * Asset tags in the organisation that start with {@code prefix}, including
          * deleted assets so a generated tag never reuses a retired number.

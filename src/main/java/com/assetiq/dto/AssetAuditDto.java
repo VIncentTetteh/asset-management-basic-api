@@ -40,5 +40,25 @@ public class AssetAuditDto {
 
     @Size(max = 5000)
     private String remarks;
+
+    // ── Count-sheet progress (read-only, counted from audit_item) ────────────
+
+    /** How many assets are on this audit's count sheet. Zero means it has none yet. */
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private long totalItemCount;
+
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private long verifiedItemCount;
+
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private long discrepancyCount;
+
+    /**
+     * True only when the sheet exists and every single item on it is verified.
+     * This is what the client's "Verified" seal is allowed to key off — an audit
+     * with no items, or with one item still pending, is not a verified audit.
+     */
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private boolean allItemsVerified;
 }
 

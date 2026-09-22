@@ -9,6 +9,8 @@ import com.assetiq.models.Organisation;
 import com.assetiq.models.User;
 import com.assetiq.multitenancy.TenantContext;
 import com.assetiq.repositories.AssetAuditRepository;
+import com.assetiq.repositories.AssetRepository;
+import com.assetiq.repositories.AuditItemRepository;
 import com.assetiq.repositories.DepartmentRepository;
 import com.assetiq.repositories.OrganisationRepository;
 import com.assetiq.repositories.UserRepository;
@@ -40,6 +42,8 @@ import static org.mockito.Mockito.when;
 class AuditServiceImplTest {
 
     @Mock AssetAuditRepository auditRepository;
+    @Mock AuditItemRepository auditItemRepository;
+    @Mock AssetRepository assetRepository;
     @Mock OrganisationRepository organisationRepository;
     @Mock DepartmentRepository departmentRepository;
     @Mock UserRepository userRepository;
@@ -50,7 +54,8 @@ class AuditServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        service = new AuditServiceImpl(auditRepository, organisationRepository, departmentRepository, userRepository);
+        service = new AuditServiceImpl(auditRepository, auditItemRepository, assetRepository,
+                organisationRepository, departmentRepository, userRepository);
         org = new Organisation();
         org.setId(UUID.randomUUID());
         TenantContext.setOrganisationId(org.getId());
