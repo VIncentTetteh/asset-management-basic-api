@@ -61,4 +61,27 @@ class OrganisationControllerTest {
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.message").value("Organisation not found"));
     }
+
+    @Test
+    void patch_refusesAnUnknownTimeZone() throws Exception {
+        mockMvc.perform(patch("/api/v1/organisations/{id}", UUID.randomUUID())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"timezone\":\"Mars/Olympus\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors.timezone").exists());
+    }
+
+    @Test
+    void patch_acceptsAnIanaTimeZoneOrBlank() throws Exception {
+        UUID id = UUID.randomUUID();
+        when(organisationService.patch(eq(id), any())).thenReturn(new com.assetiq.dto.OrganisationDto());
+        mockMvc.perform(patch("/api/v1/organisations/{id}", id)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"timezone\":\"Africa/Accra\"}"))
+                .andExpect(status().isOk());
+        mockMvc.perform(patch("/api/v1/organisations/{id}", id)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"timezone\":\"\"}"))
+                .andExpect(status().isOk());
+    }
 }

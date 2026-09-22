@@ -6,6 +6,7 @@ import com.assetiq.validation.OnCreate;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
+import com.assetiq.validation.TimeZoneId;
 import lombok.Data;
 
 
@@ -42,6 +43,7 @@ public class OrganisationDto {
     private String contactPhone;
 
     @Size(max = 255)
+    @TimeZoneId
     private String timezone;
 
     private OrganisationStatus status;
