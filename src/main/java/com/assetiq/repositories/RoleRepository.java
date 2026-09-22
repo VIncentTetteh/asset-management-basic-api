@@ -21,4 +21,11 @@ public interface RoleRepository extends JpaRepository<Role, UUID> {
     Set<Role> findByOrganisationAndDeletedAtIsNull(Organisation organisation);
 
     Optional<Role> findByNameAndOrganisationAndDeletedAtIsNull(String name, Organisation organisation);
+
+    /** True when any live user holds the role as primary role or through user_roles. */
+    @org.springframework.data.jpa.repository.Query("""
+            select count(u) > 0 from User u left join u.roles r
+            where u.deletedAt is null and (u.role.id = :roleId or r.id = :roleId)
+            """)
+    boolean isAssignedToAnyUser(@org.springframework.data.repository.query.Param("roleId") java.util.UUID roleId);
 }

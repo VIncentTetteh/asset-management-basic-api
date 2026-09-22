@@ -1,10 +1,10 @@
 package com.assetiq.services.impl;
 
 import com.assetiq.models.RolePermission;
+import com.assetiq.security.PermissionGrantGuard;
 import com.assetiq.security.RolePermissionDefaults;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
-import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import com.assetiq.dto.UserDto;
 import com.assetiq.config.CachingConfig;
@@ -304,20 +304,10 @@ public class UserServiceImpl extends TenantAwareService implements UserService {
      * helper account, or to anyone). Organisation admins are unrestricted.
      */
     void assertCanGrant(Role role) {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth == null) {
-            throw new AccessDeniedException("No authenticated user in security context");
-        }
-        Set<String> held = auth.getAuthorities().stream()
-                .map(GrantedAuthority::getAuthority).collect(Collectors.toSet());
-        if (held.contains("ROLE_ADMIN") || held.contains("ROLE_ORG_ADMIN")) return;
         Set<String> required = role.isGrantAllPermissions()
                 ? RolePermissionDefaults.allPermissionNames()
                 : role.getRolePermissions().stream().map(RolePermission::getPermission).collect(Collectors.toSet());
-        if (!held.containsAll(required)) {
-            throw new AccessDeniedException("You cannot assign the role '" + role.getName()
-                    + "': it grants permissions you do not hold");
-        }
+        PermissionGrantGuard.assertCallerHolds(required, "assign the role '" + role.getName() + "'");
     }
 
     @Override

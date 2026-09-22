@@ -55,9 +55,17 @@ class RoleServiceImplTest {
     @InjectMocks
     private RoleServiceImpl roleService;
 
+    @org.junit.jupiter.api.BeforeEach
+    void actAsOrgAdmin() {
+        org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
+                new org.springframework.security.authentication.UsernamePasswordAuthenticationToken("admin@example.com",
+                        "n/a", java.util.List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_ADMIN"))));
+    }
+
     @AfterEach
     void tearDown() {
         TenantContext.clear();
+        org.springframework.security.core.context.SecurityContextHolder.clearContext();
     }
 
     // ── createRole ────────────────────────────────────────────────────────────
