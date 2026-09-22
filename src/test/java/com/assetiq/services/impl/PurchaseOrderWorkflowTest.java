@@ -49,6 +49,8 @@ import static org.mockito.Mockito.when;
 class PurchaseOrderWorkflowTest {
 
     @Mock PurchaseOrderRepository poRepository;
+    @Mock PoLineItemRepository lineItemRepository;
+    @Mock CategoryRepository categoryRepository;
     @Mock OrganisationRepository organisationRepository;
     @Mock DepartmentRepository departmentRepository;
     @Mock SupplierRepository supplierRepository;
@@ -68,7 +70,7 @@ class PurchaseOrderWorkflowTest {
     @BeforeEach
     void setUp() {
         ledger = new LedgerFixture(budgetRepository, notificationService);
-        service = new PurchaseOrderServiceImpl(poRepository, organisationRepository, departmentRepository,
+        service = new PurchaseOrderServiceImpl(poRepository, lineItemRepository, categoryRepository, organisationRepository, departmentRepository,
                 supplierRepository, userRepository, budgetRepository, notificationService, currencyResolver,
                 ledger.service);
         org = new Organisation();

@@ -30,6 +30,8 @@ import static org.mockito.Mockito.*;
 class PurchaseOrderServiceImplTest {
 
     @Mock PurchaseOrderRepository poRepository;
+    @Mock PoLineItemRepository lineItemRepository;
+    @Mock CategoryRepository categoryRepository;
     @Mock OrganisationRepository organisationRepository;
     @Mock DepartmentRepository departmentRepository;
     @Mock SupplierRepository supplierRepository;
@@ -47,7 +49,7 @@ class PurchaseOrderServiceImplTest {
     void setUp() {
         ledger = new LedgerFixture(budgetRepository, notificationService);
         service = new PurchaseOrderServiceImpl(
-                poRepository, organisationRepository, departmentRepository,
+                poRepository, lineItemRepository, categoryRepository, organisationRepository, departmentRepository,
                 supplierRepository, userRepository, budgetRepository,
                 notificationService, currencyResolver, ledger.service);
         organisation = new Organisation();

@@ -8,6 +8,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Size;
+import jakarta.validation.Valid;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Data;
 
@@ -15,6 +16,7 @@ import lombok.Data;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.UUID;
 
 @Data
@@ -30,6 +32,18 @@ public class PurchaseOrderDto {
     @DecimalMin(value = "0.01", message = "Total amount must be greater than zero")
     @Digits(integer = 13, fraction = 2)
     private BigDecimal totalAmount;
+
+    /**
+     * The order's lines. Optional: an order may still be a single lump sum, in which
+     * case this is empty and {@link #totalAmount} is whatever the buyer typed. When
+     * lines are present the total is derived from them and any supplied total is
+     * ignored. On PUT/PATCH the set is replaced wholesale, so the payload must carry
+     * every line the order should end up with; PATCH leaves the lines alone when the
+     * field is absent. Lines can only be written while the order is in DRAFT, which
+     * is the same rule the rest of the order's fields already follow.
+     */
+    @Valid
+    private List<PoLineItemDto> lineItems;
 
     @Size(max = 3)
     private String currency;

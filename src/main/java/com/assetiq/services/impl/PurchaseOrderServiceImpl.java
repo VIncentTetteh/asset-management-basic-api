@@ -1,9 +1,12 @@
 package com.assetiq.services.impl;
 
+import com.assetiq.dto.PoLineItemDto;
 import com.assetiq.dto.PurchaseOrderDto;
 import com.assetiq.enums.BudgetLedgerKind;
 import com.assetiq.enums.POStatus;
 import com.assetiq.models.Budget;
+import com.assetiq.models.Category;
+import com.assetiq.models.PoLineItem;
 import com.assetiq.models.PurchaseOrder;
 import com.assetiq.models.Organisation;
 import com.assetiq.models.Department;
@@ -14,6 +17,7 @@ import com.assetiq.enums.NotificationType;
 import com.assetiq.services.CurrencyResolver;
 import com.assetiq.services.NotificationService;
 import com.assetiq.services.PurchaseOrderService;
+import com.assetiq.services.PurchaseOrderTotals;
 import com.assetiq.services.TenantAwareService;
 import com.assetiq.services.UserDisplayNames;
 import com.assetiq.services.budget.BudgetLedgerService;
@@ -26,7 +30,10 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -38,6 +45,8 @@ public class PurchaseOrderServiceImpl extends TenantAwareService implements Purc
     private static final Logger logger = LoggerFactory.getLogger(PurchaseOrderServiceImpl.class);
 
     private final PurchaseOrderRepository poRepository;
+    private final PoLineItemRepository lineItemRepository;
+    private final CategoryRepository categoryRepository;
     private final DepartmentRepository departmentRepository;
     private final SupplierRepository supplierRepository;
     private final UserRepository userRepository;
@@ -47,6 +56,8 @@ public class PurchaseOrderServiceImpl extends TenantAwareService implements Purc
     private final BudgetLedgerService budgetLedger;
 
     public PurchaseOrderServiceImpl(PurchaseOrderRepository poRepository,
+            PoLineItemRepository lineItemRepository,
+            CategoryRepository categoryRepository,
             OrganisationRepository organisationRepository,
             DepartmentRepository departmentRepository,
             SupplierRepository supplierRepository,
@@ -57,6 +68,8 @@ public class PurchaseOrderServiceImpl extends TenantAwareService implements Purc
             BudgetLedgerService budgetLedger) {
         super(organisationRepository);
         this.poRepository = poRepository;
+        this.lineItemRepository = lineItemRepository;
+        this.categoryRepository = categoryRepository;
         this.departmentRepository = departmentRepository;
         this.supplierRepository = supplierRepository;
         this.userRepository = userRepository;
@@ -98,7 +111,13 @@ public class PurchaseOrderServiceImpl extends TenantAwareService implements Purc
         requireBudgetCurrency(po);
 
         PurchaseOrder saved = poRepository.save(po);
-        logger.info("Created Purchase Order {} (PO Number: {})", saved.getId(), saved.getPoNumber());
+        if (poDto.getLineItems() != null && !poDto.getLineItems().isEmpty()) {
+            replaceLineItems(saved, org, poDto.getLineItems());
+            saved = poRepository.save(saved);
+        }
+        logger.info("Created Purchase Order {} (PO Number: {}) with {} line(s)",
+                saved.getId(), saved.getPoNumber(),
+                poDto.getLineItems() == null ? 0 : poDto.getLineItems().size());
         notificationService.notifyOrgAdmins(org, NotificationType.PURCHASE_ORDER,
                 "Purchase Order Created",
                 "Purchase Order '" + saved.getPoNumber() + "' has been created for " + supplier.getName() + ".",
@@ -175,6 +194,8 @@ public class PurchaseOrderServiceImpl extends TenantAwareService implements Purc
         po.setLinkedBudget(poDto.getLinkedBudgetId() != null
                 ? requireLinkableBudget(poDto.getLinkedBudgetId(), org) : null);
         requireBudgetCurrency(po);
+        // PUT is a full replacement: an absent or empty list leaves the order a lump sum.
+        replaceLineItems(po, org, poDto.getLineItems() == null ? List.of() : poDto.getLineItems());
 
         return mapToDto(poRepository.save(po));
     }
@@ -210,6 +231,10 @@ public class PurchaseOrderServiceImpl extends TenantAwareService implements Purc
             po.setLinkedBudget(requireLinkableBudget(poDto.getLinkedBudgetId(), org));
         }
         requireBudgetCurrency(po);
+        // PATCH only touches the lines when the field is present; an empty list clears them.
+        if (poDto.getLineItems() != null) {
+            replaceLineItems(po, org, poDto.getLineItems());
+        }
 
         return mapToDto(poRepository.save(po));
     }
@@ -370,9 +395,14 @@ public class PurchaseOrderServiceImpl extends TenantAwareService implements Purc
         if (po.getStatus() == POStatus.APPROVED || po.getStatus() == POStatus.DELIVERED) {
             unwindBudget(org, po);
         }
-        po.setDeletedAt(Instant.now());
+        Instant now = Instant.now();
+        List<PoLineItem> lines = liveLinesOf(po.getId());
+        lines.forEach(line -> line.setDeletedAt(now));
+        lineItemRepository.saveAll(lines);
+        po.setDeletedAt(now);
         poRepository.save(po);
-        logger.info("Soft-deleted Purchase Order {} (PO Number: {})", id, po.getPoNumber());
+        logger.info("Soft-deleted Purchase Order {} (PO Number: {}) and {} line(s)",
+                id, po.getPoNumber(), lines.size());
     }
 
     /**
@@ -471,7 +501,106 @@ public class PurchaseOrderServiceImpl extends TenantAwareService implements Purc
         }
         dto.setCreatedAt(po.getCreatedAt());
         dto.setUpdatedAt(po.getUpdatedAt());
+        dto.setLineItems(liveLinesOf(po.getId()).stream().map(PurchaseOrderServiceImpl::mapLineToDto).toList());
         return dto;
+    }
+
+    // ── Line items ───────────────────────────────────────────────────────────
+    //
+    // The set is replaced wholesale rather than merged: a line is identified by its
+    // position on the printed order, and diffing client-supplied ids would let a
+    // caller move one order's line onto another. Replaced lines are soft-deleted so
+    // the order's history survives, and the partial unique index (V56) lets the
+    // replacements reuse the same line numbers in the same transaction.
+
+    private List<PoLineItem> liveLinesOf(UUID purchaseOrderId) {
+        return lineItemRepository.findByPurchaseOrderIdAndDeletedAtIsNullOrderByLineNumberAsc(purchaseOrderId);
+    }
+
+    /**
+     * Replaces an order's lines and re-derives its total.
+     *
+     * <p>With lines, the stored total is the sum of the line totals: the two cannot
+     * be allowed to disagree, because approval commits the stored total against a
+     * budget. With no lines the order stays the lump sum the buyer typed.
+     */
+    private void replaceLineItems(PurchaseOrder po, Organisation org, List<PoLineItemDto> requested) {
+        Instant now = Instant.now();
+        List<PoLineItem> existing = liveLinesOf(po.getId());
+        existing.forEach(line -> line.setDeletedAt(now));
+        lineItemRepository.saveAll(existing);
+        // Flush the soft deletes before the replacements land: both sets share the
+        // (purchase_order_id, line_number) partial unique index.
+        lineItemRepository.flush();
+
+        if (requested.isEmpty()) {
+            return;
+        }
+
+        List<PoLineItem> lines = new ArrayList<>();
+        int lineNumber = 1;
+        for (PoLineItemDto dto : requested) {
+            lines.add(toLineItem(po, org, dto, lineNumber++));
+        }
+        lineItemRepository.saveAll(lines);
+        po.setTotalAmount(PurchaseOrderTotals.orderTotalOf(requested));
+    }
+
+    private PoLineItem toLineItem(PurchaseOrder po, Organisation org, PoLineItemDto dto, int lineNumber) {
+        if (dto.getDescription() == null || dto.getDescription().isBlank()) {
+            throw new IllegalArgumentException("Every purchase order line needs a description");
+        }
+        if (dto.getQuantity() == null || dto.getQuantity().signum() <= 0) {
+            throw new IllegalArgumentException("Line " + lineNumber + ": quantity must be greater than zero");
+        }
+        if (dto.getUnitPrice() == null || dto.getUnitPrice().signum() < 0) {
+            throw new IllegalArgumentException("Line " + lineNumber + ": unit price cannot be negative");
+        }
+
+        PoLineItem line = new PoLineItem();
+        line.setOrganisation(org);
+        line.setPurchaseOrder(po);
+        line.setLineNumber(lineNumber);
+        line.setDescription(dto.getDescription().trim());
+        line.setSupplierPartNumber(blankToNull(dto.getSupplierPartNumber()));
+        if (dto.getCategoryId() != null) {
+            line.setCategory(requireCategory(dto.getCategoryId(), org));
+        }
+        line.setQuantity(dto.getQuantity());
+        line.setUnitPrice(dto.getUnitPrice());
+        line.setTaxRate(dto.getTaxRate());
+        BigDecimal net = PurchaseOrderTotals.netOf(dto.getQuantity(), dto.getUnitPrice());
+        line.setTaxAmount(PurchaseOrderTotals.taxOf(net, dto.getTaxRate(), dto.getTaxAmount()));
+        line.setLineTotal(PurchaseOrderTotals.lineTotalOf(dto.getQuantity(), dto.getUnitPrice(),
+                dto.getTaxRate(), dto.getTaxAmount()));
+        return line;
+    }
+
+    private Category requireCategory(UUID categoryId, Organisation org) {
+        return categoryRepository.findByIdAndOrganisationAndDeletedAtIsNull(categoryId, org)
+                .orElseThrow(() -> new IllegalArgumentException("Category not found in your organisation"));
+    }
+
+    private static PoLineItemDto mapLineToDto(PoLineItem line) {
+        PoLineItemDto dto = new PoLineItemDto();
+        dto.setId(line.getId());
+        dto.setLineNumber(line.getLineNumber());
+        dto.setDescription(line.getDescription());
+        dto.setSupplierPartNumber(line.getSupplierPartNumber());
+        if (line.getCategory() != null) {
+            dto.setCategoryId(line.getCategory().getId());
+            dto.setCategoryName(line.getCategory().getName());
+        }
+        dto.setQuantity(line.getQuantity());
+        dto.setUnitPrice(line.getUnitPrice());
+        dto.setTaxRate(line.getTaxRate());
+        dto.setTaxAmount(line.getTaxAmount());
+        dto.setLineTotal(line.getLineTotal());
+        return dto;
+    }
+
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
     }
 
     private User resolveCurrentUser(Organisation org) {
