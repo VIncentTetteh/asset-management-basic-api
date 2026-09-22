@@ -3,11 +3,13 @@ package com.assetiq.controllers.v1;
 import com.assetiq.dto.UserDto;
 import com.assetiq.services.UserService;
 import com.assetiq.security.annotation.RequireFreshMfa;
+import com.assetiq.validation.OnCreate;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Set;
@@ -52,7 +54,7 @@ public class UserController {
     @PatchMapping("/me")
     public ResponseEntity<UserDto> patchMe(
             Authentication authentication,
-            @RequestBody UserDto dto) {
+            @Valid @RequestBody UserDto dto) {
         return ResponseEntity.ok(userService.patchMe(authentication.getName(), dto));
     }
 
@@ -60,7 +62,7 @@ public class UserController {
 
     @PostMapping
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_USERS','EDIT_USER','DELETE_USER')")
-    public ResponseEntity<UserDto> createUser(@Valid @RequestBody UserDto dto) {
+    public ResponseEntity<UserDto> createUser(@Validated(OnCreate.class) @RequestBody UserDto dto) {
         return ResponseEntity.status(HttpStatus.CREATED).body(userService.createUser(dto));
     }
 
@@ -83,14 +85,14 @@ public class UserController {
     @PutMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_USERS','EDIT_USER','DELETE_USER')")
     public ResponseEntity<UserDto> updateUser(@PathVariable UUID id,
-            @Valid @RequestBody UserDto dto) {
+            @Validated(OnCreate.class) @RequestBody UserDto dto) {
         return ResponseEntity.ok(userService.updateUser(id, dto));
     }
 
     @PatchMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_USERS','EDIT_USER','DELETE_USER')")
     public ResponseEntity<UserDto> patchUser(@PathVariable UUID id,
-            @RequestBody UserDto dto) {
+            @Valid @RequestBody UserDto dto) {
         return ResponseEntity.ok(userService.patchUser(id, dto));
     }
 

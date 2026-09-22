@@ -1,5 +1,6 @@
 package com.assetiq.controllers.v1;
 
+import jakarta.validation.Valid;
 import com.assetiq.dto.DiscoveredDeviceDto;
 import com.assetiq.dto.NetworkScanRequestDto;
 import com.assetiq.dto.PagedResponseDto;
@@ -40,7 +41,7 @@ public class NetworkDiscoveryController {
      */
     @PostMapping("/scan")
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_NETWORK_DISCOVERY')")
-    public ResponseEntity<List<DiscoveredDeviceDto>> scan(@RequestBody NetworkScanRequestDto request) {
+    public ResponseEntity<List<DiscoveredDeviceDto>> scan(@Valid @RequestBody NetworkScanRequestDto request) {
         return ResponseEntity.ok(discoveryService.scan(request));
     }
 

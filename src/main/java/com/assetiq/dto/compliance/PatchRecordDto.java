@@ -1,8 +1,11 @@
 package com.assetiq.dto.compliance;
 
 import com.assetiq.models.compliance.PatchRecord;
+import com.assetiq.validation.NullOrNotBlank;
+import com.assetiq.validation.OnCreate;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 import lombok.Data;
 
 import java.time.Instant;
@@ -14,16 +17,20 @@ public class PatchRecordDto {
     private UUID id;
     private UUID organisationId;
 
-    @NotNull(message = "Asset ID is required")
+    @NotNull(groups = OnCreate.class, message = "Asset ID is required")
     private UUID assetId;
 
     private String assetName;
 
-    @NotBlank(message = "Patch name is required")
+    @NotBlank(groups = OnCreate.class, message = "Patch name is required")
+    @NullOrNotBlank
+    @Size(max = 255)
     private String patchName;
 
+    @Size(max = 64)
     private String version;
     private Instant appliedAt;
+    @Size(max = 255)
     private String appliedByEmail;
     private Boolean testEnvironmentValidated;
     private String rollbackPlan;

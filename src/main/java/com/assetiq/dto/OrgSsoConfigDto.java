@@ -4,6 +4,7 @@ import com.assetiq.enums.SsoProvider;
 
 
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 import lombok.Data;
 
 /**
@@ -25,6 +26,7 @@ public class OrgSsoConfigDto {
 
     // ── OAuth2 fields ─────────────────────────────────────────────────────────
 
+    @Size(max = 255)
     private String clientId;
 
     /**
@@ -32,8 +34,10 @@ public class OrgSsoConfigDto {
      */
     private String clientSecret;
 
+    @Size(max = 255)
     private String issuerUri;
 
+    @Size(max = 255)
     private String scopes;
 
     private String redirectUri;
@@ -42,10 +46,12 @@ public class OrgSsoConfigDto {
 
     private String idpMetadataUrl;
 
+    @Size(max = 255)
     private String spEntityId;
 
     private String assertionConsumerServiceUrl;
 
     /** Email domain for SSO auto-discovery (e.g. "company.com"). Stored on the Organisation. */
+    @Size(max = 255)
     private String emailDomain;
 }

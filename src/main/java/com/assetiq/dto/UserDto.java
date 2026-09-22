@@ -1,6 +1,8 @@
 package com.assetiq.dto;
 
 import com.assetiq.enums.UserStatus;
+import com.assetiq.validation.NullOrNotBlank;
+import com.assetiq.validation.OnCreate;
 import jakarta.validation.constraints.Email;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.NotBlank;
@@ -14,16 +16,23 @@ import java.util.UUID;
 public class UserDto {
     private UUID id;
 
-    @NotBlank(message = "First name is required")
+    @NotBlank(groups = OnCreate.class, message = "First name is required")
+    @NullOrNotBlank
+    @Size(max = 255)
     private String firstName;
 
-    @NotBlank(message = "Last name is required")
+    @NotBlank(groups = OnCreate.class, message = "Last name is required")
+    @NullOrNotBlank
+    @Size(max = 255)
     private String lastName;
 
     @Email(message = "Email must be valid")
-    @NotBlank(message = "Email is required")
+    @NotBlank(groups = OnCreate.class, message = "Email is required")
+    @NullOrNotBlank
+    @Size(max = 255)
     private String email;
 
+    @Size(max = 255)
     private String phone;
 
     /**
@@ -34,8 +43,10 @@ public class UserDto {
     @Size(min = 8, max = 128, message = "Password must be 8 to 128 characters")
     private String password;
 
+    @Size(max = 255)
     private String employeeId;
 
+    @Size(max = 255)
     private String jobTitle;
 
     private UUID roleId;

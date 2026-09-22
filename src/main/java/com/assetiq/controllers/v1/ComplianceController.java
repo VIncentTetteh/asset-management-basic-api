@@ -3,6 +3,7 @@ package com.assetiq.controllers.v1;
 import com.assetiq.dto.compliance.*;
 import com.assetiq.dto.PagedResponseDto;
 import com.assetiq.services.ComplianceService;
+import com.assetiq.validation.OnCreate;
 import jakarta.validation.Valid;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -11,6 +12,7 @@ import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -51,14 +53,14 @@ public class ComplianceController {
 
     @PostMapping("/controls")
     @PreAuthorize(WRITE)
-    public ResponseEntity<ComplianceControlDto> createControl(@Valid @RequestBody ComplianceControlDto dto) {
+    public ResponseEntity<ComplianceControlDto> createControl(@Validated(OnCreate.class) @RequestBody ComplianceControlDto dto) {
         return ResponseEntity.status(HttpStatus.CREATED).body(complianceService.createControl(dto));
     }
 
     @PatchMapping("/controls/{id}")
     @PreAuthorize(WRITE)
     public ResponseEntity<ComplianceControlDto> updateControl(
-            @PathVariable UUID id, @RequestBody ComplianceControlDto dto) {
+            @PathVariable UUID id, @Valid @RequestBody ComplianceControlDto dto) {
         return ResponseEntity.ok(complianceService.updateControl(id, dto));
     }
 
@@ -84,14 +86,14 @@ public class ComplianceController {
 
     @PostMapping("/bog-controls")
     @PreAuthorize(WRITE)
-    public ResponseEntity<BogControlDto> createBogControl(@Valid @RequestBody BogControlDto dto) {
+    public ResponseEntity<BogControlDto> createBogControl(@Validated(OnCreate.class) @RequestBody BogControlDto dto) {
         return ResponseEntity.status(HttpStatus.CREATED).body(complianceService.createBogControl(dto));
     }
 
     @PatchMapping("/bog-controls/{id}")
     @PreAuthorize(WRITE)
     public ResponseEntity<BogControlDto> updateBogControl(
-            @PathVariable UUID id, @RequestBody BogControlDto dto) {
+            @PathVariable UUID id, @Valid @RequestBody BogControlDto dto) {
         return ResponseEntity.ok(complianceService.updateBogControl(id, dto));
     }
 
@@ -133,14 +135,14 @@ public class ComplianceController {
 
     @PostMapping("/risks")
     @PreAuthorize(WRITE)
-    public ResponseEntity<RiskRegisterDto> createRisk(@Valid @RequestBody RiskRegisterDto dto) {
+    public ResponseEntity<RiskRegisterDto> createRisk(@Validated(OnCreate.class) @RequestBody RiskRegisterDto dto) {
         return ResponseEntity.status(HttpStatus.CREATED).body(complianceService.createRisk(dto));
     }
 
     @PatchMapping("/risks/{id}")
     @PreAuthorize(WRITE)
     public ResponseEntity<RiskRegisterDto> updateRisk(
-            @PathVariable UUID id, @RequestBody RiskRegisterDto dto) {
+            @PathVariable UUID id, @Valid @RequestBody RiskRegisterDto dto) {
         return ResponseEntity.ok(complianceService.updateRisk(id, dto));
     }
 
@@ -181,14 +183,14 @@ public class ComplianceController {
 
     @PostMapping("/incidents")
     @PreAuthorize(WRITE)
-    public ResponseEntity<SecurityIncidentDto> createIncident(@Valid @RequestBody SecurityIncidentDto dto) {
+    public ResponseEntity<SecurityIncidentDto> createIncident(@Validated(OnCreate.class) @RequestBody SecurityIncidentDto dto) {
         return ResponseEntity.status(HttpStatus.CREATED).body(complianceService.createIncident(dto));
     }
 
     @PatchMapping("/incidents/{id}")
     @PreAuthorize(WRITE)
     public ResponseEntity<SecurityIncidentDto> updateIncident(
-            @PathVariable UUID id, @RequestBody SecurityIncidentDto dto) {
+            @PathVariable UUID id, @Valid @RequestBody SecurityIncidentDto dto) {
         return ResponseEntity.ok(complianceService.updateIncident(id, dto));
     }
 
@@ -213,14 +215,14 @@ public class ComplianceController {
 
     @PostMapping("/policies")
     @PreAuthorize(WRITE)
-    public ResponseEntity<SecurityPolicyDto> createPolicy(@Valid @RequestBody SecurityPolicyDto dto) {
+    public ResponseEntity<SecurityPolicyDto> createPolicy(@Validated(OnCreate.class) @RequestBody SecurityPolicyDto dto) {
         return ResponseEntity.status(HttpStatus.CREATED).body(complianceService.createPolicy(dto));
     }
 
     @PatchMapping("/policies/{id}")
     @PreAuthorize(WRITE)
     public ResponseEntity<SecurityPolicyDto> updatePolicy(
-            @PathVariable UUID id, @RequestBody SecurityPolicyDto dto) {
+            @PathVariable UUID id, @Valid @RequestBody SecurityPolicyDto dto) {
         return ResponseEntity.ok(complianceService.updatePolicy(id, dto));
     }
 
@@ -245,14 +247,14 @@ public class ComplianceController {
 
     @PostMapping("/security-zones")
     @PreAuthorize(WRITE)
-    public ResponseEntity<SecurityZoneDto> createSecurityZone(@Valid @RequestBody SecurityZoneDto dto) {
+    public ResponseEntity<SecurityZoneDto> createSecurityZone(@Validated(OnCreate.class) @RequestBody SecurityZoneDto dto) {
         return ResponseEntity.status(HttpStatus.CREATED).body(complianceService.createSecurityZone(dto));
     }
 
     @PatchMapping("/security-zones/{id}")
     @PreAuthorize(WRITE)
     public ResponseEntity<SecurityZoneDto> updateSecurityZone(
-            @PathVariable UUID id, @RequestBody SecurityZoneDto dto) {
+            @PathVariable UUID id, @Valid @RequestBody SecurityZoneDto dto) {
         return ResponseEntity.ok(complianceService.updateSecurityZone(id, dto));
     }
 
@@ -277,14 +279,14 @@ public class ComplianceController {
 
     @PostMapping("/ics-assets")
     @PreAuthorize(WRITE)
-    public ResponseEntity<IcsAssetDto> createIcsAsset(@Valid @RequestBody IcsAssetDto dto) {
+    public ResponseEntity<IcsAssetDto> createIcsAsset(@Validated(OnCreate.class) @RequestBody IcsAssetDto dto) {
         return ResponseEntity.status(HttpStatus.CREATED).body(complianceService.createIcsAsset(dto));
     }
 
     @PatchMapping("/ics-assets/{id}")
     @PreAuthorize(WRITE)
     public ResponseEntity<IcsAssetDto> updateIcsAsset(
-            @PathVariable UUID id, @RequestBody IcsAssetDto dto) {
+            @PathVariable UUID id, @Valid @RequestBody IcsAssetDto dto) {
         return ResponseEntity.ok(complianceService.updateIcsAsset(id, dto));
     }
 
@@ -326,14 +328,14 @@ public class ComplianceController {
 
     @PostMapping("/patch-records")
     @PreAuthorize(WRITE)
-    public ResponseEntity<PatchRecordDto> createPatchRecord(@Valid @RequestBody PatchRecordDto dto) {
+    public ResponseEntity<PatchRecordDto> createPatchRecord(@Validated(OnCreate.class) @RequestBody PatchRecordDto dto) {
         return ResponseEntity.status(HttpStatus.CREATED).body(complianceService.createPatchRecord(dto));
     }
 
     @PatchMapping("/patch-records/{id}")
     @PreAuthorize(WRITE)
     public ResponseEntity<PatchRecordDto> updatePatchRecord(
-            @PathVariable UUID id, @RequestBody PatchRecordDto dto) {
+            @PathVariable UUID id, @Valid @RequestBody PatchRecordDto dto) {
         return ResponseEntity.ok(complianceService.updatePatchRecord(id, dto));
     }
 
@@ -358,14 +360,14 @@ public class ComplianceController {
 
     @PostMapping("/pci-saq")
     @PreAuthorize(WRITE)
-    public ResponseEntity<PciSaqRecordDto> upsertPciSaqRecord(@Valid @RequestBody PciSaqRecordDto dto) {
+    public ResponseEntity<PciSaqRecordDto> upsertPciSaqRecord(@Validated(OnCreate.class) @RequestBody PciSaqRecordDto dto) {
         return ResponseEntity.status(HttpStatus.CREATED).body(complianceService.upsertPciSaqRecord(dto));
     }
 
     @PatchMapping("/pci-saq/{id}")
     @PreAuthorize(WRITE)
     public ResponseEntity<PciSaqRecordDto> updatePciSaqRecord(
-            @PathVariable UUID id, @RequestBody PciSaqRecordDto dto) {
+            @PathVariable UUID id, @Valid @RequestBody PciSaqRecordDto dto) {
         return ResponseEntity.ok(complianceService.updatePciSaqRecord(id, dto));
     }
 
@@ -383,14 +385,14 @@ public class ComplianceController {
 
     @PostMapping("/sla-metrics")
     @PreAuthorize(WRITE)
-    public ResponseEntity<SlaMetricDto> createSlaMetric(@Valid @RequestBody SlaMetricDto dto) {
+    public ResponseEntity<SlaMetricDto> createSlaMetric(@Validated(OnCreate.class) @RequestBody SlaMetricDto dto) {
         return ResponseEntity.status(HttpStatus.CREATED).body(complianceService.createSlaMetric(dto));
     }
 
     @PatchMapping("/sla-metrics/{id}")
     @PreAuthorize(WRITE)
     public ResponseEntity<SlaMetricDto> updateSlaMetric(
-            @PathVariable UUID id, @RequestBody SlaMetricDto dto) {
+            @PathVariable UUID id, @Valid @RequestBody SlaMetricDto dto) {
         return ResponseEntity.ok(complianceService.updateSlaMetric(id, dto));
     }
 
@@ -425,14 +427,14 @@ public class ComplianceController {
     @PostMapping("/vulnerability-scans")
     @PreAuthorize(WRITE)
     public ResponseEntity<VulnerabilityScanDto> createVulnerabilityScan(
-            @Valid @RequestBody VulnerabilityScanDto dto) {
+            @Validated(OnCreate.class) @RequestBody VulnerabilityScanDto dto) {
         return ResponseEntity.status(HttpStatus.CREATED).body(complianceService.createVulnerabilityScan(dto));
     }
 
     @PatchMapping("/vulnerability-scans/{id}")
     @PreAuthorize(WRITE)
     public ResponseEntity<VulnerabilityScanDto> updateVulnerabilityScan(
-            @PathVariable UUID id, @RequestBody VulnerabilityScanDto dto) {
+            @PathVariable UUID id, @Valid @RequestBody VulnerabilityScanDto dto) {
         return ResponseEntity.ok(complianceService.updateVulnerabilityScan(id, dto));
     }
 
@@ -459,14 +461,14 @@ public class ComplianceController {
     @PostMapping("/regulatory-filings")
     @PreAuthorize(WRITE)
     public ResponseEntity<RegulatoryFilingDto> createRegulatoryFiling(
-            @Valid @RequestBody RegulatoryFilingDto dto) {
+            @Validated(OnCreate.class) @RequestBody RegulatoryFilingDto dto) {
         return ResponseEntity.status(HttpStatus.CREATED).body(complianceService.createRegulatoryFiling(dto));
     }
 
     @PatchMapping("/regulatory-filings/{id}")
     @PreAuthorize(WRITE)
     public ResponseEntity<RegulatoryFilingDto> updateRegulatoryFiling(
-            @PathVariable UUID id, @RequestBody RegulatoryFilingDto dto) {
+            @PathVariable UUID id, @Valid @RequestBody RegulatoryFilingDto dto) {
         return ResponseEntity.ok(complianceService.updateRegulatoryFiling(id, dto));
     }
 

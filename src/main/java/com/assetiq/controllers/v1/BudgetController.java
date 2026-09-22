@@ -7,10 +7,12 @@ import com.assetiq.dto.BudgetSummaryDto;
 import com.assetiq.dto.ExpenseDto;
 import com.assetiq.dto.PagedResponseDto;
 import com.assetiq.services.BudgetService;
+import com.assetiq.validation.OnCreate;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
@@ -30,7 +32,7 @@ public class BudgetController {
 
     @PostMapping
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_BUDGETS','APPROVE_BUDGET')")
-    public ResponseEntity<BudgetDto> create(@Valid @RequestBody BudgetDto dto) {
+    public ResponseEntity<BudgetDto> create(@Validated(OnCreate.class) @RequestBody BudgetDto dto) {
         return ResponseEntity.status(HttpStatus.CREATED).body(budgetService.create(dto));
     }
 
@@ -56,14 +58,14 @@ public class BudgetController {
     @PutMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_BUDGETS','APPROVE_BUDGET')")
     public ResponseEntity<BudgetDto> update(
-            @PathVariable UUID id, @Valid @RequestBody BudgetDto dto) {
+            @PathVariable UUID id, @Validated(OnCreate.class) @RequestBody BudgetDto dto) {
         return ResponseEntity.ok(budgetService.update(id, dto));
     }
 
     @PatchMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_BUDGETS','APPROVE_BUDGET')")
     public ResponseEntity<BudgetDto> patch(
-            @PathVariable UUID id, @RequestBody BudgetDto dto) {
+            @PathVariable UUID id, @Valid @RequestBody BudgetDto dto) {
         return ResponseEntity.ok(budgetService.patch(id, dto));
     }
 

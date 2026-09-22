@@ -29,7 +29,7 @@ public class LeaseRecordController {
 
     @PutMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','MANAGE_LEASES')")
-    public ResponseEntity<LeaseRecordDto> update(@PathVariable UUID id, @RequestBody LeaseRecordDto dto) {
+    public ResponseEntity<LeaseRecordDto> update(@PathVariable UUID id, @Valid @RequestBody LeaseRecordDto dto) {
         // Unknown lease -> 404 (ResourceNotFoundException); invalid input -> 400.
         return ResponseEntity.ok(leaseRecordService.update(id, dto));
     }

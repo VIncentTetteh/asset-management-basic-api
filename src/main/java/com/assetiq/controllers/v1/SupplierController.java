@@ -2,9 +2,11 @@ package com.assetiq.controllers.v1;
 
 import com.assetiq.dto.SupplierDto;
 import com.assetiq.services.SupplierService;
+import com.assetiq.validation.OnCreate;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import jakarta.validation.Valid;
@@ -23,7 +25,7 @@ public class SupplierController {
 
     @PostMapping
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_ORGANIZATION_SETTINGS','MANAGE_SUPPLIERS')")
-    public ResponseEntity<SupplierDto> createSupplier(@Valid @RequestBody SupplierDto supplierDto) {
+    public ResponseEntity<SupplierDto> createSupplier(@Validated(OnCreate.class) @RequestBody SupplierDto supplierDto) {
         SupplierDto createdSupplier = supplierService.createSupplier(supplierDto);
         return ResponseEntity.status(HttpStatus.CREATED).body(createdSupplier);
     }
@@ -45,7 +47,7 @@ public class SupplierController {
     @PutMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_ORGANIZATION_SETTINGS','MANAGE_SUPPLIERS')")
     public ResponseEntity<SupplierDto> updateSupplier(@PathVariable UUID id,
-                                                     @Valid @RequestBody SupplierDto supplierDto) {
+                                                     @Validated(OnCreate.class) @RequestBody SupplierDto supplierDto) {
         SupplierDto updatedSupplier = supplierService.updateSupplier(id, supplierDto);
         return ResponseEntity.ok(updatedSupplier);
     }
@@ -53,7 +55,7 @@ public class SupplierController {
     @PatchMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_ORGANIZATION_SETTINGS','MANAGE_SUPPLIERS')")
     public ResponseEntity<SupplierDto> patchSupplier(@PathVariable UUID id,
-            @RequestBody SupplierDto supplierDto) {
+            @Valid @RequestBody SupplierDto supplierDto) {
         SupplierDto updatedSupplier = supplierService.patchSupplier(id, supplierDto);
         return ResponseEntity.ok(updatedSupplier);
     }

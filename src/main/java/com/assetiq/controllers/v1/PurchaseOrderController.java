@@ -6,8 +6,10 @@ import com.assetiq.services.PurchaseOrderService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 import com.assetiq.security.annotation.RequireFreshMfa;
+import com.assetiq.validation.OnCreate;
 
 import jakarta.validation.Valid;
 import java.util.Set;
@@ -26,7 +28,7 @@ public class PurchaseOrderController {
     @PostMapping
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_EXPENSES','MANAGE_PROCUREMENT')")
     public ResponseEntity<PurchaseOrderDto> createPurchaseOrder(
-            @Valid @RequestBody PurchaseOrderDto poDto) {
+            @Validated(OnCreate.class) @RequestBody PurchaseOrderDto poDto) {
         PurchaseOrderDto createdPo = poService.createPurchaseOrder(poDto);
         return ResponseEntity.status(HttpStatus.CREATED).body(createdPo);
     }
@@ -59,7 +61,7 @@ public class PurchaseOrderController {
     @PutMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_EXPENSES','MANAGE_PROCUREMENT')")
     public ResponseEntity<PurchaseOrderDto> updatePurchaseOrder(@PathVariable UUID id,
-            @Valid @RequestBody PurchaseOrderDto poDto) {
+            @Validated(OnCreate.class) @RequestBody PurchaseOrderDto poDto) {
         PurchaseOrderDto updatedPo = poService.updatePurchaseOrder(id, poDto);
         return ResponseEntity.ok(updatedPo);
     }
@@ -67,7 +69,7 @@ public class PurchaseOrderController {
     @PatchMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_EXPENSES','MANAGE_PROCUREMENT')")
     public ResponseEntity<PurchaseOrderDto> patchPurchaseOrder(@PathVariable UUID id,
-            @RequestBody PurchaseOrderDto poDto) {
+            @Valid @RequestBody PurchaseOrderDto poDto) {
         PurchaseOrderDto updatedPo = poService.patchPurchaseOrder(id, poDto);
         return ResponseEntity.ok(updatedPo);
     }

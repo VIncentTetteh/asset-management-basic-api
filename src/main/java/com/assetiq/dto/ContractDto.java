@@ -2,8 +2,13 @@ package com.assetiq.dto;
 
 import com.assetiq.enums.ContractStatus;
 import com.assetiq.enums.ContractType;
+import com.assetiq.validation.NullOrNotBlank;
+import com.assetiq.validation.OnCreate;
+import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.PositiveOrZero;
+import jakarta.validation.constraints.Size;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -13,12 +18,15 @@ public class ContractDto {
 
     private UUID id;
 
-    @NotBlank
+    @NotBlank(groups = OnCreate.class)
+    @NullOrNotBlank
+    @Size(max = 255)
     private String title;
 
+    @Size(max = 100)
     private String contractNumber;
 
-    @NotNull
+    @NotNull(groups = OnCreate.class)
     private ContractType contractType;
 
     private ContractStatus status;
@@ -29,19 +37,24 @@ public class ContractDto {
     private UUID assetId;
     private String assetName;
 
-    @NotNull
+    @NotNull(groups = OnCreate.class)
     private LocalDate startDate;
 
-    @NotNull
+    @NotNull(groups = OnCreate.class)
     private LocalDate endDate;
 
+    @PositiveOrZero
     private Integer alertDaysBefore;
 
+    @PositiveOrZero
+    @Digits(integer = 13, fraction = 2)
     private BigDecimal value;
+    @Size(max = 3)
     private String currency;
 
     private boolean autoRenew;
 
+    @Size(max = 500)
     private String documentUrl;
     private String notes;
 

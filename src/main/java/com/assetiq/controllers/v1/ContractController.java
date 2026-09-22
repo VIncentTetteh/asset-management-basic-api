@@ -2,10 +2,12 @@ package com.assetiq.controllers.v1;
 
 import com.assetiq.dto.ContractDto;
 import com.assetiq.services.ContractService;
+import com.assetiq.validation.OnCreate;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -23,7 +25,7 @@ public class ContractController {
 
     @PostMapping
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_ORGANIZATION_SETTINGS','MANAGE_CONTRACTS')")
-    public ResponseEntity<ContractDto> create(@Valid @RequestBody ContractDto dto) {
+    public ResponseEntity<ContractDto> create(@Validated(OnCreate.class) @RequestBody ContractDto dto) {
         return ResponseEntity.status(HttpStatus.CREATED).body(contractService.create(dto));
     }
 
@@ -53,14 +55,14 @@ public class ContractController {
     @PutMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_ORGANIZATION_SETTINGS','MANAGE_CONTRACTS')")
     public ResponseEntity<ContractDto> update(
-            @PathVariable UUID id, @Valid @RequestBody ContractDto dto) {
+            @PathVariable UUID id, @Validated(OnCreate.class) @RequestBody ContractDto dto) {
         return ResponseEntity.ok(contractService.update(id, dto));
     }
 
     @PatchMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_ORGANIZATION_SETTINGS','MANAGE_CONTRACTS')")
     public ResponseEntity<ContractDto> patch(
-            @PathVariable UUID id, @RequestBody ContractDto dto) {
+            @PathVariable UUID id, @Valid @RequestBody ContractDto dto) {
         return ResponseEntity.ok(contractService.patch(id, dto));
     }
 

@@ -1,8 +1,11 @@
 package com.assetiq.dto.compliance;
 
 import com.assetiq.models.compliance.SecurityIncident;
+import com.assetiq.validation.NullOrNotBlank;
+import com.assetiq.validation.OnCreate;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 import lombok.Data;
 
 import java.time.Instant;
@@ -14,14 +17,17 @@ public class SecurityIncidentDto {
     private UUID id;
     private UUID organisationId;
 
-    @NotBlank(message = "Title is required")
+    @NotBlank(groups = OnCreate.class, message = "Title is required")
+    @NullOrNotBlank
+    @Size(max = 255)
     private String title;
 
     private String description;
 
-    @NotNull(message = "Severity is required")
+    @NotNull(groups = OnCreate.class, message = "Severity is required")
     private SecurityIncident.Severity severity;
 
+    @Size(max = 64)
     private String category;
     private UUID reportedById;
     private String reportedByEmail;

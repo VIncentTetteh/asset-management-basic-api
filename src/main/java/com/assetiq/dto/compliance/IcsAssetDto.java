@@ -1,7 +1,9 @@
 package com.assetiq.dto.compliance;
 
 import com.assetiq.models.compliance.IcsAsset;
+import com.assetiq.validation.OnCreate;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 import lombok.Data;
 
 import java.time.Instant;
@@ -13,13 +15,15 @@ public class IcsAssetDto {
     private UUID id;
     private UUID organisationId;
 
-    @NotNull(message = "Asset ID is required")
+    @NotNull(groups = OnCreate.class, message = "Asset ID is required")
     private UUID assetId;
 
     private String assetName;
     private UUID securityZoneId;
     private String securityZoneName;
+    @Size(max = 64)
     private String firmwareVersion;
+    @Size(max = 128)
     private String protocol;
     private IcsAsset.VendorSupportStatus vendorSupportStatus;
     private Instant lastPatchedAt;

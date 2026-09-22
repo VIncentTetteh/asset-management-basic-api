@@ -6,6 +6,6 @@ import jakarta.validation.constraints.Size;
 public record CreateConsentRequest(
         @NotBlank @Size(max = 100) String purpose,
         boolean granted,
-        String ipAddress,
+        @Size(max = 50) String ipAddress,
         String userAgent
 ) {}

@@ -1,7 +1,10 @@
 package com.assetiq.dto.compliance;
 
 import com.assetiq.models.compliance.SecurityPolicy;
+import com.assetiq.validation.NullOrNotBlank;
+import com.assetiq.validation.OnCreate;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import lombok.Data;
 
 import java.time.Instant;
@@ -13,13 +16,18 @@ public class SecurityPolicyDto {
     private UUID id;
     private UUID organisationId;
 
-    @NotBlank(message = "Title is required")
+    @NotBlank(groups = OnCreate.class, message = "Title is required")
+    @NullOrNotBlank
+    @Size(max = 255)
     private String title;
 
+    @Size(max = 16)
     private String version;
+    @Size(max = 255)
     private String documentUrl;
     private UUID ownerId;
     private String ownerEmail;
+    @Size(max = 255)
     private String approvedByEmail;
     private Instant effectiveDate;
     private Instant reviewDueDate;

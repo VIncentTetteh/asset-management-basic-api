@@ -1,8 +1,14 @@
 package com.assetiq.dto;
 
 import com.assetiq.enums.*;
+import com.assetiq.validation.NullOrNotBlank;
+import com.assetiq.validation.OnCreate;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import jakarta.validation.constraints.Digits;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.PositiveOrZero;
+import jakarta.validation.constraints.Size;
 import lombok.Data;
 
 
@@ -16,13 +22,18 @@ import java.util.UUID;
 public class AssetDto {
     private UUID id;
 
-    @NotBlank(message = "Asset name is required")
+    @NotBlank(groups = OnCreate.class, message = "Asset name is required")
+    @NullOrNotBlank
+    @Size(max = 255)
     private String name;
 
+    @Size(max = 255)
     private String assetTag;
 
+    @Size(max = 255)
     private String serialNumber;
 
+    @Size(max = 255)
     private String barcodeQrCode;
 
     private String description;
@@ -31,22 +42,31 @@ public class AssetDto {
 
     private AssetType assetType;
 
+    @Size(max = 255)
     private String manufacturer;
 
+    @Size(max = 255)
     private String model;
 
     private LocalDate purchaseDate;
 
+    @PositiveOrZero
+    @Digits(integer = 13, fraction = 2)
     private BigDecimal purchaseCost;
 
+    @Size(max = 3)
     private String currency;
 
     private DepreciationMethod depreciationMethod;
 
+    @Min(1)
     private Integer usefulLifeMonths;
 
+    @PositiveOrZero
+    @Digits(integer = 13, fraction = 2)
     private BigDecimal residualValue;
 
+    @Digits(integer = 13, fraction = 2)
     private BigDecimal currentBookValue;
 
     private LocalDate warrantyExpiryDate;
@@ -61,8 +81,10 @@ public class AssetDto {
 
     private UUID supplierId;
 
+    @Size(max = 255)
     private String invoiceId;
 
+    @Size(max = 255)
     private String insurancePolicyId;
 
     private UUID departmentId;
@@ -73,6 +95,7 @@ public class AssetDto {
 
     private com.assetiq.enums.ProcurementType procurementType;
 
+    @Size(max = 100)
     private String costCenter;
 
     private Instant createdAt;

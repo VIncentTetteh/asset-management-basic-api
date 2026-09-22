@@ -1,6 +1,9 @@
 package com.assetiq.dto;
 
+import com.assetiq.validation.NullOrNotBlank;
+import com.assetiq.validation.OnCreate;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import lombok.Data;
 
 import java.util.List;
@@ -10,7 +13,9 @@ import java.util.UUID;
 public class RoleDto {
     private UUID id;
 
-    @NotBlank(message = "Role name is required")
+    @NotBlank(groups = OnCreate.class, message = "Role name is required")
+    @NullOrNotBlank
+    @Size(max = 255)
     private String name;
 
     private String description;

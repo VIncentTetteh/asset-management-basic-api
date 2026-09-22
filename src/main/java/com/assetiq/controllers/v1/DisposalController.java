@@ -3,9 +3,11 @@ package com.assetiq.controllers.v1;
 import com.assetiq.dto.DisposalRecordDto;
 import com.assetiq.security.annotation.RequireFreshMfa;
 import com.assetiq.services.DisposalService;
+import com.assetiq.validation.OnCreate;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import jakarta.validation.Valid;
@@ -26,7 +28,7 @@ public class DisposalController {
     @PostMapping
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','DISPOSE_ASSET')")
     public ResponseEntity<DisposalRecordDto> createDisposalRecord(
-            @Valid @RequestBody DisposalRecordDto recordDto) {
+            @Validated(OnCreate.class) @RequestBody DisposalRecordDto recordDto) {
         DisposalRecordDto createdRecord = disposalService.createDisposalRecord(recordDto);
         return ResponseEntity.status(HttpStatus.CREATED).body(createdRecord);
     }
@@ -60,7 +62,7 @@ public class DisposalController {
     @PutMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','DISPOSE_ASSET')")
     public ResponseEntity<DisposalRecordDto> updateDisposalRecord(@PathVariable UUID id,
-            @Valid @RequestBody DisposalRecordDto recordDto) {
+            @Validated(OnCreate.class) @RequestBody DisposalRecordDto recordDto) {
         DisposalRecordDto updatedRecord = disposalService.updateDisposalRecord(id, recordDto);
         return ResponseEntity.ok(updatedRecord);
     }
@@ -68,7 +70,7 @@ public class DisposalController {
     @PatchMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','DISPOSE_ASSET')")
     public ResponseEntity<DisposalRecordDto> patchDisposalRecord(@PathVariable UUID id,
-            @RequestBody DisposalRecordDto recordDto) {
+            @Valid @RequestBody DisposalRecordDto recordDto) {
         DisposalRecordDto updatedRecord = disposalService.patchDisposalRecord(id, recordDto);
         return ResponseEntity.ok(updatedRecord);
     }

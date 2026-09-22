@@ -2,9 +2,11 @@ package com.assetiq.controllers.v1;
 
 import com.assetiq.dto.MaintenanceRecordDto;
 import com.assetiq.services.MaintenanceService;
+import com.assetiq.validation.OnCreate;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import jakarta.validation.Valid;
@@ -25,7 +27,7 @@ public class MaintenanceController {
     @PostMapping
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','SCHEDULE_MAINTENANCE','MARK_MAINTENANCE_COMPLETE')")
     public ResponseEntity<MaintenanceRecordDto> createMaintenanceRecord(
-            @Valid @RequestBody MaintenanceRecordDto recordDto) {
+            @Validated(OnCreate.class) @RequestBody MaintenanceRecordDto recordDto) {
         MaintenanceRecordDto createdRecord = maintenanceService.createMaintenanceRecord(recordDto);
         return ResponseEntity.status(HttpStatus.CREATED).body(createdRecord);
     }
@@ -58,7 +60,7 @@ public class MaintenanceController {
     @PutMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','SCHEDULE_MAINTENANCE','MARK_MAINTENANCE_COMPLETE')")
     public ResponseEntity<MaintenanceRecordDto> updateMaintenanceRecord(@PathVariable UUID id,
-            @Valid @RequestBody MaintenanceRecordDto recordDto) {
+            @Validated(OnCreate.class) @RequestBody MaintenanceRecordDto recordDto) {
         MaintenanceRecordDto updatedRecord = maintenanceService.updateMaintenanceRecord(id, recordDto);
         return ResponseEntity.ok(updatedRecord);
     }
@@ -66,7 +68,7 @@ public class MaintenanceController {
     @PatchMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','SCHEDULE_MAINTENANCE','MARK_MAINTENANCE_COMPLETE')")
     public ResponseEntity<MaintenanceRecordDto> patchMaintenanceRecord(@PathVariable UUID id,
-            @RequestBody MaintenanceRecordDto recordDto) {
+            @Valid @RequestBody MaintenanceRecordDto recordDto) {
         MaintenanceRecordDto updatedRecord = maintenanceService.patchMaintenanceRecord(id, recordDto);
         return ResponseEntity.ok(updatedRecord);
     }

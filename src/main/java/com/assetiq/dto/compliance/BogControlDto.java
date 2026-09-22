@@ -1,7 +1,10 @@
 package com.assetiq.dto.compliance;
 
 import com.assetiq.models.compliance.ControlStatus;
+import com.assetiq.validation.NullOrNotBlank;
+import com.assetiq.validation.OnCreate;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import lombok.Data;
 
 import java.time.Instant;
@@ -13,13 +16,17 @@ public class BogControlDto {
     private UUID id;
     private UUID organisationId;
 
-    @NotBlank(message = "Directive reference is required")
+    @NotBlank(groups = OnCreate.class, message = "Directive reference is required")
+    @NullOrNotBlank
+    @Size(max = 32)
     private String directiveRef;
 
-    @NotBlank(message = "Requirement text is required")
+    @NotBlank(groups = OnCreate.class, message = "Requirement text is required")
+    @NullOrNotBlank
     private String requirement;
 
     private ControlStatus status;
+    @Size(max = 255)
     private String evidenceUrl;
     private String gapDescription;
     private String remediationPlan;

@@ -2,8 +2,10 @@ package com.assetiq.controllers.v1;
 
 import com.assetiq.dto.DepartmentDto;
 import com.assetiq.services.DepartmentService;
+import com.assetiq.validation.OnCreate;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import jakarta.validation.Valid;
@@ -22,7 +24,7 @@ public class DepartmentController {
 
     @PostMapping
     @PreAuthorize("hasAuthority('ROLE_ORG_ADMIN') or hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_DEPARTMENTS')")
-    public ResponseEntity<DepartmentDto> create(@Valid @RequestBody DepartmentDto dto) {
+    public ResponseEntity<DepartmentDto> create(@Validated(OnCreate.class) @RequestBody DepartmentDto dto) {
         return ResponseEntity.ok(departmentService.create(dto));
     }
 
@@ -49,14 +51,14 @@ public class DepartmentController {
 
     @PutMapping("/{id}")
     @PreAuthorize("hasAuthority('ROLE_ORG_ADMIN') or hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_DEPARTMENTS')")
-    public ResponseEntity<DepartmentDto> update(@PathVariable UUID id, @Valid @RequestBody DepartmentDto dto) {
+    public ResponseEntity<DepartmentDto> update(@PathVariable UUID id, @Validated(OnCreate.class) @RequestBody DepartmentDto dto) {
         // Unknown department -> 404 (ResourceNotFoundException); bad input -> 400.
         return ResponseEntity.ok(departmentService.update(id, dto));
     }
 
     @PatchMapping("/{id}")
     @PreAuthorize("hasAuthority('ROLE_ORG_ADMIN') or hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_DEPARTMENTS')")
-    public ResponseEntity<DepartmentDto> patch(@PathVariable UUID id, @RequestBody DepartmentDto dto) {
+    public ResponseEntity<DepartmentDto> patch(@PathVariable UUID id, @Valid @RequestBody DepartmentDto dto) {
         // Unknown department -> 404 (ResourceNotFoundException); bad input -> 400.
         return ResponseEntity.ok(departmentService.patch(id, dto));
     }

@@ -638,21 +638,26 @@ public class AuthController {
     // Request/Response classes
     public static class RegisterRequest {
         @NotBlank(message = "First name is required")
+        @Size(max = 255)
         public String firstName;
 
         @NotBlank(message = "Last name is required")
+        @Size(max = 255)
         public String lastName;
 
         @Email(message = "Email must be valid")
         @NotBlank(message = "Email is required")
+        @Size(max = 255)
         public String email;
 
+        @Size(max = 255)
         public String phone;
 
         @NotBlank(message = "Password is required")
         @Size(min = 8, message = "Password must be at least 8 characters")
         public String password;
 
+        @Size(max = 255)
         public String jobTitle;
 
         @jakarta.validation.constraints.NotNull(message = "Organisation ID is required")

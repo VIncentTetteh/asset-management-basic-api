@@ -37,6 +37,10 @@ class ControllerErrorBodyTest {
     @Mock
     private DepartmentService departmentService;
 
+    private static final String VALID_LEASE = "{\"assetId\":\"" + UUID.randomUUID() + "\",\"lessorId\":\""
+            + UUID.randomUUID() + "\",\"startDate\":\"2026-01-01\",\"endDate\":\"2026-12-31\","
+            + "\"monthlyPayment\":100.00}";
+
     private MockMvc mvc(Object controller) {
         return MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new GlobalExceptionHandler())
@@ -63,7 +67,7 @@ class ControllerErrorBodyTest {
 
         mvc(new LeaseRecordController(leaseRecordService))
                 .perform(put("/api/v1/leases/{id}", id)
-                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                        .contentType(MediaType.APPLICATION_JSON).content(VALID_LEASE))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.message").value("Lease record not found: " + id));
     }
@@ -76,9 +80,19 @@ class ControllerErrorBodyTest {
 
         mvc(new LeaseRecordController(leaseRecordService))
                 .perform(put("/api/v1/leases/{id}", id)
-                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                        .contentType(MediaType.APPLICATION_JSON).content(VALID_LEASE))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("Lease end date must not be before its start date"));
+    }
+
+    @Test
+    void leaseUpdate_missingMonthlyPayment_is400FieldError() throws Exception {
+        mvc(new LeaseRecordController(leaseRecordService))
+                .perform(put("/api/v1/leases/{id}", UUID.randomUUID())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(VALID_LEASE.replace(",\"monthlyPayment\":100.00", "")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors.monthlyPayment").value("Monthly payment is required"));
     }
 
     @Test

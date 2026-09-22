@@ -1,5 +1,6 @@
 package com.assetiq.controllers.v1;
 
+import jakarta.validation.Valid;
 import com.assetiq.dto.AiChatRequest;
 import com.assetiq.dto.AiChatResponse;
 import com.assetiq.dto.PredictiveInsightDto;
@@ -48,7 +49,7 @@ public class AIInsightsController {
      * owns retrieval, so web, mobile, and desktop all share the same logic.
      */
     @PostMapping("/chat")
-    public ResponseEntity<AiChatResponse> chat(@RequestBody AiChatRequest request) {
+    public ResponseEntity<AiChatResponse> chat(@Valid @RequestBody AiChatRequest request) {
         return ResponseEntity.ok(aiChatService.chat(request));
     }
 

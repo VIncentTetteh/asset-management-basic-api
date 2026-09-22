@@ -2,9 +2,11 @@ package com.assetiq.controllers.v1;
 
 import com.assetiq.dto.LocationDto;
 import com.assetiq.services.LocationService;
+import com.assetiq.validation.OnCreate;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import jakarta.validation.Valid;
@@ -23,7 +25,7 @@ public class LocationController {
 
     @PostMapping
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_ORGANIZATION_SETTINGS','MANAGE_LOCATIONS')")
-    public ResponseEntity<LocationDto> createLocation(@Valid @RequestBody LocationDto locationDto) {
+    public ResponseEntity<LocationDto> createLocation(@Validated(OnCreate.class) @RequestBody LocationDto locationDto) {
         LocationDto createdLocation = locationService.createLocation(locationDto, null);
         return ResponseEntity.status(HttpStatus.CREATED).body(createdLocation);
     }
@@ -53,7 +55,7 @@ public class LocationController {
     @PutMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_ORGANIZATION_SETTINGS','MANAGE_LOCATIONS')")
     public ResponseEntity<LocationDto> updateLocation(@PathVariable UUID id,
-            @Valid @RequestBody LocationDto locationDto) {
+            @Validated(OnCreate.class) @RequestBody LocationDto locationDto) {
         LocationDto updatedLocation = locationService.updateLocation(id, locationDto);
         return ResponseEntity.ok(updatedLocation);
     }
@@ -61,7 +63,7 @@ public class LocationController {
     @PatchMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_ORGANIZATION_SETTINGS','MANAGE_LOCATIONS')")
     public ResponseEntity<LocationDto> patchLocation(@PathVariable UUID id,
-            @RequestBody LocationDto locationDto) {
+            @Valid @RequestBody LocationDto locationDto) {
         LocationDto updatedLocation = locationService.patchLocation(id, locationDto);
         return ResponseEntity.ok(updatedLocation);
     }

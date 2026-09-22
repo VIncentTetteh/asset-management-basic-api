@@ -2,10 +2,12 @@ package com.assetiq.controllers.v1;
 
 import com.assetiq.dto.SoftwareLicenseDto;
 import com.assetiq.services.SoftwareLicenseService;
+import com.assetiq.validation.OnCreate;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -24,7 +26,7 @@ public class SoftwareLicenseController {
 
     @PostMapping
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_ORGANIZATION_SETTINGS','MANAGE_SOFTWARE_LICENSES')")
-    public ResponseEntity<SoftwareLicenseDto> create(@Valid @RequestBody SoftwareLicenseDto dto) {
+    public ResponseEntity<SoftwareLicenseDto> create(@Validated(OnCreate.class) @RequestBody SoftwareLicenseDto dto) {
         return ResponseEntity.status(HttpStatus.CREATED).body(licenseService.create(dto));
     }
 
@@ -74,14 +76,14 @@ public class SoftwareLicenseController {
     @PutMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_ORGANIZATION_SETTINGS','MANAGE_SOFTWARE_LICENSES')")
     public ResponseEntity<SoftwareLicenseDto> update(@PathVariable UUID id,
-                                                      @Valid @RequestBody SoftwareLicenseDto dto) {
+                                                      @Validated(OnCreate.class) @RequestBody SoftwareLicenseDto dto) {
         return ResponseEntity.ok(licenseService.update(id, dto));
     }
 
     @PatchMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_ORGANIZATION_SETTINGS','MANAGE_SOFTWARE_LICENSES')")
     public ResponseEntity<SoftwareLicenseDto> patch(@PathVariable UUID id,
-                                                     @RequestBody SoftwareLicenseDto dto) {
+                                                     @Valid @RequestBody SoftwareLicenseDto dto) {
         return ResponseEntity.ok(licenseService.patch(id, dto));
     }
 

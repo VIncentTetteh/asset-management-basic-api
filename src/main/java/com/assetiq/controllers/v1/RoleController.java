@@ -5,9 +5,11 @@ import com.assetiq.enums.Permission;
 import com.assetiq.security.annotation.EnforceTenant;
 import com.assetiq.security.annotation.RequireFreshMfa;
 import com.assetiq.services.RoleService;
+import com.assetiq.validation.OnCreate;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import jakarta.validation.Valid;
@@ -31,7 +33,7 @@ public class RoleController {
     @RequireFreshMfa
     @PreAuthorize("hasAnyAuthority('SYSTEM_ADMIN','MANAGE_ROLES','MANAGE_ORGANIZATION_SETTINGS')")
     @EnforceTenant
-    public ResponseEntity<RoleDto> createRole(@Valid @RequestBody RoleDto roleDto,
+    public ResponseEntity<RoleDto> createRole(@Validated(OnCreate.class) @RequestBody RoleDto roleDto,
                                               @RequestParam UUID organisationId) {
         RoleDto createdRole = roleService.createRole(roleDto, organisationId);
         return ResponseEntity.status(HttpStatus.CREATED).body(createdRole);
@@ -54,7 +56,7 @@ public class RoleController {
     @RequireFreshMfa
     @PreAuthorize("hasAnyAuthority('SYSTEM_ADMIN','MANAGE_ROLES','MANAGE_ORGANIZATION_SETTINGS')")
     public ResponseEntity<RoleDto> updateRole(@PathVariable UUID id,
-                                              @Valid @RequestBody RoleDto roleDto) {
+                                              @Validated(OnCreate.class) @RequestBody RoleDto roleDto) {
         return ResponseEntity.ok(roleService.updateRole(id, roleDto));
     }
 
@@ -62,7 +64,7 @@ public class RoleController {
     @RequireFreshMfa
     @PreAuthorize("hasAnyAuthority('SYSTEM_ADMIN','MANAGE_ROLES','MANAGE_ORGANIZATION_SETTINGS')")
     public ResponseEntity<RoleDto> patchRole(@PathVariable UUID id,
-                                             @RequestBody RoleDto roleDto) {
+                                             @Valid @RequestBody RoleDto roleDto) {
         return ResponseEntity.ok(roleService.patchRole(id, roleDto));
     }
 

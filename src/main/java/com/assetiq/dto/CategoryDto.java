@@ -1,6 +1,10 @@
 package com.assetiq.dto;
 
+import com.assetiq.validation.NullOrNotBlank;
+import com.assetiq.validation.OnCreate;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.PositiveOrZero;
+import jakarta.validation.constraints.Size;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Data;
 
@@ -13,7 +17,9 @@ import java.util.UUID;
 public class CategoryDto {
     private UUID id;
 
-    @NotBlank(message = "Category name is required")
+    @NotBlank(groups = OnCreate.class, message = "Category name is required")
+    @NullOrNotBlank
+    @Size(max = 255)
     private String name;
 
     private String description;
@@ -22,8 +28,10 @@ public class CategoryDto {
 
     private UUID depreciationPolicyId;
 
+    @PositiveOrZero
     private Integer defaultWarrantyPeriodMonths;
 
+    @Size(max = 255)
     private String assetPrefixCode;
 
     private UUID organisationId;

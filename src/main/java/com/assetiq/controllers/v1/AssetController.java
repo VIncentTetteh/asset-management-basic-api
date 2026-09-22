@@ -20,6 +20,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
 import com.assetiq.assets.AssetQrCodes;
+import com.assetiq.validation.OnCreate;
 import com.google.zxing.BarcodeFormat;
 import com.google.zxing.EncodeHintType;
 import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel;
@@ -32,6 +33,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -75,7 +77,7 @@ public class AssetController {
 
     @PostMapping
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','CREATE_ASSET','EDIT_ASSET')")
-    public ResponseEntity<AssetDto> create(@Valid @RequestBody AssetDto dto) {
+    public ResponseEntity<AssetDto> create(@Validated(OnCreate.class) @RequestBody AssetDto dto) {
         // IllegalArgumentException -> 400 and IllegalStateException -> 409 come from
         // GlobalExceptionHandler, with the service's message in the body.
         return ResponseEntity.ok(assetService.create(dto));
@@ -136,14 +138,14 @@ public class AssetController {
 
     @PutMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','EDIT_ASSET')")
-    public ResponseEntity<AssetDto> update(@PathVariable UUID id, @Valid @RequestBody AssetDto dto) {
+    public ResponseEntity<AssetDto> update(@PathVariable UUID id, @Validated(OnCreate.class) @RequestBody AssetDto dto) {
         // Unknown asset -> 404 (ResourceNotFoundException); invalid input -> 400.
         return ResponseEntity.ok(assetService.update(id, dto));
     }
 
     @PatchMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','EDIT_ASSET')")
-    public ResponseEntity<AssetDto> patch(@PathVariable UUID id, @RequestBody AssetDto dto) {
+    public ResponseEntity<AssetDto> patch(@PathVariable UUID id, @Valid @RequestBody AssetDto dto) {
         return ResponseEntity.ok(assetService.patch(id, dto));
     }
 

@@ -2,8 +2,10 @@ package com.assetiq.dto;
 
 import com.assetiq.enums.DisposalMethod;
 import com.assetiq.enums.DisposalStatus;
+import com.assetiq.validation.OnCreate;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
@@ -18,19 +20,21 @@ import java.util.UUID;
 public class DisposalRecordDto {
     private UUID id;
 
-    @NotNull(message = "Asset ID is required")
+    @NotNull(groups = OnCreate.class, message = "Asset ID is required")
     private UUID assetId;
 
-    @NotNull(message = "Disposal method is required")
+    @NotNull(groups = OnCreate.class, message = "Disposal method is required")
     private DisposalMethod disposalMethod;
 
-    @NotNull(message = "Disposal date is required")
+    @NotNull(groups = OnCreate.class, message = "Disposal date is required")
     private LocalDate disposalDate;
 
     @DecimalMin(value = "0.00", message = "Sale value cannot be negative")
+    @Digits(integer = 13, fraction = 2)
     private BigDecimal saleValue;
 
     /** ISO-4217 code of {@code saleValue}; defaults to the asset's currency when omitted on create. */
+    @Size(max = 3)
     private String currency;
 
     /** Read-only: the request/approve/reject endpoints own it. */

@@ -2,8 +2,10 @@ package com.assetiq.controllers.v1;
 
 import com.assetiq.dto.OrganisationDto;
 import com.assetiq.services.OrganisationService;
+import com.assetiq.validation.OnCreate;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import jakarta.validation.Valid;
@@ -22,7 +24,7 @@ public class OrganisationController {
 
     @PostMapping
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_ORGANIZATION_SETTINGS')")
-    public ResponseEntity<OrganisationDto> create(@Valid @RequestBody OrganisationDto dto) {
+    public ResponseEntity<OrganisationDto> create(@Validated(OnCreate.class) @RequestBody OrganisationDto dto) {
         return ResponseEntity.ok(organisationService.create(dto));
     }
 
@@ -42,13 +44,13 @@ public class OrganisationController {
 
     @PutMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_ORGANIZATION_SETTINGS')")
-    public ResponseEntity<OrganisationDto> update(@PathVariable UUID id, @Valid @RequestBody OrganisationDto dto) {
+    public ResponseEntity<OrganisationDto> update(@PathVariable UUID id, @Validated(OnCreate.class) @RequestBody OrganisationDto dto) {
         return ResponseEntity.ok(organisationService.update(id, dto));
     }
 
     @PatchMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_ORGANIZATION_SETTINGS')")
-    public ResponseEntity<OrganisationDto> patch(@PathVariable UUID id, @RequestBody OrganisationDto dto) {
+    public ResponseEntity<OrganisationDto> patch(@PathVariable UUID id, @Valid @RequestBody OrganisationDto dto) {
         return ResponseEntity.ok(organisationService.patch(id, dto));
     }
 

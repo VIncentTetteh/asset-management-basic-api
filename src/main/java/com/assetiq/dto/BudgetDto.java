@@ -1,11 +1,15 @@
 package com.assetiq.dto;
 
 import com.assetiq.enums.BudgetStatus;
+import com.assetiq.validation.NullOrNotBlank;
+import com.assetiq.validation.OnCreate;
 import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -16,7 +20,9 @@ public class BudgetDto {
 
     private UUID id;
 
-    @NotBlank
+    @NotBlank(groups = OnCreate.class)
+    @NullOrNotBlank
+    @Size(max = 255)
     private String name;
 
     private String description;
@@ -24,14 +30,17 @@ public class BudgetDto {
     private UUID departmentId;
     private String departmentName;
 
-    @NotNull
+    @NotNull(groups = OnCreate.class)
     @DecimalMin("0.01")
+    @Digits(integer = 13, fraction = 2)
     private BigDecimal totalAmount;
 
     /** Read-only: maintained by the budget ledger, ignored on create/update. */
+    @Digits(integer = 13, fraction = 2)
     private BigDecimal spentAmount;
 
     /** Read-only: open purchase-order and expense commitments against this budget. */
+    @Digits(integer = 13, fraction = 2)
     private BigDecimal committedAmount;
 
     /**
@@ -51,12 +60,13 @@ public class BudgetDto {
     @Max(100)
     private Integer alertThresholdPct;
 
+    @Size(max = 3)
     private String currency;
 
-    @NotNull
+    @NotNull(groups = OnCreate.class)
     private LocalDate periodStart;
 
-    @NotNull
+    @NotNull(groups = OnCreate.class)
     private LocalDate periodEnd;
 
     private BudgetStatus status;

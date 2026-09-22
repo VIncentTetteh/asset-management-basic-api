@@ -2,9 +2,11 @@ package com.assetiq.controllers.v1;
 
 import com.assetiq.dto.CategoryDto;
 import com.assetiq.services.CategoryService;
+import com.assetiq.validation.OnCreate;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import jakarta.validation.Valid;
@@ -23,7 +25,7 @@ public class CategoryController {
 
     @PostMapping
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_ORGANIZATION_SETTINGS','MANAGE_CATEGORIES')")
-    public ResponseEntity<CategoryDto> createCategory(@Valid @RequestBody CategoryDto categoryDto) {
+    public ResponseEntity<CategoryDto> createCategory(@Validated(OnCreate.class) @RequestBody CategoryDto categoryDto) {
         CategoryDto createdCategory = categoryService.createCategory(categoryDto, null);
         return ResponseEntity.status(HttpStatus.CREATED).body(createdCategory);
     }
@@ -53,7 +55,7 @@ public class CategoryController {
     @PutMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_ORGANIZATION_SETTINGS','MANAGE_CATEGORIES')")
     public ResponseEntity<CategoryDto> updateCategory(@PathVariable UUID id,
-            @Valid @RequestBody CategoryDto categoryDto) {
+            @Validated(OnCreate.class) @RequestBody CategoryDto categoryDto) {
         CategoryDto updatedCategory = categoryService.updateCategory(id, categoryDto);
         return ResponseEntity.ok(updatedCategory);
     }
@@ -61,7 +63,7 @@ public class CategoryController {
     @PatchMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_ORGANIZATION_SETTINGS','MANAGE_CATEGORIES')")
     public ResponseEntity<CategoryDto> patchCategory(@PathVariable UUID id,
-            @RequestBody CategoryDto categoryDto) {
+            @Valid @RequestBody CategoryDto categoryDto) {
         CategoryDto updatedCategory = categoryService.patchCategory(id, categoryDto);
         return ResponseEntity.ok(updatedCategory);
     }

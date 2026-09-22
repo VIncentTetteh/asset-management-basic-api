@@ -15,6 +15,7 @@ public class VendorPerformanceReviewDto {
 
     @NotNull
     @DecimalMin("1.0") @DecimalMax("5.0")
+    @Digits(integer = 1, fraction = 2)
     private BigDecimal rating;
 
     @Min(1) @Max(5)

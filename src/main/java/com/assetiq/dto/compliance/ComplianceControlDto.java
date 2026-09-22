@@ -2,8 +2,11 @@ package com.assetiq.dto.compliance;
 
 import com.assetiq.models.compliance.ComplianceFramework;
 import com.assetiq.models.compliance.ControlStatus;
+import com.assetiq.validation.NullOrNotBlank;
+import com.assetiq.validation.OnCreate;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 import lombok.Data;
 
 import java.time.Instant;
@@ -15,18 +18,23 @@ public class ComplianceControlDto {
     private UUID id;
     private UUID organisationId;
 
-    @NotNull(message = "Framework is required")
+    @NotNull(groups = OnCreate.class, message = "Framework is required")
     private ComplianceFramework framework;
 
-    @NotBlank(message = "Control reference is required")
+    @NotBlank(groups = OnCreate.class, message = "Control reference is required")
+    @NullOrNotBlank
+    @Size(max = 64)
     private String controlRef;
 
-    @NotBlank(message = "Control name is required")
+    @NotBlank(groups = OnCreate.class, message = "Control name is required")
+    @NullOrNotBlank
+    @Size(max = 255)
     private String controlName;
 
     private String controlDescription;
     private ControlStatus status;
     private String justification;
+    @Size(max = 255)
     private String evidenceUrl;
     private String gapDescription;
     private String remediationPlan;
@@ -34,6 +42,7 @@ public class ComplianceControlDto {
     private String ownerEmail;
     private Instant reviewDueDate;
     private Instant lastReviewedAt;
+    @Size(max = 255)
     private String lastReviewedByEmail;
     private Instant createdAt;
     private Instant updatedAt;

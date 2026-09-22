@@ -1,5 +1,7 @@
 package com.assetiq.dto;
 
+import com.assetiq.validation.NullOrNotBlank;
+import com.assetiq.validation.OnCreate;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import lombok.Getter;
@@ -15,12 +17,14 @@ public class WebhookDto {
 
     private UUID id;
 
-    @NotBlank
+    @NotBlank(groups = OnCreate.class)
     @Size(max = 200)
+    @NullOrNotBlank
     private String name;
 
-    @NotBlank
+    @NotBlank(groups = OnCreate.class)
     @Size(max = 2048)
+    @NullOrNotBlank
     private String url;
 
     /** Event names to subscribe to. */
@@ -29,6 +33,7 @@ public class WebhookDto {
     private boolean active = true;
 
     /** Only returned on create; never on list/get. */
+    @Size(max = 512)
     private String secret;
 
     private long deliveryCount;
