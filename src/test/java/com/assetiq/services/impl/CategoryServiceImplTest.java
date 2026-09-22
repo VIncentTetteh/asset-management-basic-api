@@ -121,6 +121,32 @@ class CategoryServiceImplTest {
     }
 
     @Test
+    void descriptionPrefixAndWarrantyCanBeCleared() {
+        category.setDescription("Portable computers");
+        category.setAssetPrefixCode("LT");
+        category.setDefaultWarrantyPeriodMonths(24);
+        CategoryDto dto = new CategoryDto();
+        dto.setClearFields(List.of("description", "assetPrefixCode", "defaultWarrantyPeriodMonths"));
+
+        CategoryDto result = service.patchCategory(category.getId(), dto);
+
+        assertThat(result.getDescription()).isNull();
+        assertThat(result.getAssetPrefixCode()).isNull();
+        assertThat(result.getDefaultWarrantyPeriodMonths()).isNull();
+    }
+
+    @Test
+    void clearingAndSettingTheSameFieldIsRejected() {
+        CategoryDto dto = new CategoryDto();
+        dto.setAssetPrefixCode("LT");
+        dto.setClearFields(List.of("assetPrefixCode"));
+
+        assertThatThrownBy(() -> service.patchCategory(category.getId(), dto))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("both set and cleared");
+    }
+
+    @Test
     void foreignPolicyIsRejected() {
         CategoryDto dto = new CategoryDto();
         dto.setDepreciationPolicyId(UUID.randomUUID());

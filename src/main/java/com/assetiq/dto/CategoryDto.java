@@ -41,8 +41,9 @@ public class CategoryDto {
     private Instant updatedAt;
 
     /**
-     * Update only: relations to clear, since a null field means "unchanged".
-     * Allowed: {@code depreciationPolicyId}, {@code parentCategoryId}.
+     * Update only: optional fields to clear, since a null field means "unchanged".
+     * Allowed: {@code depreciationPolicyId}, {@code parentCategoryId}, {@code description},
+     * {@code assetPrefixCode}, {@code defaultWarrantyPeriodMonths}.
      */
     @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
     private List<String> clearFields;

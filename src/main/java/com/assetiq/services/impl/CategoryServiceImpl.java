@@ -31,8 +31,9 @@ import java.util.stream.Collectors;
 @Transactional
 public class CategoryServiceImpl extends TenantAwareService implements CategoryService {
 
-    /** Relations an update may clear through {@link CategoryDto#getClearFields()}. */
-    static final Set<String> CLEARABLE_FIELDS = Set.of("depreciationPolicyId", "parentCategoryId");
+    /** Optional fields an update may clear through {@link CategoryDto#getClearFields()}. */
+    static final Set<String> CLEARABLE_FIELDS = Set.of("depreciationPolicyId", "parentCategoryId",
+            "description", "assetPrefixCode", "defaultWarrantyPeriodMonths");
 
     private final CategoryRepository categoryRepository;
     private final DepreciationPolicyRepository depreciationPolicyRepository;
@@ -173,6 +174,18 @@ public class CategoryServiceImpl extends TenantAwareService implements CategoryS
             }
             category.setParentCategory(null);
         }
+        if (clears.contains("description")) {
+            requireNotAlsoSet("description", dto.getDescription());
+            category.setDescription(null);
+        }
+        if (clears.contains("assetPrefixCode")) {
+            requireNotAlsoSet("assetPrefixCode", dto.getAssetPrefixCode());
+            category.setAssetPrefixCode(null);
+        }
+        if (clears.contains("defaultWarrantyPeriodMonths")) {
+            requireNotAlsoSet("defaultWarrantyPeriodMonths", dto.getDefaultWarrantyPeriodMonths());
+            category.setDefaultWarrantyPeriodMonths(null);
+        }
 
         UUID before = category.getDepreciationPolicy() != null ? category.getDepreciationPolicy().getId() : null;
         if (dto.getDepreciationPolicyId() != null) {
@@ -188,6 +201,12 @@ public class CategoryServiceImpl extends TenantAwareService implements CategoryS
                     asset.setCurrentBookValue(DepreciationCalculator.forAsset(asset, today).netBookValue());
                 }
             }
+        }
+    }
+
+    private static void requireNotAlsoSet(String field, Object value) {
+        if (value != null) {
+            throw new IllegalArgumentException("Field is both set and cleared: " + field);
         }
     }
 
