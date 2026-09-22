@@ -68,6 +68,20 @@ public class Organisation extends BaseEntity {
     @Column(name = "email_domain", unique = true, nullable = true)
     private String emailDomain;
 
+    /** Data protection officer (Ghana DPA 2012 / GDPR), V11. */
+    @Column(name = "dpo_name")
+    private String dpoName;
+
+    @Column(name = "dpo_email")
+    private String dpoEmail;
+
+    /**
+     * Where the tenant's personal data is declared to reside: GH, EU, US or OTHER
+     * (V11/V13; NOT NULL DEFAULT 'GH' where beforeMigrate built the table).
+     */
+    @Column(name = "data_residency_region", length = 10)
+    private String dataResidencyRegion = "GH";
+
     /**
      * When a closed account becomes eligible for permanent deletion.
      *

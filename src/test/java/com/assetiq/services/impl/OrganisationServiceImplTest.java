@@ -96,6 +96,44 @@ class OrganisationServiceImplTest {
         assertEquals("Organisation not found", exception.getMessage());
     }
 
+    @Test
+    void patch_blankClearsToNull_andDpaFieldsRoundTrip() {
+        Organisation organisation = ownTenant("ROLE_ADMIN");
+        organisation.setRegistrationNumber("REG-1");
+        organisation.setTaxId("TAX-1");
+        organisation.setContactEmail("ops@acme.com");
+        when(organisationRepository.save(any(Organisation.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        OrganisationDto patch = new OrganisationDto();
+        patch.setRegistrationNumber("  ");
+        patch.setTaxId("");
+        patch.setContactEmail("");
+        patch.setDpoName("  Efua Owusu ");
+        patch.setDpoEmail("dpo@acme.com");
+        patch.setDataResidencyRegion("EU");
+
+        OrganisationDto result = organisationService.patch(organisation.getId(), patch);
+
+        assertEquals(null, organisation.getRegistrationNumber());
+        assertEquals(null, organisation.getTaxId());
+        assertEquals(null, organisation.getContactEmail());
+        assertEquals("Efua Owusu", result.getDpoName());
+        assertEquals("dpo@acme.com", result.getDpoEmail());
+        assertEquals("EU", result.getDataResidencyRegion());
+    }
+
+    @Test
+    void patch_nullLeavesDpaFieldsUnchanged() {
+        Organisation organisation = ownTenant("ROLE_ADMIN");
+        organisation.setDpoName("Efua");
+        when(organisationRepository.save(any(Organisation.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        OrganisationDto result = organisationService.patch(organisation.getId(), new OrganisationDto());
+
+        assertEquals("Efua", result.getDpoName());
+        assertEquals("GH", result.getDataResidencyRegion());
+    }
+
     private Organisation ownTenant(String... authorities) {
         UUID organisationId = UUID.randomUUID();
         Organisation organisation = new Organisation();

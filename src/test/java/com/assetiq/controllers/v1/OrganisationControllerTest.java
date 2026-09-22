@@ -84,4 +84,14 @@ class OrganisationControllerTest {
                         .content("{\"timezone\":\"\"}"))
                 .andExpect(status().isOk());
     }
+
+    @Test
+    void patch_refusesAnUnknownResidencyOrABadDpoEmail() throws Exception {
+        mockMvc.perform(patch("/api/v1/organisations/{id}", UUID.randomUUID())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"dataResidencyRegion\":\"MARS\",\"dpoEmail\":\"not-an-email\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors.dataResidencyRegion").exists())
+                .andExpect(jsonPath("$.errors.dpoEmail").exists());
+    }
 }

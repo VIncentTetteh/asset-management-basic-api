@@ -55,6 +55,10 @@ public class OrganisationServiceImpl implements OrganisationService {
         organisation.setContactEmail(blankToNull(dto.getContactEmail()));
         organisation.setContactPhone(blankToNull(dto.getContactPhone()));
         organisation.setTimezone(blankToNull(dto.getTimezone()));
+        organisation.setDpoName(blankToNull(dto.getDpoName()));
+        organisation.setDpoEmail(blankToNull(dto.getDpoEmail()));
+        if (dto.getDataResidencyRegion() != null)
+            organisation.setDataResidencyRegion(dto.getDataResidencyRegion());
         if (dto.getStatus() != null)
             organisation.setStatus(dto.getStatus());
 
@@ -149,6 +153,12 @@ public class OrganisationServiceImpl implements OrganisationService {
             o.setContactPhone(blankToNull(dto.getContactPhone()));
         if (dto.getTimezone() != null)
             o.setTimezone(blankToNull(dto.getTimezone()));
+        if (dto.getDpoName() != null)
+            o.setDpoName(blankToNull(dto.getDpoName()));
+        if (dto.getDpoEmail() != null)
+            o.setDpoEmail(blankToNull(dto.getDpoEmail()));
+        if (dto.getDataResidencyRegion() != null)
+            o.setDataResidencyRegion(dto.getDataResidencyRegion());
         if (dto.getStatus() != null)
             o.setStatus(dto.getStatus());
         if (dto.getBillingCurrency() != null && !dto.getBillingCurrency().isBlank())
@@ -250,6 +260,9 @@ public class OrganisationServiceImpl implements OrganisationService {
         dto.setTimezone(o.getTimezone());
         dto.setStatus(o.getStatus());
         dto.setBillingCurrency(o.getBillingCurrency());
+        dto.setDpoName(o.getDpoName());
+        dto.setDpoEmail(o.getDpoEmail());
+        dto.setDataResidencyRegion(o.getDataResidencyRegion());
         return dto;
     }
 }
