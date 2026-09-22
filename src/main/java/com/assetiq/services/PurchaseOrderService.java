@@ -28,7 +28,7 @@ public interface PurchaseOrderService {
     PurchaseOrderDto approvePurchaseOrder(UUID id); // C4: approver from SecurityContext
 
     /** SUBMITTED -> REJECTED. */
-    PurchaseOrderDto rejectPurchaseOrder(UUID id);
+    PurchaseOrderDto rejectPurchaseOrder(UUID id, String reason);
 
     /** APPROVED -> DELIVERED; converts the budget commitment into spend. */
     PurchaseOrderDto receivePurchaseOrder(UUID id);

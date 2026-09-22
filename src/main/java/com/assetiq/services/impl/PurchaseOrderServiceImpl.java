@@ -15,6 +15,7 @@ import com.assetiq.services.CurrencyResolver;
 import com.assetiq.services.NotificationService;
 import com.assetiq.services.PurchaseOrderService;
 import com.assetiq.services.TenantAwareService;
+import com.assetiq.services.UserDisplayNames;
 import com.assetiq.services.budget.BudgetLedgerService;
 import com.assetiq.services.budget.BudgetPosting;
 import org.slf4j.Logger;
@@ -85,6 +86,7 @@ public class PurchaseOrderServiceImpl extends TenantAwareService implements Purc
         // delivered, rejected or cancelled order from a client-supplied status.
         po.setStatus(POStatus.DRAFT);
         po.setRemarks(poDto.getRemarks());
+        po.setExpectedDeliveryDate(poDto.getExpectedDeliveryDate());
         po.setOrganisation(org);
         po.setDepartment(department);
         po.setSupplier(supplier);
@@ -165,6 +167,8 @@ public class PurchaseOrderServiceImpl extends TenantAwareService implements Purc
         po.setTotalAmount(poDto.getTotalAmount());
         po.setCurrency(currencyResolver.resolveOrDefault(poDto.getCurrency()));
         po.setRemarks(poDto.getRemarks());
+        // PUT is a full replacement: a null date clears it.
+        po.setExpectedDeliveryDate(poDto.getExpectedDeliveryDate());
         po.setDepartment(requireDepartment(poDto.getDepartmentId(), org));
         po.setSupplier(requireSupplier(poDto.getSupplierId(), org));
         // PUT is a full replacement: a null linkedBudgetId unlinks the budget.
@@ -192,6 +196,9 @@ public class PurchaseOrderServiceImpl extends TenantAwareService implements Purc
         }
         if (poDto.getRemarks() != null) {
             po.setRemarks(poDto.getRemarks());
+        }
+        if (poDto.getExpectedDeliveryDate() != null) {
+            po.setExpectedDeliveryDate(poDto.getExpectedDeliveryDate());
         }
         if (poDto.getDepartmentId() != null) {
             po.setDepartment(requireDepartment(poDto.getDepartmentId(), org));
@@ -278,7 +285,7 @@ public class PurchaseOrderServiceImpl extends TenantAwareService implements Purc
     }
 
     @Override
-    public PurchaseOrderDto rejectPurchaseOrder(UUID id) {
+    public PurchaseOrderDto rejectPurchaseOrder(UUID id, String reason) {
         Organisation org = requireTenantOrg();
         PurchaseOrder po = requireOrder(id, org);
 
@@ -296,14 +303,18 @@ public class PurchaseOrderServiceImpl extends TenantAwareService implements Purc
         if (po.getRequestedBy() != null && po.getRequestedBy().getId().equals(rejector.getId())) {
             throw new IllegalStateException("A purchase order requester cannot reject their own order");
         }
+        if (reason == null || reason.isBlank()) {
+            throw new IllegalArgumentException("A rejection reason is required");
+        }
         po.setStatus(POStatus.REJECTED);
+        po.setRejectionReason(reason.trim());
         po.setRejectedBy(rejector);
         po.setRejectedAt(Instant.now());
         logger.info("Purchase Order {} rejected by user {}", id, rejector.getEmail());
         PurchaseOrder rejected = poRepository.save(po);
         notificationService.notifyOrgAdmins(org, NotificationType.APPROVAL,
                 "Purchase Order Rejected",
-                "Purchase Order '" + rejected.getPoNumber() + "' has been rejected.",
+                "Purchase Order '" + rejected.getPoNumber() + "' has been rejected: " + rejected.getRejectionReason(),
                 rejected.getId(), "/purchase-orders");
         return mapToDto(rejected);
     }
@@ -444,8 +455,13 @@ public class PurchaseOrderServiceImpl extends TenantAwareService implements Purc
         if (po.getRejectedBy() != null) {
             dto.setRejectedById(po.getRejectedBy().getId());
         }
+        dto.setRequestedByName(UserDisplayNames.of(po.getRequestedBy()));
+        dto.setApprovedByName(UserDisplayNames.of(po.getApprovedBy()));
+        dto.setRejectedByName(UserDisplayNames.of(po.getRejectedBy()));
         dto.setApprovedAt(po.getApprovedAt());
         dto.setRejectedAt(po.getRejectedAt());
+        dto.setRejectionReason(po.getRejectionReason());
+        dto.setExpectedDeliveryDate(po.getExpectedDeliveryDate());
         dto.setRemarks(po.getRemarks());
         dto.setOrganisationId(po.getOrganisation().getId());
         dto.setDepartmentId(po.getDepartment().getId());

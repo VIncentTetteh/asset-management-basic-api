@@ -228,9 +228,60 @@ class PurchaseOrderWorkflowTest {
     @DisplayName("an approved order cannot be rejected; cancel is the route")
     void rejectApproved_refused() {
         approve();
-        assertThatThrownBy(() -> service.rejectPurchaseOrder(po.getId()))
+        assertThatThrownBy(() -> service.rejectPurchaseOrder(po.getId(), "Too expensive"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("cancel");
+    }
+
+    @Test
+    @DisplayName("reject records the reason and the rejecter; the trail carries display names")
+    void reject_recordsReasonAndNames() {
+        maker.setFirstName("Mary");
+        maker.setLastName("Maker");
+        submitAs(maker);
+        authenticate(checker);
+
+        PurchaseOrderDto rejected = service.rejectPurchaseOrder(po.getId(), "  Over the quarterly cap ");
+
+        assertThat(rejected.getStatus()).isEqualTo(POStatus.REJECTED);
+        assertThat(rejected.getRejectionReason()).isEqualTo("Over the quarterly cap");
+        assertThat(rejected.getRejectedById()).isEqualTo(checker.getId());
+        assertThat(rejected.getRequestedByName()).isEqualTo("Mary Maker");
+        assertThat(rejected.getRejectedByName()).isEqualTo("checker@example.com");
+        assertThat(rejected.getApprovedByName()).isNull();
+        assertThat(ledger.entries).isEmpty();
+    }
+
+    @Test
+    @DisplayName("reject without a reason is refused and leaves the order submitted")
+    void reject_requiresReason() {
+        submitAs(maker);
+        authenticate(checker);
+        assertThatThrownBy(() -> service.rejectPurchaseOrder(po.getId(), "  "))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("reason");
+        assertThat(po.getStatus()).isEqualTo(POStatus.SUBMITTED);
+    }
+
+    @Test
+    @DisplayName("the expected delivery date is stored on create, replaced by PUT and cleared by a null")
+    void expectedDeliveryDate_roundTrips() {
+        PurchaseOrderDto dto = new PurchaseOrderDto();
+        dto.setPoNumber("PO-1");
+        dto.setTotalAmount(new BigDecimal("400"));
+        dto.setCurrency("GHS");
+        dto.setDepartmentId(po.getDepartment().getId());
+        dto.setSupplierId(po.getSupplier().getId());
+        dto.setExpectedDeliveryDate(java.time.LocalDate.of(2026, 10, 1));
+        when(departmentRepository.findByIdAndOrganisationAndDeletedAtIsNull(po.getDepartment().getId(), org))
+                .thenReturn(Optional.of(po.getDepartment()));
+        when(supplierRepository.findByIdAndOrganisationAndDeletedAtIsNull(po.getSupplier().getId(), org))
+                .thenReturn(Optional.of(po.getSupplier()));
+
+        assertThat(service.updatePurchaseOrder(po.getId(), dto).getExpectedDeliveryDate())
+                .isEqualTo(java.time.LocalDate.of(2026, 10, 1));
+        dto.setExpectedDeliveryDate(null);
+        assertThat(service.updatePurchaseOrder(po.getId(), dto).getExpectedDeliveryDate()).isNull();
     }
 
     @ParameterizedTest(name = "approve from {0} is illegal")

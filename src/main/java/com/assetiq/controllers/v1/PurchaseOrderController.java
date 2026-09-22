@@ -1,6 +1,7 @@
 package com.assetiq.controllers.v1;
 
 import com.assetiq.dto.PurchaseOrderDto;
+import com.assetiq.dto.PurchaseOrderRejectRequest;
 import com.assetiq.enums.POStatus;
 import com.assetiq.services.PurchaseOrderService;
 import org.springframework.http.HttpStatus;
@@ -94,8 +95,9 @@ public class PurchaseOrderController {
     @PostMapping("/{id}/reject")
     @RequireFreshMfa
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_EXPENSES','APPROVE_PROCUREMENT','REJECT_REQUESTS')")
-    public ResponseEntity<PurchaseOrderDto> rejectPurchaseOrder(@PathVariable UUID id) {
-        PurchaseOrderDto rejectedPo = poService.rejectPurchaseOrder(id);
+    public ResponseEntity<PurchaseOrderDto> rejectPurchaseOrder(@PathVariable UUID id,
+            @Valid @RequestBody PurchaseOrderRejectRequest request) {
+        PurchaseOrderDto rejectedPo = poService.rejectPurchaseOrder(id, request.reason());
         return ResponseEntity.ok(rejectedPo);
     }
 

@@ -8,11 +8,13 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Size;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Data;
 
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.UUID;
 
 @Data
@@ -43,6 +45,23 @@ public class PurchaseOrderDto {
     private Instant approvedAt;
 
     private Instant rejectedAt;
+
+    /** Why the order was rejected; set only by the reject endpoint. */
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private String rejectionReason;
+
+    /** Approval trail display names (full name, else email). */
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private String requestedByName;
+
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private String approvedByName;
+
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private String rejectedByName;
+
+    /** Optional: when the goods are expected. */
+    private LocalDate expectedDeliveryDate;
 
     private String remarks;
 

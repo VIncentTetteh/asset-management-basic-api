@@ -8,6 +8,7 @@ import lombok.Setter;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 
 // Natural key is unique among live rows only: partial unique index uq_purchase_order_org_number_live
 // (V46, WHERE deleted_at IS NULL). JPA cannot declare a partial index, so no
@@ -44,6 +45,14 @@ public class PurchaseOrder extends BaseEntity {
     private User rejectedBy;
 
     private Instant rejectedAt;
+
+    /** Why the order was rejected (V50); set by the reject endpoint. */
+    @Column(columnDefinition = "TEXT")
+    private String rejectionReason;
+
+    /** When the goods are expected (the V7 expected_delivery column). */
+    @Column(name = "expected_delivery")
+    private LocalDate expectedDeliveryDate;
 
     @Column(columnDefinition = "TEXT")
     private String remarks;
