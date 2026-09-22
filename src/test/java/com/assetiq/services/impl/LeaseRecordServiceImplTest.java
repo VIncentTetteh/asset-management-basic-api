@@ -98,6 +98,65 @@ class LeaseRecordServiceImplTest {
         assertThatThrownBy(() -> service.create(dto)).isInstanceOf(IllegalArgumentException.class);
     }
 
+    private LeaseRecord existing() {
+        LeaseRecord record = new LeaseRecord();
+        record.setId(UUID.randomUUID());
+        record.setOrganisation(org);
+        record.setAsset(asset);
+        record.setLessor(lessor);
+        record.setStartDate(LocalDate.of(2026, 1, 1));
+        record.setEndDate(LocalDate.of(2027, 1, 1));
+        record.setMonthlyPayment(new BigDecimal("250"));
+        record.setStatus(com.assetiq.enums.LeaseStatus.TERMINATED);
+        record.setNotes("Termination reason: moved office");
+        record.setNoticePeriodDays(0);
+        when(leaseRepository.findByIdAndOrganisationAndDeletedAtIsNull(record.getId(), org))
+                .thenReturn(Optional.of(record));
+        return record;
+    }
+
+    @Test
+    @DisplayName("PUT moves the lease to another asset, clears notes and department, never changes status")
+    void update_fullReplace() {
+        LeaseRecord record = existing();
+        com.assetiq.models.Department dept = new com.assetiq.models.Department();
+        dept.setId(UUID.randomUUID());
+        record.setDepartment(dept);
+        Asset other = new Asset();
+        other.setId(UUID.randomUUID());
+        other.setOrganisation(org);
+        other.setName("Crane");
+        when(assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(other.getId(), org)).thenReturn(Optional.of(other));
+
+        LeaseRecordDto dto = request(lessor.getId());
+        dto.setAssetId(other.getId());
+        dto.setStatus(com.assetiq.enums.LeaseStatus.ACTIVE);
+        LeaseRecordDto result = service.update(record.getId(), dto);
+
+        assertThat(result.getAssetName()).isEqualTo("Crane");
+        assertThat(record.getNotes()).isNull();
+        assertThat(record.getDepartment()).isNull();
+        assertThat(record.getStatus()).isEqualTo(com.assetiq.enums.LeaseStatus.TERMINATED);
+        assertThat(record.getNoticePeriodDays()).isZero();
+    }
+
+    @Test
+    @DisplayName("PUT refuses an unknown asset or department as field errors")
+    void update_unknownLinks() {
+        LeaseRecord record = existing();
+        LeaseRecordDto dto = request(lessor.getId());
+        dto.setAssetId(UUID.randomUUID());
+        assertThatThrownBy(() -> service.update(record.getId(), dto))
+                .isInstanceOf(com.assetiq.exceptions.FieldValidationException.class)
+                .extracting("field").isEqualTo("assetId");
+
+        dto.setAssetId(asset.getId());
+        dto.setDepartmentId(UUID.randomUUID());
+        assertThatThrownBy(() -> service.update(record.getId(), dto))
+                .isInstanceOf(com.assetiq.exceptions.FieldValidationException.class)
+                .extracting("field").isEqualTo("departmentId");
+    }
+
     private LeaseRecordDto request(UUID lessorId) {
         LeaseRecordDto dto = new LeaseRecordDto();
         dto.setAssetId(asset.getId());

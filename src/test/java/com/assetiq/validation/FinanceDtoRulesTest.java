@@ -1,6 +1,7 @@
 package com.assetiq.validation;
 
 import com.assetiq.dto.ContractDto;
+import com.assetiq.dto.LeaseRecordDto;
 import com.assetiq.dto.PurchaseOrderRejectRequest;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validation;
@@ -60,6 +61,22 @@ class FinanceDtoRulesTest {
         dto.setAlertDaysBefore(0);
         dto.setDocumentUrl("https://docs.example.com/c.pdf");
         dto.setContractNumber("C-1");
+        assertThat(invalidFields(dto)).isEmpty();
+    }
+
+    @Test
+    void lease_monthlyPaymentIsRequiredAndPositive_noticeNotNegative() {
+        LeaseRecordDto dto = new LeaseRecordDto();
+        dto.setAssetId(java.util.UUID.randomUUID());
+        dto.setLessorId(java.util.UUID.randomUUID());
+        dto.setStartDate(java.time.LocalDate.of(2026, 1, 1));
+        dto.setEndDate(java.time.LocalDate.of(2027, 1, 1));
+        dto.setNoticePeriodDays(-1);
+        assertThat(invalidFields(dto)).containsExactlyInAnyOrder("monthlyPayment", "noticePeriodDays");
+        dto.setMonthlyPayment(BigDecimal.ZERO);
+        dto.setNoticePeriodDays(0);
+        assertThat(invalidFields(dto)).containsExactly("monthlyPayment");
+        dto.setMonthlyPayment(new BigDecimal("0.01"));
         assertThat(invalidFields(dto)).isEmpty();
     }
 }

@@ -7,6 +7,7 @@ import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
 import com.assetiq.enums.LeaseStatus;
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -48,6 +49,8 @@ public class LeaseRecordDto {
     private String notes;
     private UUID organisationId;
     private UUID departmentId;
+    /** Read-only: set by create, terminate and the expiry job, never by PUT. */
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private LeaseStatus status;
     private Instant createdAt;
 }

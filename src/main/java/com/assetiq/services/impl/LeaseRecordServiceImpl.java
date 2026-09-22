@@ -2,6 +2,7 @@ package com.assetiq.services.impl;
 
 import com.assetiq.dto.LeaseRecordDto;
 import com.assetiq.enums.LeaseStatus;
+import com.assetiq.exceptions.FieldValidationException;
 import com.assetiq.enums.NotificationType;
 import com.assetiq.models.*;
 import com.assetiq.repositories.*;
@@ -86,10 +87,7 @@ public class LeaseRecordServiceImpl extends TenantAwareService implements LeaseR
         record.setStatus(LeaseStatus.ACTIVE);
         record.setOrganisation(org);
 
-        if (dto.getDepartmentId() != null) {
-            departmentRepository.findByIdAndOrganisationAndDeletedAtIsNull(dto.getDepartmentId(), org)
-                    .ifPresent(record::setDepartment);
-        }
+        record.setDepartment(resolveDepartment(dto.getDepartmentId(), org));
 
         LeaseRecord saved = leaseRecordRepository.save(record);
 
@@ -105,11 +103,23 @@ public class LeaseRecordServiceImpl extends TenantAwareService implements LeaseR
 
     // ── Update ────────────────────────────────────────────────────────────────
 
+    /**
+     * PUT: every field the form edits is replaced. The asset may change; notes and
+     * the department are cleared by a null (the notes carry any termination reason,
+     * so the web form sends them back unchanged unless the user edits them). Auto
+     * renew and the notice period keep their stored value when omitted. Status is
+     * not editable here: terminate and the expiry job own it, so a client cannot
+     * mark a lease TERMINATED or ACTIVE outside the workflow.
+     */
     @Override
     public LeaseRecordDto update(UUID id, LeaseRecordDto dto) {
         Organisation org = requireTenantOrg();
         LeaseRecord record = requireLease(id, org);
 
+        if (dto.getAssetId() != null && !dto.getAssetId().equals(record.getAsset().getId())) {
+            record.setAsset(assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(dto.getAssetId(), org)
+                    .orElseThrow(() -> new FieldValidationException("assetId", "Asset not found in your organisation")));
+        }
         if (dto.getLessorId() != null) {
             record.setLessor(supplierRepository.findByIdAndOrganisationAndDeletedAtIsNull(dto.getLessorId(), org)
                     .orElseThrow(() -> new IllegalArgumentException("Supplier (lessor) not found: " + dto.getLessorId())));
@@ -124,17 +134,18 @@ public class LeaseRecordServiceImpl extends TenantAwareService implements LeaseR
         if (dto.getCurrency() != null) record.setCurrency(CurrencyResolver.normaliseIsoCode(dto.getCurrency()));
         if (dto.getAutoRenew() != null) record.setAutoRenew(dto.getAutoRenew());
         if (dto.getNoticePeriodDays() != null) record.setNoticePeriodDays(dto.getNoticePeriodDays());
-        if (dto.getNotes() != null) record.setNotes(dto.getNotes());
-        if (dto.getStatus() != null) record.setStatus(dto.getStatus());
-
-        if (dto.getDepartmentId() != null) {
-            departmentRepository.findByIdAndOrganisationAndDeletedAtIsNull(dto.getDepartmentId(), org)
-                    .ifPresent(record::setDepartment);
-        }
+        record.setNotes(dto.getNotes());
+        record.setDepartment(resolveDepartment(dto.getDepartmentId(), org));
 
         LeaseRecord saved = leaseRecordRepository.save(record);
         log.info("Lease record {} updated", id);
         return toDto(saved);
+    }
+
+    private Department resolveDepartment(UUID departmentId, Organisation org) {
+        if (departmentId == null) return null;
+        return departmentRepository.findByIdAndOrganisationAndDeletedAtIsNull(departmentId, org)
+                .orElseThrow(() -> new FieldValidationException("departmentId", "Department not found in your organisation"));
     }
 
     // ── Read ──────────────────────────────────────────────────────────────────
