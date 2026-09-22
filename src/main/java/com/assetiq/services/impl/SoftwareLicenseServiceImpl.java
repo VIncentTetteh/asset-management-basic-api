@@ -176,7 +176,9 @@ public class SoftwareLicenseServiceImpl extends TenantAwareService implements So
         license.setLicenseType(dto.getLicenseType());
         if (dto.getStatus() != null) license.setStatus(dto.getStatus());
         license.setTotalSeats(dto.getTotalSeats());
-        if (dto.getUsedSeats() != null) license.setUsedSeats(dto.getUsedSeats());
+        // Create and full replace: a blank "seats in use" means none. Keeping the old
+        // value made the field impossible to clear from the edit form.
+        license.setUsedSeats(dto.getUsedSeats() == null ? 0 : dto.getUsedSeats());
         license.setPurchaseCost(dto.getPurchaseCost());
         license.setAnnualRenewalCost(dto.getAnnualRenewalCost());
         // Omitted currency keeps the current value (set from the tenant default on create).

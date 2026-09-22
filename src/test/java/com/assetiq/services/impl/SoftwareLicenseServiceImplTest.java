@@ -109,6 +109,17 @@ class SoftwareLicenseServiceImplTest {
     }
 
     @Test
+    void putWithBlankSeatsInUseClearsItToZero() {
+        license.setUsedSeats(12);
+        SoftwareLicenseDto dto = body();
+        dto.setUsedSeats(null);
+
+        service.update(license.getId(), dto);
+
+        assertThat(license.getUsedSeats()).isZero();
+    }
+
+    @Test
     void unknownAssetIsAFieldError() {
         SoftwareLicenseDto dto = body();
         dto.setAssetId(UUID.randomUUID());
