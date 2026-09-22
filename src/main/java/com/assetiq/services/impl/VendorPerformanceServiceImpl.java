@@ -1,6 +1,7 @@
 package com.assetiq.services.impl;
 
 import com.assetiq.dto.VendorPerformanceReviewDto;
+import com.assetiq.exceptions.FieldValidationException;
 import com.assetiq.models.Organisation;
 import com.assetiq.models.Supplier;
 import com.assetiq.models.VendorPerformanceReview;
@@ -42,8 +43,12 @@ public class VendorPerformanceServiceImpl extends TenantAwareService implements 
     @Transactional
     public VendorPerformanceReviewDto create(VendorPerformanceReviewDto dto) {
         Organisation org = requireTenantOrg();
+        if (dto.getSupplierId() == null) {
+            throw new FieldValidationException("supplierId", "Supplier is required");
+        }
+        requirePeriodInOrder(dto);
         Supplier supplier = supplierRepository.findByIdAndOrganisationAndDeletedAtIsNull(dto.getSupplierId(), org)
-                .orElseThrow(() -> new IllegalArgumentException("Supplier not found: " + dto.getSupplierId()));
+                .orElseThrow(() -> new FieldValidationException("supplierId", "Supplier not found in your organisation"));
 
         VendorPerformanceReview review = new VendorPerformanceReview();
         review.setSupplier(supplier);
@@ -113,15 +118,25 @@ public class VendorPerformanceServiceImpl extends TenantAwareService implements 
         VendorPerformanceReview review = reviewRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
                 .orElseThrow(() -> new IllegalArgumentException("Review not found: " + id));
 
-        if (dto.getRating() != null) review.setRating(dto.getRating());
-        if (dto.getDeliveryScore() != null) review.setDeliveryScore(dto.getDeliveryScore());
-        if (dto.getQualityScore() != null) review.setQualityScore(dto.getQualityScore());
-        if (dto.getSupportScore() != null) review.setSupportScore(dto.getSupportScore());
-        if (dto.getFeedback() != null) review.setFeedback(dto.getFeedback());
-        if (dto.getPeriodStart() != null) review.setPeriodStart(dto.getPeriodStart());
-        if (dto.getPeriodEnd() != null) review.setPeriodEnd(dto.getPeriodEnd());
+        // PUT replaces everything but the supplier (a review stays with the supplier
+        // it was written for): a null sub-score, feedback or period date clears it.
+        requirePeriodInOrder(dto);
+        review.setRating(dto.getRating());
+        review.setDeliveryScore(dto.getDeliveryScore());
+        review.setQualityScore(dto.getQualityScore());
+        review.setSupportScore(dto.getSupportScore());
+        review.setFeedback(dto.getFeedback());
+        review.setPeriodStart(dto.getPeriodStart());
+        review.setPeriodEnd(dto.getPeriodEnd());
 
         return toDto(reviewRepository.save(review));
+    }
+
+    private static void requirePeriodInOrder(VendorPerformanceReviewDto dto) {
+        if (dto.getPeriodStart() != null && dto.getPeriodEnd() != null
+                && dto.getPeriodEnd().isBefore(dto.getPeriodStart())) {
+            throw new FieldValidationException("periodEnd", "Period end must be on or after the period start");
+        }
     }
 
     @Override
