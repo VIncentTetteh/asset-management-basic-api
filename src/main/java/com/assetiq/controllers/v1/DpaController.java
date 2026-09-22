@@ -139,7 +139,7 @@ public class DpaController {
             @RequestParam(required = false) DsarRequest.Status status,
             @RequestParam(required = false) String responseSummary,
             @RequestParam(required = false) UUID assignedToUserId,
-            @RequestBody(required = false) UpdateDsarStatusRequest body) {
+            @Valid @RequestBody(required = false) UpdateDsarStatusRequest body) {
         DsarRequest.Status newStatus = body != null && body.status() != null ? body.status() : status;
         String summary = body != null && body.responseSummary() != null ? body.responseSummary() : responseSummary;
         UUID assignee = body != null && body.assignedToUserId() != null ? body.assignedToUserId() : assignedToUserId;
