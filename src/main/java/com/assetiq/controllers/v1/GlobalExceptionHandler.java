@@ -127,9 +127,24 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                 HttpStatus.CONFLICT);
     }
 
+    /**
+     * Database integrity failures, split by the root SQLState (see
+     * {@link DataIntegrityViolationClassifier}): 23505 is a 409 DUPLICATE naming the
+     * field, NOT NULL / too long / out of range / CHECK are 400s, and a foreign-key
+     * failure is a 409 IN_USE. When the field is known it goes in {@code errors} so
+     * the web app can mark it, exactly like a Bean Validation failure.
+     */
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<Object> handleDataIntegrity(DataIntegrityViolationException ex) {
-        return new ResponseEntity<>(errorBody(409, "A record with this value already exists", "CONFLICT_DUPLICATE"), HttpStatus.CONFLICT);
+        DataIntegrityViolationClassifier.Classification c = DataIntegrityViolationClassifier.classify(ex);
+        // Log state and constraint only: the driver message can carry the conflicting value.
+        log.warn("Data integrity violation: sqlState={} constraint={} -> {} {}",
+                c.sqlState(), c.constraint(), c.status().value(), c.errorCode());
+        Map<String, Object> body = errorBody(c.status().value(), c.message(), c.errorCode());
+        if (!c.fieldErrors().isEmpty()) {
+            body.put("errors", new HashMap<>(c.fieldErrors()));
+        }
+        return new ResponseEntity<>(body, c.status());
     }
 
     @ExceptionHandler(DataAccessException.class)
