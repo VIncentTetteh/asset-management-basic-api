@@ -11,6 +11,7 @@ import com.assetiq.enums.DisposalStatus;
 import com.assetiq.enums.UserStatus;
 import com.assetiq.repositories.*;
 import com.assetiq.enums.NotificationType;
+import com.assetiq.services.AssetStateTransitionService;
 import com.assetiq.services.CurrencyResolver;
 import com.assetiq.services.DisposalService;
 import com.assetiq.services.UserDisplayNames;
@@ -38,17 +39,20 @@ public class DisposalServiceImpl extends TenantAwareService implements DisposalS
     private final AssetRepository assetRepository;
     private final UserRepository userRepository;
     private final NotificationService notificationService;
+    private final AssetStateTransitionService stateTransitionService;
 
     public DisposalServiceImpl(DisposalRecordRepository disposalRepository,
             AssetRepository assetRepository,
             OrganisationRepository organisationRepository,
             UserRepository userRepository,
-            NotificationService notificationService) {
+            NotificationService notificationService,
+            AssetStateTransitionService stateTransitionService) {
         super(organisationRepository);
         this.disposalRepository = disposalRepository;
         this.assetRepository = assetRepository;
         this.userRepository = userRepository;
         this.notificationService = notificationService;
+        this.stateTransitionService = stateTransitionService;
     }
 
     /**
@@ -120,10 +124,12 @@ public class DisposalServiceImpl extends TenantAwareService implements DisposalS
         record.setApprovedBy(approver);
         record.setApprovedAt(Instant.now());
 
-        // Mark asset as disposed and release it from any assigned user
-        asset.setStatus(AssetStatus.DISPOSED);
+        // Mark asset as disposed and release it from any assigned user. The status
+        // goes through the state machine (it used to be set directly), so an asset
+        // already in a terminal state is refused rather than silently re-disposed.
         asset.setAssignedUser(null);
-        assetRepository.save(asset);
+        stateTransitionService.transition(asset, AssetStatus.DISPOSED, approver,
+                "Disposal " + record.getId() + " approved");
 
         DisposalRecord saved = disposalRepository.save(record);
         notificationService.notifyOrgAdmins(org, NotificationType.DISPOSAL,

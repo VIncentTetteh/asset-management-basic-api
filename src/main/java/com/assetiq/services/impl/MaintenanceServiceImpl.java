@@ -9,8 +9,11 @@ import com.assetiq.models.Organisation;
 import com.assetiq.repositories.MaintenanceRecordRepository;
 import com.assetiq.repositories.AssetRepository;
 import com.assetiq.repositories.OrganisationRepository;
+import com.assetiq.enums.CheckoutStatus;
+import com.assetiq.repositories.CheckoutRecordRepository;
 import com.assetiq.repositories.SupplierRepository;
 import com.assetiq.enums.NotificationType;
+import com.assetiq.services.AssetStateTransitionService;
 import com.assetiq.services.CurrencyResolver;
 import com.assetiq.services.MaintenanceService;
 import com.assetiq.services.NotificationService;
@@ -32,17 +35,23 @@ public class MaintenanceServiceImpl extends TenantAwareService implements Mainte
     private final AssetRepository assetRepository;
     private final SupplierRepository supplierRepository;
     private final NotificationService notificationService;
+    private final CheckoutRecordRepository checkoutRepository;
+    private final AssetStateTransitionService stateTransitionService;
 
     public MaintenanceServiceImpl(MaintenanceRecordRepository recordRepository,
             AssetRepository assetRepository,
             SupplierRepository supplierRepository,
             OrganisationRepository organisationRepository,
-            NotificationService notificationService) {
+            NotificationService notificationService,
+            CheckoutRecordRepository checkoutRepository,
+            AssetStateTransitionService stateTransitionService) {
         super(organisationRepository);
         this.recordRepository = recordRepository;
         this.assetRepository = assetRepository;
         this.supplierRepository = supplierRepository;
         this.notificationService = notificationService;
+        this.checkoutRepository = checkoutRepository;
+        this.stateTransitionService = stateTransitionService;
     }
 
     @Override
@@ -83,8 +92,7 @@ public class MaintenanceServiceImpl extends TenantAwareService implements Mainte
         // M6: an open record takes the asset into MAINTENANCE. A record logged as
         // already COMPLETED/CANCELLED (history) leaves the asset alone.
         if (isOpen(savedRecord.getStatus())) {
-            asset.setStatus(AssetStatus.MAINTENANCE);
-            assetRepository.save(asset);
+            takeIntoMaintenance(savedRecord);
         }
 
         notificationService.notifyOrgAdmins(org, NotificationType.MAINTENANCE,
@@ -284,12 +292,24 @@ public class MaintenanceServiceImpl extends TenantAwareService implements Mainte
             }
             releaseAssetIfNoOpenWork(record);
         } else if (!wasOpen && nowOpen) {
-            Asset asset = record.getAsset();
-            if (asset.getStatus() != AssetStatus.DISPOSED && asset.getStatus() != AssetStatus.RETIRED) {
-                asset.setStatus(AssetStatus.MAINTENANCE);
-                assetRepository.save(asset);
-            }
+            takeIntoMaintenance(record);
         }
+    }
+
+    /**
+     * Sends the asset into MAINTENANCE through the state machine, remembering the
+     * status it is leaving so closing the ticket can put it back there. A disposed
+     * or retired asset has no live status to change, so it is left alone.
+     */
+    private void takeIntoMaintenance(MaintenanceRecord record) {
+        Asset asset = record.getAsset();
+        AssetStatus before = asset.getStatus();
+        if (before == AssetStatus.DISPOSED || before == AssetStatus.RETIRED) return;
+        if (before != AssetStatus.MAINTENANCE) {
+            record.setAssetStatusBefore(before);
+        }
+        stateTransitionService.transition(asset, AssetStatus.MAINTENANCE, null,
+                "Maintenance record " + record.getId() + " opened");
     }
 
     private void releaseAssetIfNoOpenWork(MaintenanceRecord closed) {
@@ -298,8 +318,24 @@ public class MaintenanceServiceImpl extends TenantAwareService implements Mainte
         boolean otherOpen = recordRepository.findByAssetIdAndDeletedAtIsNull(asset.getId()).stream()
                 .anyMatch(r -> !r.getId().equals(closed.getId()) && isOpen(r.getStatus()));
         if (otherOpen) return;
-        asset.setStatus(asset.getAssignedUser() != null ? AssetStatus.IN_USE : AssetStatus.IN_STOCK);
-        assetRepository.save(asset);
+        stateTransitionService.transition(asset, statusToReturnTo(closed), null,
+                "Maintenance record " + closed.getId() + " closed");
+    }
+
+    /**
+     * Where an asset goes when its last open ticket closes: back to the status it
+     * held when the ticket opened. Tickets from before that was recorded (V53) fall
+     * back to IN_USE when the asset is still out — assigned to someone <em>or</em>
+     * checked out without an assigned user, which used to be sent back to IN_STOCK
+     * while it was still in someone's hands.
+     */
+    private AssetStatus statusToReturnTo(MaintenanceRecord closed) {
+        AssetStatus before = closed.getAssetStatusBefore();
+        if (before != null && before != AssetStatus.MAINTENANCE) return before;
+        Asset asset = closed.getAsset();
+        boolean stillOut = asset.getAssignedUser() != null
+                || checkoutRepository.findByAssetAndStatusAndDeletedAtIsNull(asset, CheckoutStatus.ACTIVE).isPresent();
+        return stillOut ? AssetStatus.IN_USE : AssetStatus.IN_STOCK;
     }
 
     /**

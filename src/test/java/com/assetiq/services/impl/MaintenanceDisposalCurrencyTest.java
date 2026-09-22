@@ -45,6 +45,7 @@ class MaintenanceDisposalCurrencyTest {
     @Mock OrganisationRepository organisationRepository;
     @Mock UserRepository userRepository;
     @Mock NotificationService notificationService;
+    @Mock com.assetiq.repositories.CheckoutRecordRepository checkoutRepository;
 
     private MaintenanceServiceImpl maintenance;
     private DisposalServiceImpl disposals;
@@ -54,9 +55,10 @@ class MaintenanceDisposalCurrencyTest {
     @BeforeEach
     void setUp() {
         maintenance = new MaintenanceServiceImpl(maintenanceRepository, assetRepository, supplierRepository,
-                organisationRepository, notificationService);
+                organisationRepository, notificationService, checkoutRepository,
+                new AssetStateTransitionServiceImpl(assetRepository));
         disposals = new DisposalServiceImpl(disposalRepository, assetRepository, organisationRepository,
-                userRepository, notificationService);
+                userRepository, notificationService, new AssetStateTransitionServiceImpl(assetRepository));
         org = new Organisation();
         org.setId(UUID.randomUUID());
         TenantContext.setOrganisationId(org.getId());

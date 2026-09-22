@@ -20,18 +20,44 @@ public class AssetStateTransitionServiceImpl implements AssetStateTransitionServ
 
     private static final Logger log = LoggerFactory.getLogger(AssetStateTransitionServiceImpl.class);
 
-    /** Allowed forward transitions per source state. */
+    /** Terminal states: nothing leaves them, and everything else can reach them. */
+    private static final Set<AssetStatus> TERMINAL = EnumSet.of(AssetStatus.DISPOSED, AssetStatus.RETIRED);
+
+    /**
+     * Allowed forward transitions per source state.
+     *
+     * <p>Maintenance and disposal used to set the status directly rather than go
+     * through here, so the map only described the paths checkout used. It now
+     * covers the whole lifecycle: an in-stock or reserved asset can go in for
+     * maintenance and come back, and any live asset can be disposed of or
+     * retired. The invariant that matters is unchanged — DISPOSED and RETIRED are
+     * terminal.
+     */
     private static final Map<AssetStatus, Set<AssetStatus>> ALLOWED = Map.of(
-            AssetStatus.PENDING_PROCUREMENT, EnumSet.of(AssetStatus.IN_STOCK),
-            AssetStatus.IN_STOCK,            EnumSet.of(AssetStatus.RESERVED, AssetStatus.IN_USE, AssetStatus.DISPOSED),
-            AssetStatus.RESERVED,            EnumSet.of(AssetStatus.IN_USE, AssetStatus.IN_STOCK),
+            AssetStatus.PENDING_PROCUREMENT, EnumSet.of(AssetStatus.IN_STOCK,
+                                                         AssetStatus.DISPOSED, AssetStatus.RETIRED),
+            AssetStatus.IN_STOCK,            EnumSet.of(AssetStatus.RESERVED, AssetStatus.IN_USE,
+                                                         AssetStatus.MAINTENANCE, AssetStatus.UNDER_REPAIR,
+                                                         AssetStatus.MISSING,
+                                                         AssetStatus.DISPOSED, AssetStatus.RETIRED),
+            AssetStatus.RESERVED,            EnumSet.of(AssetStatus.IN_USE, AssetStatus.IN_STOCK,
+                                                         AssetStatus.MAINTENANCE, AssetStatus.UNDER_REPAIR,
+                                                         AssetStatus.MISSING,
+                                                         AssetStatus.DISPOSED, AssetStatus.RETIRED),
             AssetStatus.IN_USE,              EnumSet.of(AssetStatus.MAINTENANCE, AssetStatus.UNDER_REPAIR,
                                                          AssetStatus.RESERVED, AssetStatus.IN_STOCK,
                                                          AssetStatus.MISSING, AssetStatus.DISPOSED, AssetStatus.RETIRED),
-            AssetStatus.MAINTENANCE,         EnumSet.of(AssetStatus.IN_USE, AssetStatus.UNDER_REPAIR),
-            AssetStatus.UNDER_REPAIR,        EnumSet.of(AssetStatus.IN_USE, AssetStatus.MAINTENANCE,
+            AssetStatus.MAINTENANCE,         EnumSet.of(AssetStatus.IN_USE, AssetStatus.IN_STOCK,
+                                                         AssetStatus.RESERVED, AssetStatus.UNDER_REPAIR,
+                                                         AssetStatus.MISSING,
                                                          AssetStatus.DISPOSED, AssetStatus.RETIRED),
-            AssetStatus.MISSING,             EnumSet.of(AssetStatus.IN_USE, AssetStatus.IN_STOCK),
+            AssetStatus.UNDER_REPAIR,        EnumSet.of(AssetStatus.IN_USE, AssetStatus.IN_STOCK,
+                                                         AssetStatus.RESERVED, AssetStatus.MAINTENANCE,
+                                                         AssetStatus.MISSING,
+                                                         AssetStatus.DISPOSED, AssetStatus.RETIRED),
+            AssetStatus.MISSING,             EnumSet.of(AssetStatus.IN_USE, AssetStatus.IN_STOCK,
+                                                         AssetStatus.RESERVED,
+                                                         AssetStatus.DISPOSED, AssetStatus.RETIRED),
             AssetStatus.DISPOSED,            EnumSet.noneOf(AssetStatus.class),
             AssetStatus.RETIRED,             EnumSet.noneOf(AssetStatus.class)
     );
@@ -44,6 +70,7 @@ public class AssetStateTransitionServiceImpl implements AssetStateTransitionServ
 
     @Override
     public boolean isTransitionAllowed(AssetStatus from, AssetStatus to) {
+        if (from != null && TERMINAL.contains(from)) return false;
         Set<AssetStatus> allowed = ALLOWED.get(from);
         return allowed != null && allowed.contains(to);
     }

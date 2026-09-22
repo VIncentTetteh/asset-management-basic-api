@@ -53,6 +53,15 @@ public class MaintenanceRecord extends BaseEntity {
 
     private LocalDate nextDueDate;
 
+    /**
+     * The asset's status when this ticket was opened, restored when it closes.
+     * Null on tickets created before V53; those fall back to the assigned-user /
+     * active-checkout rule.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "asset_status_before", length = 30)
+    private com.assetiq.enums.AssetStatus assetStatusBefore;
+
     @ManyToOne
     @JoinColumn(nullable = false)
     private Organisation organisation;

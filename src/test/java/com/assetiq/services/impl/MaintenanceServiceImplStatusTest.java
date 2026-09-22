@@ -2,9 +2,11 @@ package com.assetiq.services.impl;
 
 import com.assetiq.dto.MaintenanceRecordDto;
 import com.assetiq.enums.AssetStatus;
+import com.assetiq.enums.CheckoutStatus;
 import com.assetiq.enums.MaintenanceStatus;
 import com.assetiq.enums.MaintenanceType;
 import com.assetiq.models.Asset;
+import com.assetiq.models.CheckoutRecord;
 import com.assetiq.models.MaintenanceRecord;
 import com.assetiq.models.Organisation;
 import com.assetiq.models.Supplier;
@@ -20,6 +22,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
@@ -34,6 +37,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -46,6 +50,7 @@ class MaintenanceServiceImplStatusTest {
     @Mock SupplierRepository supplierRepository;
     @Mock OrganisationRepository organisationRepository;
     @Mock NotificationService notificationService;
+    @Mock com.assetiq.repositories.CheckoutRecordRepository checkoutRepository;
 
     private MaintenanceServiceImpl service;
     private Organisation org;
@@ -53,8 +58,11 @@ class MaintenanceServiceImplStatusTest {
 
     @BeforeEach
     void setUp() {
+        // The real state machine, so the asset statuses these tests assert on are
+        // the ones the transition service actually allows.
         service = new MaintenanceServiceImpl(recordRepository, assetRepository, supplierRepository,
-                organisationRepository, notificationService);
+                organisationRepository, notificationService, checkoutRepository,
+                new AssetStateTransitionServiceImpl(assetRepository));
         org = new Organisation();
         org.setId(UUID.randomUUID());
         TenantContext.setOrganisationId(org.getId());
@@ -95,6 +103,47 @@ class MaintenanceServiceImplStatusTest {
         assertThat(out.getStatus()).isEqualTo(MaintenanceStatus.COMPLETED);
         assertThat(out.getPerformedDate()).isEqualTo(LocalDate.now());
         assertThat(asset.getStatus()).isEqualTo(AssetStatus.IN_STOCK);
+    }
+
+    @Test
+    void completingReturnsACheckedOutButUnassignedAssetToInUse() {
+        // The asset is out on an ACTIVE checkout with no assignedUser: it used to
+        // come back as IN_STOCK while it was still in someone's hands.
+        MaintenanceRecord r = record(MaintenanceStatus.IN_PROGRESS);
+        when(recordRepository.findByAssetIdAndDeletedAtIsNull(asset.getId())).thenReturn(Set.of(r));
+        when(checkoutRepository.findByAssetAndStatusAndDeletedAtIsNull(asset, CheckoutStatus.ACTIVE))
+                .thenReturn(Optional.of(new CheckoutRecord()));
+
+        service.completeMaintenanceRecord(r.getId());
+
+        assertThat(asset.getStatus()).isEqualTo(AssetStatus.IN_USE);
+    }
+
+    @Test
+    void openingATicketRecordsTheStatusTheAssetIsLeaving() {
+        asset.setStatus(AssetStatus.RESERVED);
+        MaintenanceRecordDto dto = new MaintenanceRecordDto();
+        dto.setAssetId(asset.getId());
+        dto.setMaintenanceType(MaintenanceType.CORRECTIVE);
+        dto.setStatus(MaintenanceStatus.SCHEDULED);
+
+        service.createMaintenanceRecord(dto);
+
+        assertThat(asset.getStatus()).isEqualTo(AssetStatus.MAINTENANCE);
+        ArgumentCaptor<MaintenanceRecord> saved = ArgumentCaptor.forClass(MaintenanceRecord.class);
+        verify(recordRepository).save(saved.capture());
+        assertThat(saved.getValue().getAssetStatusBefore()).isEqualTo(AssetStatus.RESERVED);
+    }
+
+    @Test
+    void theAssetReturnsToTheStatusItHadWhenTheTicketOpened() {
+        MaintenanceRecord r = record(MaintenanceStatus.IN_PROGRESS);
+        r.setAssetStatusBefore(AssetStatus.RESERVED);
+        when(recordRepository.findByAssetIdAndDeletedAtIsNull(asset.getId())).thenReturn(Set.of(r));
+
+        service.completeMaintenanceRecord(r.getId());
+
+        assertThat(asset.getStatus()).isEqualTo(AssetStatus.RESERVED);
     }
 
     @Test

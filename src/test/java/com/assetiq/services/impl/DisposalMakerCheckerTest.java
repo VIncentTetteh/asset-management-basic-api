@@ -62,7 +62,7 @@ class DisposalMakerCheckerTest {
     @BeforeEach
     void setUp() {
         service = new DisposalServiceImpl(disposalRepository, assetRepository, organisationRepository,
-                userRepository, notificationService);
+                userRepository, notificationService, new AssetStateTransitionServiceImpl(assetRepository));
         org = new Organisation();
         org.setId(UUID.randomUUID());
         TenantContext.setOrganisationId(org.getId());
