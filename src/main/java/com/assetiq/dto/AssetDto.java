@@ -98,6 +98,23 @@ public class AssetDto {
     @Size(max = 100)
     private String costCenter;
 
+    // ── TCO inputs (read by the total-cost-of-ownership report) ──
+
+    /** Annual insurance premium, in the asset's currency. */
+    @PositiveOrZero
+    @Digits(integer = 13, fraction = 2)
+    private BigDecimal insurancePremiumPerYear;
+
+    /** Cost of one day of downtime, in the asset's currency. */
+    @PositiveOrZero
+    @Digits(integer = 13, fraction = 2)
+    private BigDecimal downtimeCostPerDay;
+
+    private LocalDate insurancePolicyExpiry;
+
+    /** The asset this one is a component of (e.g. a server's disk). */
+    private UUID parentAssetId;
+
     private Instant createdAt;
 
     private Instant updatedAt;
@@ -133,7 +150,8 @@ public class AssetDto {
      * Update only: optional relations to clear, by DTO field name. A null field in
      * an update means "leave unchanged", so clearing needs to be explicit. Allowed:
      * {@code departmentId}, {@code locationId}, {@code supplierId},
-     * {@code purchaseOrderId}, {@code assignedUserId}.
+     * {@code purchaseOrderId}, {@code assignedUserId}, {@code parentAssetId},
+     * {@code insurancePremiumPerYear}, {@code downtimeCostPerDay}, {@code insurancePolicyExpiry}.
      */
     @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
     private List<String> clearFields;

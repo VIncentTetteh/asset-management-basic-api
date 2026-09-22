@@ -438,6 +438,108 @@ class AssetServiceImplTest {
         }
     }
 
+    @Nested
+    @DisplayName("status: DISPOSED only through the disposal workflow")
+    class StatusRules {
+
+        @BeforeEach
+        void admin() {
+            authenticate("ROLE_ORG_ADMIN");
+        }
+
+        private AssetDto status(AssetStatus s) {
+            AssetDto dto = new AssetDto();
+            dto.setStatus(s);
+            return dto;
+        }
+
+        @Test
+        void editCannotDispose() {
+            assertThatThrownBy(() -> service.patch(asset.getId(), status(AssetStatus.DISPOSED)))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("disposal request");
+            assertThat(asset.getStatus()).isEqualTo(AssetStatus.IN_USE);
+        }
+
+        @Test
+        void createCannotDispose() {
+            AssetDto dto = status(AssetStatus.DISPOSED);
+            dto.setName("Old printer");
+            assertThatThrownBy(() -> service.create(dto)).isInstanceOf(IllegalArgumentException.class);
+        }
+
+        @Test
+        void disposedAssetCannotBeRevived() {
+            asset.setStatus(AssetStatus.DISPOSED);
+            assertThatThrownBy(() -> service.patch(asset.getId(), status(AssetStatus.IN_USE)))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+
+        @Test
+        void retiringStaysAvailableWithoutAWorkflow() {
+            assertThat(service.patch(asset.getId(), status(AssetStatus.RETIRED)).getStatus()).isEqualTo(AssetStatus.RETIRED);
+        }
+
+        @Test
+        void resendingTheCurrentStatusIsANoOp() {
+            asset.setStatus(AssetStatus.DISPOSED);
+            AssetDto dto = status(AssetStatus.DISPOSED);
+            dto.setName("Renamed");
+            assertThat(service.patch(asset.getId(), dto).getName()).isEqualTo("Renamed");
+        }
+    }
+
+    @Nested
+    @DisplayName("TCO inputs are part of the asset contract")
+    class TcoInputs {
+
+        @BeforeEach
+        void admin() {
+            authenticate("ROLE_ORG_ADMIN");
+        }
+
+        @Test
+        void savedReturnedAndClearable() {
+            AssetDto dto = new AssetDto();
+            dto.setInsurancePremiumPerYear(new BigDecimal("1200.00"));
+            dto.setDowntimeCostPerDay(new BigDecimal("300.00"));
+            dto.setInsurancePolicyExpiry(LocalDate.of(2027, 6, 30));
+
+            AssetDto saved = service.patch(asset.getId(), dto);
+
+            assertThat(saved.getInsurancePremiumPerYear()).isEqualByComparingTo("1200.00");
+            assertThat(saved.getDowntimeCostPerDay()).isEqualByComparingTo("300.00");
+            assertThat(saved.getInsurancePolicyExpiry()).isEqualTo(LocalDate.of(2027, 6, 30));
+
+            AssetDto clear = new AssetDto();
+            clear.setClearFields(List.of("insurancePremiumPerYear", "downtimeCostPerDay", "insurancePolicyExpiry"));
+            AssetDto cleared = service.patch(asset.getId(), clear);
+
+            assertThat(cleared.getInsurancePremiumPerYear()).isNull();
+            assertThat(cleared.getDowntimeCostPerDay()).isNull();
+            assertThat(cleared.getInsurancePolicyExpiry()).isNull();
+        }
+
+        @Test
+        void parentAssetIsLinkedAndCyclesRefused() {
+            Asset server = new Asset();
+            server.setId(UUID.randomUUID());
+            server.setName("Server");
+            server.setOrganisation(org);
+            when(assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(server.getId(), org)).thenReturn(Optional.of(server));
+            AssetDto dto = new AssetDto();
+            dto.setParentAssetId(server.getId());
+
+            assertThat(service.patch(asset.getId(), dto).getParentAssetId()).isEqualTo(server.getId());
+
+            server.setParentAsset(asset);
+            AssetDto cycle = new AssetDto();
+            cycle.setParentAssetId(server.getId());
+            asset.setParentAsset(null);
+            assertThatThrownBy(() -> service.patch(asset.getId(), cycle)).isInstanceOf(IllegalArgumentException.class);
+        }
+    }
+
     private static AssetDto rename(String name) {
         AssetDto dto = new AssetDto();
         dto.setName(name);

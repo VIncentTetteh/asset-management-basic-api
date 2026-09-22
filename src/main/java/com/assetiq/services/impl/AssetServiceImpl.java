@@ -1,6 +1,7 @@
 package com.assetiq.services.impl;
 
 import com.assetiq.assets.CategoryAssetDefaults;
+import com.assetiq.services.HierarchyGuard;
 
 import com.assetiq.dto.AssetDto;
 import com.assetiq.dto.AssetFilterRequest;
@@ -139,7 +140,8 @@ public class AssetServiceImpl implements AssetService {
 
     /** Relations an update may clear explicitly through {@link AssetDto#getClearFields()}. */
     static final Set<String> CLEARABLE_FIELDS =
-            Set.of("departmentId", "locationId", "supplierId", "purchaseOrderId", "assignedUserId");
+            Set.of("departmentId", "locationId", "supplierId", "purchaseOrderId", "assignedUserId",
+                    "parentAssetId", "insurancePremiumPerYear", "downtimeCostPerDay", "insurancePolicyExpiry");
 
     private static boolean hasAnyAuthority(Set<String> allowed) {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
@@ -221,6 +223,7 @@ public class AssetServiceImpl implements AssetService {
         asset.setUsefulLifeMonths(dto.getUsefulLifeMonths());
         asset.setResidualValue(dto.getResidualValue());
         asset.setWarrantyExpiryDate(dto.getWarrantyExpiryDate());
+        requireEditableStatus(null, dto.getStatus());
         if (dto.getStatus() != null)
             asset.setStatus(dto.getStatus());
         if (dto.getCondition() != null)
@@ -229,6 +232,12 @@ public class AssetServiceImpl implements AssetService {
         asset.setInsurancePolicyId(dto.getInsurancePolicyId());
         asset.setProcurementType(dto.getProcurementType());
         asset.setCostCenter(dto.getCostCenter());
+        asset.setInsurancePremiumPerYear(dto.getInsurancePremiumPerYear());
+        asset.setDowntimeCostPerDay(dto.getDowntimeCostPerDay());
+        asset.setInsurancePolicyExpiry(dto.getInsurancePolicyExpiry());
+        if (dto.getParentAssetId() != null) {
+            asset.setParentAsset(requireParentAsset(dto.getParentAssetId(), null, organisation));
+        }
 
         if (dto.getCategoryId() != null) {
             categoryRepository.findByIdAndOrganisationAndDeletedAtIsNull(dto.getCategoryId(), organisation)
@@ -287,6 +296,10 @@ public class AssetServiceImpl implements AssetService {
             result.setInsurancePolicyId(saved.getInsurancePolicyId());
             result.setProcurementType(saved.getProcurementType());
             result.setCostCenter(saved.getCostCenter());
+            result.setInsurancePremiumPerYear(saved.getInsurancePremiumPerYear());
+            result.setDowntimeCostPerDay(saved.getDowntimeCostPerDay());
+            result.setInsurancePolicyExpiry(saved.getInsurancePolicyExpiry());
+            result.setParentAssetId(dto.getParentAssetId());
 
             // Set IDs from the DTO input or saved entity
             result.setCategoryId(dto.getCategoryId());
@@ -467,6 +480,7 @@ public class AssetServiceImpl implements AssetService {
             asset.setResidualValue(dto.getResidualValue());
         if (dto.getWarrantyExpiryDate() != null)
             asset.setWarrantyExpiryDate(dto.getWarrantyExpiryDate());
+        requireEditableStatus(asset.getStatus(), dto.getStatus());
         if (dto.getStatus() != null)
             asset.setStatus(dto.getStatus());
         if (dto.getCondition() != null)
@@ -479,6 +493,14 @@ public class AssetServiceImpl implements AssetService {
             asset.setProcurementType(dto.getProcurementType());
         if (dto.getCostCenter() != null)
             asset.setCostCenter(dto.getCostCenter());
+        if (dto.getInsurancePremiumPerYear() != null)
+            asset.setInsurancePremiumPerYear(dto.getInsurancePremiumPerYear());
+        if (dto.getDowntimeCostPerDay() != null)
+            asset.setDowntimeCostPerDay(dto.getDowntimeCostPerDay());
+        if (dto.getInsurancePolicyExpiry() != null)
+            asset.setInsurancePolicyExpiry(dto.getInsurancePolicyExpiry());
+        if (dto.getParentAssetId() != null)
+            asset.setParentAsset(requireParentAsset(dto.getParentAssetId(), asset.getId(), org));
 
         if (dto.getCategoryId() != null) {
             categoryRepository.findByIdAndOrganisationAndDeletedAtIsNull(dto.getCategoryId(), org)
@@ -514,6 +536,10 @@ public class AssetServiceImpl implements AssetService {
         if (clears.contains("supplierId")) asset.setSupplier(null);
         if (clears.contains("purchaseOrderId")) asset.setPurchaseOrder(null);
         if (clears.contains("assignedUserId")) asset.setAssignedUser(null);
+        if (clears.contains("parentAssetId")) asset.setParentAsset(null);
+        if (clears.contains("insurancePremiumPerYear")) asset.setInsurancePremiumPerYear(null);
+        if (clears.contains("downtimeCostPerDay")) asset.setDowntimeCostPerDay(null);
+        if (clears.contains("insurancePolicyExpiry")) asset.setInsurancePolicyExpiry(null);
 
         refreshBookValue(asset);
         Asset saved = assetRepository.save(asset);
@@ -528,6 +554,37 @@ public class AssetServiceImpl implements AssetService {
     @Transactional
     public AssetDto patch(UUID id, AssetDto dto) {
         return update(id, dto);
+    }
+
+    /** Loads a parent asset in the organisation, refusing the asset itself or one of its components. */
+    private Asset requireParentAsset(UUID parentId, UUID selfId, Organisation org) {
+        Asset parent = assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(parentId, org)
+                .orElseThrow(() -> new IllegalArgumentException("Parent asset not found in your organisation"));
+        if (parent.getId().equals(selfId)) {
+            throw new IllegalArgumentException("An asset cannot be its own parent");
+        }
+        HierarchyGuard.assertNotDescendant(parent, selfId, Asset::getParentAsset, Asset::getId,
+                "An asset cannot be placed under one of its own components");
+        return parent;
+    }
+
+    /**
+     * DISPOSED is reached only through an approved disposal request (maker-checker,
+     * sale value, write-off); setting it on create or edit bypassed all of that.
+     * A disposed asset's status is final, so an edit cannot revive it either.
+     *
+     * <p>RETIRED stays settable here: there is no retirement workflow, and retiring
+     * records no financial event (the asset stays on the register with its book value).
+     */
+    static void requireEditableStatus(AssetStatus current, AssetStatus requested) {
+        if (requested == null || requested == current) return;
+        if (requested == AssetStatus.DISPOSED) {
+            throw new IllegalArgumentException(
+                    "An asset is disposed through a disposal request, which needs approval; it cannot be set to DISPOSED directly");
+        }
+        if (current == AssetStatus.DISPOSED) {
+            throw new IllegalArgumentException("A disposed asset's status cannot be changed");
+        }
     }
 
     /**
@@ -551,6 +608,10 @@ public class AssetServiceImpl implements AssetService {
         provided.put("supplierId", dto.getSupplierId());
         provided.put("purchaseOrderId", dto.getPurchaseOrderId());
         provided.put("assignedUserId", dto.getAssignedUserId());
+        provided.put("parentAssetId", dto.getParentAssetId());
+        provided.put("insurancePremiumPerYear", dto.getInsurancePremiumPerYear());
+        provided.put("downtimeCostPerDay", dto.getDowntimeCostPerDay());
+        provided.put("insurancePolicyExpiry", dto.getInsurancePolicyExpiry());
         for (String field : clears) {
             if (provided.get(field) != null) {
                 throw new IllegalArgumentException("Field is both set and cleared: " + field);
@@ -680,6 +741,11 @@ public class AssetServiceImpl implements AssetService {
         d.setInsurancePolicyId(a.getInsurancePolicyId());
         d.setProcurementType(a.getProcurementType());
         d.setCostCenter(a.getCostCenter());
+        d.setInsurancePremiumPerYear(a.getInsurancePremiumPerYear());
+        d.setDowntimeCostPerDay(a.getDowntimeCostPerDay());
+        d.setInsurancePolicyExpiry(a.getInsurancePolicyExpiry());
+        if (a.getParentAsset() != null)
+            d.setParentAssetId(a.getParentAsset().getId());
         if (a.getCategory() != null)
             d.setCategoryId(a.getCategory().getId());
         if (a.getDepartment() != null)
