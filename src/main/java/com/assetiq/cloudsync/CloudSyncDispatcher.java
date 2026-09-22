@@ -1,5 +1,6 @@
 package com.assetiq.cloudsync;
 
+import com.assetiq.enums.CloudEnvironment;
 import com.assetiq.enums.CloudProvider;
 import com.assetiq.models.CloudAsset;
 import com.assetiq.models.Organisation;
@@ -143,8 +144,10 @@ public class CloudSyncDispatcher {
         if (discovered.getDescription() != null) {
             target.setDescription(discovered.getDescription());
         }
-        if (discovered.getEnvironment() != null && target.getEnvironment() == null) {
-            target.setEnvironment(discovered.getEnvironment());
+        // Provider tags say "production", "prod", "Dev"...: store the normalised enum name.
+        String environment = CloudEnvironment.normaliseToName(discovered.getEnvironment());
+        if (environment != null && target.getEnvironment() == null) {
+            target.setEnvironment(environment);
         }
 
         cloudAssetRepo.save(target);

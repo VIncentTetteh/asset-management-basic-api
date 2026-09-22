@@ -3,6 +3,7 @@ package com.assetiq.services.impl;
 import com.assetiq.cloudsync.CloudSyncDispatcher;
 import com.assetiq.dto.CloudAssetDto;
 import com.assetiq.dto.CloudCostSummaryDto;
+import com.assetiq.enums.CloudEnvironment;
 import com.assetiq.enums.CloudProvider;
 import com.assetiq.models.CloudAsset;
 import com.assetiq.models.CloudCostRecord;
@@ -91,7 +92,8 @@ public class CloudAssetServiceImpl extends TenantAwareService implements CloudAs
                 .filter(a -> provider == null || provider.isBlank()
                         || a.getProvider().name().equalsIgnoreCase(provider))
                 .filter(a -> environment == null || environment.isBlank()
-                        || environment.equalsIgnoreCase(a.getEnvironment()))
+                        || Objects.equals(CloudEnvironment.normaliseToName(environment),
+                                CloudEnvironment.normaliseToName(a.getEnvironment())))
                 .map(this::toDto)
                 .collect(Collectors.toList());
 
@@ -253,7 +255,7 @@ public class CloudAssetServiceImpl extends TenantAwareService implements CloudAs
         entity.setAccountId(dto.getAccountId());
         entity.setMonthlyCostEstimate(dto.getMonthlyCostEstimate());
         entity.setCurrency(currencyResolver.resolveOrDefault(dto.getCurrency()));
-        entity.setEnvironment(dto.getEnvironment());
+        entity.setEnvironment(CloudEnvironment.normaliseToName(dto.getEnvironment()));
         entity.setTags(dto.getTags());
         entity.setDescription(dto.getDescription());
         entity.setOrganisation(org);
@@ -271,7 +273,8 @@ public class CloudAssetServiceImpl extends TenantAwareService implements CloudAs
         dto.setAccountId(a.getAccountId());
         dto.setMonthlyCostEstimate(a.getMonthlyCostEstimate());
         dto.setCurrency(a.getCurrency());
-        dto.setEnvironment(a.getEnvironment());
+        // Legacy free-text values read in the normalised form too.
+        dto.setEnvironment(CloudEnvironment.normaliseToName(a.getEnvironment()));
         dto.setTags(a.getTags());
         dto.setDescription(a.getDescription());
         dto.setLastSyncAt(a.getLastSyncAt());

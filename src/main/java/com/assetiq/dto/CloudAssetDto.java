@@ -45,6 +45,11 @@ public class CloudAssetDto {
     private BigDecimal monthlyCostEstimate;
     @Size(max = 10)
     private String currency;
+    /**
+     * One of {@link com.assetiq.enums.CloudEnvironment} (PROD, STAGING, DEV, TEST,
+     * OTHER), or null for "not set". Common spellings ("production", "uat") are
+     * accepted and normalised; unrecognised text becomes OTHER.
+     */
     @Size(max = 50)
     private String environment;
     private String tags;
