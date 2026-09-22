@@ -12,12 +12,11 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 
+// Natural key is unique among live rows only: partial unique index uq_asset_org_tag_live / uq_asset_org_serial_live
+// (V46, WHERE deleted_at IS NULL). JPA cannot declare a partial index, so no
+// @UniqueConstraint here; declaring the full one would claim soft-deleted rows count.
 @Entity
-@Table(name = "asset", uniqueConstraints = {
-        @UniqueConstraint(columnNames = { "asset_tag", "organisation_id" }, name = "uk_asset_tag_per_organisation"),
-        @UniqueConstraint(columnNames = { "serial_number",
-                "organisation_id" }, name = "uk_serial_number_per_organisation")
-})
+@Table(name = "asset")
 @Data
 @Setter
 @Getter

@@ -9,9 +9,11 @@ import lombok.Setter;
 /**
  * Monthly SLA / availability metrics for SOC 2 Availability criteria.
  */
+// Natural key is unique among live rows only: partial unique index uq_sla_metric_org_period_live
+// (V46, WHERE deleted_at IS NULL). JPA cannot declare a partial index, so no
+// @UniqueConstraint here; declaring the full one would claim soft-deleted rows count.
 @Entity
 @Table(name = "sla_metric",
-        uniqueConstraints = @UniqueConstraint(name = "uq_sla_org_month_year", columnNames = {"organisation_id", "month", "year"}),
         indexes = @Index(name = "idx_sla_org", columnList = "organisation_id,year,month"))
 @Getter
 @Setter

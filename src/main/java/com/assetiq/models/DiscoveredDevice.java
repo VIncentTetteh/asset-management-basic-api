@@ -9,11 +9,13 @@ import lombok.Setter;
 import java.time.Instant;
 import java.util.UUID;
 
+// Natural key is unique among live rows only: partial unique index uq_discovered_device_org_ip_live
+// (V46, WHERE deleted_at IS NULL). JPA cannot declare a partial index, so no
+// @UniqueConstraint here; declaring the full one would claim soft-deleted rows count.
 @Entity
 @Getter
 @Setter
-@Table(name = "discovered_device",
-        uniqueConstraints = @UniqueConstraint(columnNames = {"ip_address", "organisation_id"}))
+@Table(name = "discovered_device")
 public class DiscoveredDevice extends BaseEntity {
 
     @Column(name = "ip_address", nullable = false, length = 45)

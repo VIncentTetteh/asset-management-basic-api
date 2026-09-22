@@ -13,10 +13,11 @@ import java.time.Instant;
  * Bank of Ghana (BOG) ICT Security Directive control tracking.
  * Maps to the BOG ICT Directive requirements for licensed financial institutions.
  */
+// Natural key is unique among live rows only: partial unique index uq_bog_control_org_ref_live
+// (V46, WHERE deleted_at IS NULL). JPA cannot declare a partial index, so no
+// @UniqueConstraint here; declaring the full one would claim soft-deleted rows count.
 @Entity
 @Table(name = "bog_control",
-        uniqueConstraints = @UniqueConstraint(name = "uq_bog_ctrl_org_ref",
-                columnNames = {"organisation_id", "directive_ref"}),
         indexes = @Index(name = "idx_bog_ctrl_org", columnList = "organisation_id"))
 @Getter
 @Setter

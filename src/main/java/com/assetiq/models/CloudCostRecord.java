@@ -7,11 +7,13 @@ import lombok.Setter;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 
+// Natural key is unique among live rows only: partial unique index uq_cloud_cost_record_asset_month_service_live
+// (V46, WHERE deleted_at IS NULL). JPA cannot declare a partial index, so no
+// @UniqueConstraint here; declaring the full one would claim soft-deleted rows count.
 @Entity
 @Getter
 @Setter
-@Table(name = "cloud_cost_record",
-        uniqueConstraints = @UniqueConstraint(columnNames = {"cloud_asset_id", "billing_month", "service_name"}))
+@Table(name = "cloud_cost_record")
 public class CloudCostRecord extends BaseEntity {
 
     @ManyToOne(fetch = FetchType.LAZY)

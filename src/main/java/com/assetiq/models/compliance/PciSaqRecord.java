@@ -11,10 +11,11 @@ import java.time.Instant;
 /**
  * PCI-DSS Self-Assessment Questionnaire (SAQ) answers per requirement.
  */
+// Natural key is unique among live rows only: partial unique index uq_pci_saq_org_requirement_live
+// (V46, WHERE deleted_at IS NULL). JPA cannot declare a partial index, so no
+// @UniqueConstraint here; declaring the full one would claim soft-deleted rows count.
 @Entity
 @Table(name = "pci_saq_record",
-        uniqueConstraints = @UniqueConstraint(name = "uq_pci_saq_org_req",
-                columnNames = {"organisation_id", "requirement_number"}),
         indexes = @Index(name = "idx_pci_saq_org", columnList = "organisation_id"))
 @Getter
 @Setter
