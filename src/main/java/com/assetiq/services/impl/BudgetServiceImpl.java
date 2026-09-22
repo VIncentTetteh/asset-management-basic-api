@@ -109,7 +109,11 @@ public class BudgetServiceImpl extends TenantAwareService implements BudgetServi
         if (dto.getName() != null) budget.setName(dto.getName());
         if (dto.getDescription() != null) budget.setDescription(dto.getDescription());
         if (dto.getTotalAmount() != null) budget.setTotalAmount(dto.getTotalAmount());
-        if (dto.getCurrency() != null) budget.setCurrency(CurrencyResolver.normaliseIsoCode(dto.getCurrency()));
+        if (dto.getCurrency() != null) {
+            String currency = CurrencyResolver.normaliseIsoCode(dto.getCurrency());
+            requireCurrencyChangeAllowed(budget, currency);
+            budget.setCurrency(currency);
+        }
         if (dto.getPeriodStart() != null) budget.setPeriodStart(dto.getPeriodStart());
         if (dto.getPeriodEnd() != null) budget.setPeriodEnd(dto.getPeriodEnd());
         if (dto.getStatus() != null) budget.setStatus(dto.getStatus());
@@ -270,7 +274,11 @@ public class BudgetServiceImpl extends TenantAwareService implements BudgetServi
         budget.setName(dto.getName());
         budget.setDescription(dto.getDescription());
         budget.setTotalAmount(dto.getTotalAmount());
-        budget.setCurrency(currencyResolver.resolveOrDefault(dto.getCurrency()));
+        if (creating || dto.getCurrency() != null) {
+            String currency = currencyResolver.resolveOrDefault(dto.getCurrency());
+            if (!creating) requireCurrencyChangeAllowed(budget, currency);
+            budget.setCurrency(currency);
+        }
         budget.setPeriodStart(dto.getPeriodStart());
         budget.setPeriodEnd(dto.getPeriodEnd());
         if (dto.getStatus() != null) {
@@ -296,6 +304,23 @@ public class BudgetServiceImpl extends TenantAwareService implements BudgetServi
         }
         requireValidPeriod(budget);
         budget.reconcileExceededStatus();
+    }
+
+    /**
+     * Spend and commitments are recorded in the budget's currency, so relabelling
+     * them as another currency would silently misstate them. The currency can only
+     * change while nothing has been spent or committed.
+     */
+    private static void requireCurrencyChangeAllowed(Budget budget, String newCurrency) {
+        String current = budget.getCurrency();
+        if (current == null || current.equalsIgnoreCase(newCurrency)) return;
+        boolean hasSpend = budget.getSpentAmount() != null && budget.getSpentAmount().signum() != 0;
+        boolean hasCommitments = budget.getCommittedAmount() != null && budget.getCommittedAmount().signum() != 0;
+        if (hasSpend || hasCommitments) {
+            throw new IllegalStateException("The budget currency cannot change from " + current + " to " + newCurrency
+                    + " because the budget already has spend or commitments recorded in " + current
+                    + ". Create a new budget in " + newCurrency + " instead.");
+        }
     }
 
     private static void requireValidPeriod(Budget budget) {

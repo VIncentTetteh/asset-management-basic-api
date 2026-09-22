@@ -140,6 +140,55 @@ class BudgetServiceImplCurrencyTest {
         verify(budgetRepository, never()).save(any());
     }
 
+    @Test
+    @DisplayName("the currency cannot change once the budget holds spend or commitments")
+    void currencyChange_refusedWithSpendOrCommitments() {
+        Budget spent = budget(null, "GHS", "100", "10", "0");
+        Budget committed = budget(null, "GHS", "100", "0", "5");
+        when(budgetRepository.findByIdForUpdate(spent.getId(), org)).thenReturn(Optional.of(spent));
+        when(budgetRepository.findByIdForUpdate(committed.getId(), org)).thenReturn(Optional.of(committed));
+        BudgetDto usd = new BudgetDto();
+        usd.setCurrency("USD");
+
+        assertThatThrownBy(() -> service.patch(spent.getId(), usd))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("cannot change from GHS to USD");
+        assertThatThrownBy(() -> service.patch(committed.getId(), usd))
+                .isInstanceOf(IllegalStateException.class);
+        assertThat(spent.getCurrency()).isEqualTo("GHS");
+        verify(budgetRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("a full update may change the currency of an unused budget, and keeps it when omitted")
+    void update_currencyRules() {
+        Budget unused = budget(null, "GHS", "100", "0", "0");
+        Budget used = budget(null, "GHS", "100", "10", "0");
+        when(budgetRepository.findByIdForUpdate(unused.getId(), org)).thenReturn(Optional.of(unused));
+        when(budgetRepository.findByIdForUpdate(used.getId(), org)).thenReturn(Optional.of(used));
+        when(budgetRepository.save(any(Budget.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(currencyResolver.resolveOrDefault("USD")).thenReturn("USD");
+
+        service.update(unused.getId(), fullUpdate("USD"));
+        assertThat(unused.getCurrency()).isEqualTo("USD");
+
+        service.update(used.getId(), fullUpdate(null));
+        assertThat(used.getCurrency()).isEqualTo("GHS");
+
+        assertThatThrownBy(() -> service.update(used.getId(), fullUpdate("USD")))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    private static BudgetDto fullUpdate(String currency) {
+        BudgetDto dto = new BudgetDto();
+        dto.setName("Ops");
+        dto.setTotalAmount(new BigDecimal("100"));
+        dto.setCurrency(currency);
+        dto.setPeriodStart(java.time.LocalDate.of(2026, 1, 1));
+        dto.setPeriodEnd(java.time.LocalDate.of(2026, 12, 31));
+        return dto;
+    }
+
     private Budget budget(Department dept, String currency, String total, String spent, String committed) {
         Budget b = new Budget();
         b.setId(UUID.randomUUID());
