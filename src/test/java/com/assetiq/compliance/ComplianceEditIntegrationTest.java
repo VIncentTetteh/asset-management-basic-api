@@ -20,6 +20,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -116,6 +117,20 @@ class ComplianceEditIntegrationTest extends BaseIntegrationTest {
                 .andExpect(status().isCreated());
         send(post(BASE + "/bog-controls"), Map.of("directiveRef", "BoG/ICT/1", "requirement", "y"))
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.errors.directiveRef").exists());
+    }
+
+    @Test
+    void slaMetricCanBeDeletedAndItsPeriodReused() throws Exception {
+        // There was no delete at all, so a wrong figure occupied its month forever.
+        String id = json(send(post(BASE + "/sla-metrics"), Map.of("month", 7, "year", 2031, "uptimePercent", 99.9))
+                .andExpect(status().isCreated()).andReturn()).path("id").asText();
+
+        mockMvc.perform(auth(delete(BASE + "/sla-metrics/" + id))).andExpect(status().isNoContent());
+        mockMvc.perform(auth(get(BASE + "/sla-metrics/" + id))).andExpect(status().isBadRequest());
+
+        // The unique index covers live rows only, so the month is free again.
+        send(post(BASE + "/sla-metrics"), Map.of("month", 7, "year", 2031, "uptimePercent", 98.0))
+                .andExpect(status().isCreated());
     }
 
     @Test

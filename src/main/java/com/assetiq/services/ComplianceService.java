@@ -97,6 +97,9 @@ public interface ComplianceService {
     /** Full replace (PUT): an absent optional field is cleared. */
     SlaMetricDto replaceSlaMetric(UUID id, SlaMetricDto dto);
 
+    /** Soft-deletes an SLA metric, freeing its month for a fresh record. */
+    void deleteSlaMetric(UUID id);
+
     // ── VulnerabilityScan ───────────────────────────────────────────────────
     Page<VulnerabilityScanDto> listVulnerabilityScans(Pageable pageable);
     VulnerabilityScanDto getVulnerabilityScan(UUID id);

@@ -476,6 +476,13 @@ public class ComplianceController {
         return ResponseEntity.ok(complianceService.replaceSlaMetric(id, dto));
     }
 
+    @DeleteMapping("/sla-metrics/{id}")
+    @PreAuthorize(WRITE)
+    public ResponseEntity<Void> deleteSlaMetric(@PathVariable UUID id) {
+        complianceService.deleteSlaMetric(id);
+        return ResponseEntity.noContent().build();
+    }
+
     // ── VulnerabilityScan ────────────────────────────────────────────────────
 
     @GetMapping("/vulnerability-scans")

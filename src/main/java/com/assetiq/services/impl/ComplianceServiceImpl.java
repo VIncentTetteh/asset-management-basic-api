@@ -1077,6 +1077,17 @@ public class ComplianceServiceImpl extends TenantAwareService implements Complia
         return toSlaMetricDto(slaMetricRepository.save(metric));
     }
 
+    @Override
+    public void deleteSlaMetric(UUID id) {
+        Organisation org = requireTenantOrg();
+        SlaMetric metric = slaMetricRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
+                .orElseThrow(() -> new IllegalArgumentException("SLA metric not found"));
+        // Soft delete, like every other compliance record: the month becomes free
+        // again because uq_sla_metric_org_period_live only covers live rows.
+        metric.setDeletedAt(Instant.now());
+        slaMetricRepository.save(metric);
+    }
+
     /** One SLA metric per organisation and month (V46 uq_sla_metric_org_period_live). */
     private void assertPeriodFree(Organisation org, Integer year, Integer month, UUID selfId) {
         if (year == null || month == null) return;
