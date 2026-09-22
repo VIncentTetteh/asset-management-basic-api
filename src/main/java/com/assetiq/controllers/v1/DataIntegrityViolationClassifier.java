@@ -62,6 +62,7 @@ final class DataIntegrityViolationClassifier {
             Map.entry("uq_employee_org_user", "userId"),
             // organisation
             Map.entry("organisation_name_key", "name"),
+            Map.entry("uq_organisation_name_live", "name"),
             Map.entry("organisation_registration_number_key", "registrationNumber"),
             Map.entry("organisation_tax_id_key", "taxId"),
             Map.entry("organisation_contact_email_key", "contactEmail"),

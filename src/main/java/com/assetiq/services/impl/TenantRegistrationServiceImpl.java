@@ -1,5 +1,7 @@
 package com.assetiq.services.impl;
 
+import com.assetiq.exceptions.DuplicateFieldException;
+
 import com.assetiq.dto.TenantRegisterRequest;
 import com.assetiq.dto.TenantRegisterResponse;
 import com.assetiq.enums.Permission;
@@ -71,8 +73,9 @@ public class TenantRegistrationServiceImpl implements TenantRegistrationService 
     @Transactional
     public TenantRegisterResponse registerTenant(TenantRegisterRequest request) {
         // Basic validations
-        if (organisationRepository.existsByNameIgnoreCaseAndDeletedAtIsNull(request.getOrganisationName())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Organisation name already exists");
+        String organisationName = request.getOrganisationName().trim();
+        if (organisationRepository.existsByNameIgnoreCaseAndDeletedAtIsNull(organisationName)) {
+            throw new DuplicateFieldException("organisationName", "Organisation name already exists");
         }
 
         // The same person may administer several tenants, so an email already used
@@ -84,15 +87,15 @@ public class TenantRegistrationServiceImpl implements TenantRegistrationService 
 
         // Create organisation
         Organisation org = new Organisation();
-        org.setName(request.getOrganisationName());
-        org.setContactEmail(request.getOrganisationContactEmail());
-        org.setCountry(request.getCountry());
-        org.setAddress(request.getAddress());
-        org.setTimezone(request.getTimezone());
-        org.setIndustry(request.getIndustry());
-        org.setRegistrationNumber(request.getRegistrationNumber());
-        org.setTaxId(request.getTaxId());
-        org.setContactPhone(request.getContactPhone());
+        org.setName(organisationName);
+        org.setContactEmail(OrganisationServiceImpl.blankToNull(request.getOrganisationContactEmail()));
+        org.setCountry(OrganisationServiceImpl.blankToNull(request.getCountry()));
+        org.setAddress(OrganisationServiceImpl.blankToNull(request.getAddress()));
+        org.setTimezone(OrganisationServiceImpl.blankToNull(request.getTimezone()));
+        org.setIndustry(OrganisationServiceImpl.blankToNull(request.getIndustry()));
+        org.setRegistrationNumber(OrganisationServiceImpl.blankToNull(request.getRegistrationNumber()));
+        org.setTaxId(OrganisationServiceImpl.blankToNull(request.getTaxId()));
+        org.setContactPhone(OrganisationServiceImpl.blankToNull(request.getContactPhone()));
         org.setCreatedBy(request.getAdminEmail()); // Manually set for ownership filtering
 
         // P1-12: Infer the billing currency from the registered country so every

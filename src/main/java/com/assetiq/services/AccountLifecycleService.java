@@ -130,6 +130,12 @@ public class AccountLifecycleService {
         if (org == null || org.getDeletedAt() == null) {
             return false;
         }
+        // Organisation names are unique among live tenants only (V52), so the name
+        // may have been taken while this one was closed.
+        if (organisationRepository.existsByNameIgnoreCaseAndDeletedAtIsNull(org.getName())) {
+            throw new IllegalStateException("Another organisation now uses the name '" + org.getName()
+                    + "'. Rename one of them before restoring this account.");
+        }
         org.setDeletedAt(null);
         org.setPurgeAfter(null);
         organisationRepository.save(org);

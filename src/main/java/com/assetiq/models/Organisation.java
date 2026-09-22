@@ -15,7 +15,8 @@ import java.util.Set;
 @EqualsAndHashCode(callSuper = true, onlyExplicitlyIncluded = true)
 public class Organisation extends BaseEntity {
 
-    @Column(nullable = false, unique = true)
+    /** Unique case-insensitively among live tenants (V52 partial index), not globally. */
+    @Column(nullable = false)
     private String name;
 
     @Column(unique = true)
@@ -34,7 +35,7 @@ public class Organisation extends BaseEntity {
     @Column(columnDefinition = "TEXT")
     private String address;
 
-    @Column(unique = true)
+    /** Not unique: several tenants may share a contact mailbox (V52). */
     private String contactEmail;
 
     private String contactPhone;

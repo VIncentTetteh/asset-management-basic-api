@@ -1,5 +1,7 @@
 package com.assetiq.services.impl;
 
+import com.assetiq.exceptions.DuplicateFieldException;
+
 import com.assetiq.dto.OrganisationDto;
 import com.assetiq.models.Organisation;
 import com.assetiq.multitenancy.TenantContext;
@@ -39,28 +41,20 @@ public class OrganisationServiceImpl implements OrganisationService {
         String name = dto.getName().trim();
 
         if (organisationRepository.existsByNameIgnoreCaseAndDeletedAtIsNull(name)) {
-            throw new IllegalStateException("Organisation with the same name already exists");
+            throw new DuplicateFieldException("name", "Organisation with the same name already exists");
         }
 
         Organisation organisation = new Organisation();
         organisation.setName(name); // always use trimmed value
 
-        if (dto.getRegistrationNumber() != null)
-            organisation.setRegistrationNumber(dto.getRegistrationNumber());
-        if (dto.getTaxId() != null)
-            organisation.setTaxId(dto.getTaxId());
-        if (dto.getIndustry() != null)
-            organisation.setIndustry(dto.getIndustry());
-        if (dto.getCountry() != null)
-            organisation.setCountry(dto.getCountry());
-        if (dto.getAddress() != null)
-            organisation.setAddress(dto.getAddress());
-        if (dto.getContactEmail() != null)
-            organisation.setContactEmail(dto.getContactEmail());
-        if (dto.getContactPhone() != null)
-            organisation.setContactPhone(dto.getContactPhone());
-        if (dto.getTimezone() != null)
-            organisation.setTimezone(dto.getTimezone());
+        organisation.setRegistrationNumber(blankToNull(dto.getRegistrationNumber()));
+        organisation.setTaxId(blankToNull(dto.getTaxId()));
+        organisation.setIndustry(blankToNull(dto.getIndustry()));
+        organisation.setCountry(blankToNull(dto.getCountry()));
+        organisation.setAddress(blankToNull(dto.getAddress()));
+        organisation.setContactEmail(blankToNull(dto.getContactEmail()));
+        organisation.setContactPhone(blankToNull(dto.getContactPhone()));
+        organisation.setTimezone(blankToNull(dto.getTimezone()));
         if (dto.getStatus() != null)
             organisation.setStatus(dto.getStatus());
 
@@ -132,26 +126,29 @@ public class OrganisationServiceImpl implements OrganisationService {
             String name = dto.getName().trim();
             if (!name.equalsIgnoreCase(o.getName())
                     && organisationRepository.existsByNameIgnoreCaseAndDeletedAtIsNull(name)) {
-                throw new IllegalStateException("Organisation with the same name already exists");
+                throw new DuplicateFieldException("name", "Organisation with the same name already exists");
             }
             o.setName(name);
         }
+        // PATCH semantics: null leaves a field unchanged; blank clears it. Cleared
+        // values are stored as NULL, never "": registration number and tax id are
+        // unique, so a second tenant clearing its value to "" collided with the first.
         if (dto.getRegistrationNumber() != null)
-            o.setRegistrationNumber(dto.getRegistrationNumber());
+            o.setRegistrationNumber(blankToNull(dto.getRegistrationNumber()));
         if (dto.getTaxId() != null)
-            o.setTaxId(dto.getTaxId());
+            o.setTaxId(blankToNull(dto.getTaxId()));
         if (dto.getIndustry() != null)
-            o.setIndustry(dto.getIndustry());
+            o.setIndustry(blankToNull(dto.getIndustry()));
         if (dto.getCountry() != null)
-            o.setCountry(dto.getCountry());
+            o.setCountry(blankToNull(dto.getCountry()));
         if (dto.getAddress() != null)
-            o.setAddress(dto.getAddress());
+            o.setAddress(blankToNull(dto.getAddress()));
         if (dto.getContactEmail() != null)
-            o.setContactEmail(dto.getContactEmail());
+            o.setContactEmail(blankToNull(dto.getContactEmail()));
         if (dto.getContactPhone() != null)
-            o.setContactPhone(dto.getContactPhone());
+            o.setContactPhone(blankToNull(dto.getContactPhone()));
         if (dto.getTimezone() != null)
-            o.setTimezone(dto.getTimezone());
+            o.setTimezone(blankToNull(dto.getTimezone()));
         if (dto.getStatus() != null)
             o.setStatus(dto.getStatus());
         if (dto.getBillingCurrency() != null && !dto.getBillingCurrency().isBlank())
@@ -180,6 +177,15 @@ public class OrganisationServiceImpl implements OrganisationService {
 
         o.setDeletedAt(Instant.now());
         organisationRepository.save(o);
+    }
+
+    /** Trimmed value, or null when absent or blank. */
+    static String blankToNull(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 
     private void assertCanManage(Organisation organisation, String action) {
