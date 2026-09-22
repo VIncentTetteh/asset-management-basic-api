@@ -128,6 +128,7 @@ public class LocationServiceImpl extends TenantAwareService implements LocationS
             if (parentLocation.getId().equals(id)) {
                 throw new IllegalArgumentException("A location cannot be its own parent");
             }
+            assertNotDescendant(parentLocation, id);
 
             location.setParentLocation(parentLocation);
         } else {
@@ -185,6 +186,7 @@ public class LocationServiceImpl extends TenantAwareService implements LocationS
             if (parentLocation.getId().equals(id)) {
                 throw new IllegalArgumentException("A location cannot be its own parent");
             }
+            assertNotDescendant(parentLocation, id);
             location.setParentLocation(parentLocation);
         }
 
@@ -197,8 +199,27 @@ public class LocationServiceImpl extends TenantAwareService implements LocationS
         Organisation org = requireTenantOrg();
         Location location = locationRepository.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
                 .orElseThrow(() -> new IllegalArgumentException("Location not found"));
+        if (!locationRepository.findByParentLocationIdAndDeletedAtIsNull(id).isEmpty()) {
+            throw new IllegalStateException("'" + location.getName()
+                    + "' has sub-locations; move or delete them first");
+        }
         location.setDeletedAt(Instant.now());
         locationRepository.save(location);
+    }
+
+    /**
+     * Refuses a parent that sits below the location being edited: only the direct
+     * self-reference was checked, so A -> B -> A cycles could be saved and broke
+     * every tree walk over locations.
+     */
+    static void assertNotDescendant(Location proposedParent, UUID selfId) {
+        java.util.Set<UUID> seen = new java.util.HashSet<>();
+        for (Location cursor = proposedParent; cursor != null; cursor = cursor.getParentLocation()) {
+            if (selfId.equals(cursor.getId())) {
+                throw new IllegalArgumentException("A location cannot be placed under one of its own sub-locations");
+            }
+            if (!seen.add(cursor.getId())) return; // existing cycle; stop walking
+        }
     }
 
     private LocationDto mapToDto(Location location) {
