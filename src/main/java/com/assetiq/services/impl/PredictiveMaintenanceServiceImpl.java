@@ -113,9 +113,7 @@ public class PredictiveMaintenanceServiceImpl extends TenantAwareService impleme
                 .filter(r -> r.getPerformedDate() != null && r.getPerformedDate().isAfter(cutoff))
                 .count();
 
-        // DAMAGED or SCRAP maps to the old "POOR/CRITICAL" concept
-        boolean badCondition = AssetCondition.DAMAGED.equals(asset.getCondition())
-                || AssetCondition.SCRAP.equals(asset.getCondition());
+        boolean badCondition = isBadCondition(asset.getCondition());
 
         if (recentCount < 3 && !badCondition) return Collections.emptyList();
 
@@ -133,6 +131,12 @@ public class PredictiveMaintenanceServiceImpl extends TenantAwareService impleme
     }
 
     // ── Rule 3: Warranty Expiry ───────────────────────────────────────────────
+
+    /** POOR, DAMAGED and SCRAP all indicate failure risk (POOR is a valid condition since it was added to the enum). */
+    static boolean isBadCondition(AssetCondition condition) {
+        return condition == AssetCondition.POOR || condition == AssetCondition.DAMAGED
+                || condition == AssetCondition.SCRAP;
+    }
 
     private List<PredictiveInsight> checkWarrantyExpiry(Asset asset, Organisation org) {
         if (asset.getWarrantyExpiryDate() == null) return Collections.emptyList();
