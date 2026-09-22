@@ -21,11 +21,19 @@ public class AssetAuditDto {
     /** Optional: null scopes the audit to the whole organisation. */
     private UUID departmentId;
 
+    /** The department's name (read-only); null for an organisation-wide audit. */
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private String departmentName;
+
     @NotNull(message = "Audit date is required")
     private LocalDate auditDate;
 
     /** Optional on create: defaults to the current user. */
     private UUID conductedById;
+
+    /** The auditor's display name (read-only). */
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private String conductedByName;
 
     /** Initial status on create (PLANNED when omitted); changed later via PATCH /status. */
     private AuditStatus status;

@@ -2,12 +2,14 @@ package com.assetiq.services.impl;
 
 import com.assetiq.dto.AssetAuditDto;
 import com.assetiq.enums.AuditStatus;
+import com.assetiq.enums.UserStatus;
 import com.assetiq.models.AssetAudit;
 import com.assetiq.models.Organisation;
 import com.assetiq.models.Department;
 import com.assetiq.models.User;
 import com.assetiq.repositories.*;
 import com.assetiq.services.AuditService;
+import com.assetiq.services.UserDisplayNames;
 import com.assetiq.services.TenantAwareService;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
@@ -50,8 +52,7 @@ public class AuditServiceImpl extends TenantAwareService implements AuditService
                         .orElseThrow(() -> new IllegalArgumentException("Department not found in your organisation"));
 
         User conductor = auditDto.getConductedById() != null
-                ? userRepository.findByIdAndOrganisation(auditDto.getConductedById(), org)
-                        .orElseThrow(() -> new IllegalArgumentException("Conductor not found in your organisation"))
+                ? requireActiveConductor(auditDto.getConductedById(), org)
                 : currentUser(org);
 
         AssetAudit audit = new AssetAudit();
@@ -137,6 +138,52 @@ public class AuditServiceImpl extends TenantAwareService implements AuditService
         return mapToDto(auditRepository.save(audit));
     }
 
+    @Override
+    public AssetAuditDto updateAuditRemarks(UUID auditId, String remarks) {
+        Organisation org = requireTenantOrg();
+        AssetAudit audit = auditRepository.findByIdAndOrganisationAndDeletedAtIsNull(auditId, org)
+                .orElseThrow(() -> new IllegalArgumentException("Audit not found"));
+        AuditStatus current = audit.getStatus() != null ? audit.getStatus() : AuditStatus.PLANNED;
+        if (current == AuditStatus.COMPLETED || current == AuditStatus.CANCELLED) {
+            throw new IllegalStateException("A " + current + " audit is a final record; its remarks cannot change");
+        }
+        audit.setRemarks(remarks == null || remarks.isBlank() ? null : remarks.trim());
+        return mapToDto(auditRepository.save(audit));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public java.util.List<AssetAuditDto> searchAudits(UUID departmentId, LocalDate startDate, LocalDate endDate,
+                                                      UUID conductedById, AuditStatus status) {
+        Organisation org = requireTenantOrg();
+        return auditRepository.findByOrganisationAndDeletedAtIsNull(org).stream()
+                .filter(a -> departmentId == null
+                        || (a.getDepartment() != null && departmentId.equals(a.getDepartment().getId())))
+                .filter(a -> startDate == null || !a.getAuditDate().isBefore(startDate))
+                .filter(a -> endDate == null || !a.getAuditDate().isAfter(endDate))
+                .filter(a -> conductedById == null || conductedById.equals(a.getConductedBy().getId()))
+                .filter(a -> status == null || effectiveStatus(a) == status)
+                .sorted(java.util.Comparator.comparing(AssetAudit::getAuditDate,
+                        java.util.Comparator.nullsLast(java.util.Comparator.reverseOrder())))
+                .map(this::mapToDto)
+                .toList();
+    }
+
+    /** Legacy rows can have no status (backfilled by V47); they read as PLANNED. */
+    private static AuditStatus effectiveStatus(AssetAudit audit) {
+        return audit.getStatus() != null ? audit.getStatus() : AuditStatus.PLANNED;
+    }
+
+    /** An explicitly named auditor must be a live, active account in the organisation. */
+    private User requireActiveConductor(UUID userId, Organisation org) {
+        User user = userRepository.findByIdAndOrganisation(userId, org)
+                .orElseThrow(() -> new IllegalArgumentException("Conductor not found in your organisation"));
+        if (user.getDeletedAt() != null || user.getStatus() != UserStatus.ACTIVE) {
+            throw new IllegalArgumentException("The auditor must be an active user");
+        }
+        return user;
+    }
+
     /**
      * Allowed audit status changes. COMPLETED and CANCELLED are final (a completed
      * audit is a compliance record); a discrepancy must be RESOLVED (or the count
@@ -188,11 +235,12 @@ public class AuditServiceImpl extends TenantAwareService implements AuditService
         dto.setOrganisationId(audit.getOrganisation().getId());
         if (audit.getDepartment() != null) {
             dto.setDepartmentId(audit.getDepartment().getId());
+            dto.setDepartmentName(audit.getDepartment().getName());
         }
         dto.setAuditDate(audit.getAuditDate());
         dto.setConductedById(audit.getConductedBy().getId());
-        // Legacy rows can have no status (backfilled by V47); read them as PLANNED.
-        dto.setStatus(audit.getStatus() != null ? audit.getStatus() : AuditStatus.PLANNED);
+        dto.setConductedByName(UserDisplayNames.of(audit.getConductedBy()));
+        dto.setStatus(effectiveStatus(audit));
         dto.setRemarks(audit.getRemarks());
         return dto;
     }

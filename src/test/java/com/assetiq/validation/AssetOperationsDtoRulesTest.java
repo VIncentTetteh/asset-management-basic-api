@@ -1,5 +1,6 @@
 package com.assetiq.validation;
 
+import com.assetiq.dto.AuditRemarksRequest;
 import com.assetiq.dto.DisposalRecordDto;
 import com.assetiq.dto.DisposalRejectRequest;
 import com.assetiq.dto.LocationDto;
@@ -88,5 +89,12 @@ class AssetOperationsDtoRulesTest {
 
         assertThat(invalidFields(new DisposalRejectRequest(" "))).containsExactly("reason");
         assertThat(invalidFields(new DisposalRejectRequest("Still under warranty"))).isEmpty();
+    }
+
+    @Test
+    void auditRemarksAreCappedAt5000() {
+        assertThat(invalidFields(new AuditRemarksRequest("x".repeat(5000)))).isEmpty();
+        assertThat(invalidFields(new AuditRemarksRequest("x".repeat(5001)))).containsExactly("remarks");
+        assertThat(invalidFields(new AuditRemarksRequest(null))).isEmpty();
     }
 }

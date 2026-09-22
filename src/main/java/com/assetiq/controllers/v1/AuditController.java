@@ -1,6 +1,8 @@
 package com.assetiq.controllers.v1;
 
 import com.assetiq.dto.AssetAuditDto;
+import com.assetiq.dto.AuditRemarksRequest;
+import com.assetiq.enums.AuditStatus;
 import com.assetiq.services.AuditService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -9,7 +11,7 @@ import org.springframework.web.bind.annotation.*;
 
 import jakarta.validation.Valid;
 import java.time.LocalDate;
-import java.util.Set;
+import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -36,23 +38,28 @@ public class AuditController {
         return ResponseEntity.ok(audit);
     }
 
+    /**
+     * The organisation's audits, newest first. Every filter is optional and they
+     * combine (AND): department, audit-date range (either end may be open),
+     * auditor and status.
+     */
     @GetMapping
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','VIEW_AUDIT_LOGS')")
-    public ResponseEntity<Set<AssetAuditDto>> getAudits(
+    public ResponseEntity<List<AssetAuditDto>> getAudits(
             @RequestParam(required = false) UUID departmentId,
             @RequestParam(required = false) LocalDate startDate,
             @RequestParam(required = false) LocalDate endDate,
-            @RequestParam(required = false) UUID conductedById) {
+            @RequestParam(required = false) UUID conductedById,
+            @RequestParam(required = false) AuditStatus status) {
+        return ResponseEntity.ok(auditService.searchAudits(departmentId, startDate, endDate, conductedById, status));
+    }
 
-        if (departmentId != null) {
-            return ResponseEntity.ok(auditService.getAuditsByDepartment(departmentId));
-        } else if (startDate != null && endDate != null) {
-            return ResponseEntity.ok(auditService.getAuditsByDateRange(startDate, endDate));
-        } else if (conductedById != null) {
-            return ResponseEntity.ok(auditService.getAuditsByConductor(conductedById));
-        }
-        // H8: No filter → return all for this tenant org
-        return ResponseEntity.ok(auditService.getAuditsByOrganisation(null));
+    /** Updates an open audit's remarks (status changes go through PATCH /status). */
+    @PatchMapping("/{id}")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','CONDUCT_AUDIT')")
+    public ResponseEntity<AssetAuditDto> updateAuditRemarks(@PathVariable UUID id,
+            @Valid @RequestBody AuditRemarksRequest request) {
+        return ResponseEntity.ok(auditService.updateAuditRemarks(id, request.remarks()));
     }
 
     @PatchMapping("/{id}/status")

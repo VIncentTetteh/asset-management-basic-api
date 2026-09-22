@@ -1,5 +1,7 @@
 package com.assetiq.services.impl;
 
+import java.util.Set;
+import com.assetiq.models.Department;
 import com.assetiq.dto.AssetAuditDto;
 import com.assetiq.enums.AuditStatus;
 import com.assetiq.models.AssetAudit;
@@ -140,5 +142,65 @@ class AuditServiceImplTest {
     void aLegacyAuditWithoutStatusReadsAsPlanned() {
         AssetAudit legacy = audit(null);
         assertThat(service.getAuditById(legacy.getId()).getStatus()).isEqualTo(AuditStatus.PLANNED);
+    }
+
+    private AssetAudit audit(AuditStatus status, LocalDate date, Department dept) {
+        AssetAudit a = new AssetAudit();
+        a.setId(UUID.randomUUID());
+        a.setOrganisation(org);
+        a.setConductedBy(me);
+        a.setAuditDate(date);
+        a.setStatus(status);
+        a.setDepartment(dept);
+        when(auditRepository.findByIdAndOrganisationAndDeletedAtIsNull(a.getId(), org)).thenReturn(Optional.of(a));
+        return a;
+    }
+
+    @Test
+    void remarksCanBeEditedOnAnOpenAuditOnly() {
+        AssetAudit open = audit(AuditStatus.IN_PROGRESS, LocalDate.of(2026, 10, 1), null);
+        assertThat(service.updateAuditRemarks(open.getId(), "  Two laptops missing ").getRemarks())
+                .isEqualTo("Two laptops missing");
+        assertThat(service.updateAuditRemarks(open.getId(), " ").getRemarks()).isNull();
+
+        AssetAudit done = audit(AuditStatus.COMPLETED, LocalDate.of(2026, 10, 1), null);
+        assertThatThrownBy(() -> service.updateAuditRemarks(done.getId(), "late note"))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void anInactiveAuditorIsRefused() {
+        User left = new User();
+        left.setId(UUID.randomUUID());
+        left.setStatus(com.assetiq.enums.UserStatus.INACTIVE);
+        when(userRepository.findByIdAndOrganisation(left.getId(), org)).thenReturn(Optional.of(left));
+        AssetAuditDto dto = new AssetAuditDto();
+        dto.setAuditDate(LocalDate.of(2026, 10, 1));
+        dto.setConductedById(left.getId());
+
+        assertThatThrownBy(() -> service.createAudit(dto))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("active");
+    }
+
+    @Test
+    void searchCombinesFiltersAndNamesTheDepartment() {
+        Department it = new Department();
+        it.setId(UUID.randomUUID());
+        it.setName("IT");
+        AssetAudit itOpen = audit(AuditStatus.DISCREPANCY_FOUND, LocalDate.of(2026, 3, 1), it);
+        AssetAudit itDone = audit(AuditStatus.COMPLETED, LocalDate.of(2026, 3, 2), it);
+        AssetAudit orgWide = audit(AuditStatus.DISCREPANCY_FOUND, LocalDate.of(2026, 3, 3), null);
+        when(auditRepository.findByOrganisationAndDeletedAtIsNull(org)).thenReturn(Set.of(itOpen, itDone, orgWide));
+
+        var found = service.searchAudits(it.getId(), null, null, null, AuditStatus.DISCREPANCY_FOUND);
+
+        assertThat(found).singleElement().satisfies(a -> {
+            assertThat(a.getId()).isEqualTo(itOpen.getId());
+            assertThat(a.getDepartmentName()).isEqualTo("IT");
+            assertThat(a.getConductedByName()).isEqualTo("auditor@example.com");
+        });
+        assertThat(service.searchAudits(null, LocalDate.of(2026, 3, 2), null, null, null))
+                .extracting(AssetAuditDto::getId).containsExactly(orgWide.getId(), itDone.getId());
     }
 }
