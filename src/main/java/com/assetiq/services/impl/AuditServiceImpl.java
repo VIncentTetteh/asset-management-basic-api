@@ -59,7 +59,7 @@ public class AuditServiceImpl extends TenantAwareService implements AuditService
         audit.setDepartment(department);
         audit.setAuditDate(auditDto.getAuditDate());
         audit.setConductedBy(conductor);
-        audit.setStatus(auditDto.getStatus() != null ? auditDto.getStatus() : AuditStatus.PLANNED);
+        audit.setStatus(initialStatus(auditDto.getStatus()));
         audit.setRemarks(auditDto.getRemarks());
 
         return mapToDto(auditRepository.save(audit));
@@ -142,6 +142,21 @@ public class AuditServiceImpl extends TenantAwareService implements AuditService
      * audit is a compliance record); a discrepancy must be RESOLVED (or the count
      * resumed) before the audit can be completed.
      */
+    /** Statuses an audit may be created in; later states are reached through transitions. */
+    static final Set<AuditStatus> CREATABLE = EnumSet.of(AuditStatus.PLANNED, AuditStatus.IN_PROGRESS);
+
+    /**
+     * A new audit starts PLANNED or IN_PROGRESS. Creating one as COMPLETED or
+     * RESOLVED skipped the audit itself.
+     */
+    static AuditStatus initialStatus(AuditStatus requested) {
+        if (requested == null) return AuditStatus.PLANNED;
+        if (!CREATABLE.contains(requested)) {
+            throw new IllegalArgumentException("A new audit must start as PLANNED or IN_PROGRESS, not " + requested);
+        }
+        return requested;
+    }
+
     static final Map<AuditStatus, Set<AuditStatus>> TRANSITIONS = Map.of(
             AuditStatus.PLANNED, EnumSet.of(AuditStatus.IN_PROGRESS, AuditStatus.COMPLETED,
                     AuditStatus.DISCREPANCY_FOUND, AuditStatus.CANCELLED),
@@ -176,7 +191,8 @@ public class AuditServiceImpl extends TenantAwareService implements AuditService
         }
         dto.setAuditDate(audit.getAuditDate());
         dto.setConductedById(audit.getConductedBy().getId());
-        dto.setStatus(audit.getStatus());
+        // Legacy rows can have no status (backfilled by V47); read them as PLANNED.
+        dto.setStatus(audit.getStatus() != null ? audit.getStatus() : AuditStatus.PLANNED);
         dto.setRemarks(audit.getRemarks());
         return dto;
     }

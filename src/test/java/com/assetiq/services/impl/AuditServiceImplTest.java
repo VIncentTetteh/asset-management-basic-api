@@ -116,4 +116,29 @@ class AuditServiceImplTest {
         assertThatThrownBy(() -> service.updateAuditStatus(a.getId(), "DONE"))
                 .isInstanceOf(IllegalArgumentException.class);
     }
+
+    @Test
+    void anAuditIsCreatedOnlyAsPlannedOrInProgress() {
+        for (AuditStatus ok : List.of(AuditStatus.PLANNED, AuditStatus.IN_PROGRESS)) {
+            AssetAuditDto dto = new AssetAuditDto();
+            dto.setAuditDate(LocalDate.of(2026, 10, 1));
+            dto.setStatus(ok);
+            assertThat(service.createAudit(dto).getStatus()).isEqualTo(ok);
+        }
+        for (AuditStatus refused : List.of(AuditStatus.COMPLETED, AuditStatus.RESOLVED,
+                AuditStatus.DISCREPANCY_FOUND, AuditStatus.CANCELLED)) {
+            AssetAuditDto dto = new AssetAuditDto();
+            dto.setAuditDate(LocalDate.of(2026, 10, 1));
+            dto.setStatus(refused);
+            assertThatThrownBy(() -> service.createAudit(dto))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("PLANNED or IN_PROGRESS");
+        }
+    }
+
+    @Test
+    void aLegacyAuditWithoutStatusReadsAsPlanned() {
+        AssetAudit legacy = audit(null);
+        assertThat(service.getAuditById(legacy.getId()).getStatus()).isEqualTo(AuditStatus.PLANNED);
+    }
 }
