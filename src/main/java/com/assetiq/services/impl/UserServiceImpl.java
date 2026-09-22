@@ -312,6 +312,9 @@ public class UserServiceImpl extends TenantAwareService implements UserService {
         User user = userRepository.findByIdAndOrganisation(id, org)
                 .orElseThrow(() -> new IllegalArgumentException("User not found in your organisation"));
         if (user.getStatus() != UserStatus.ACTIVE) {
+            // Reactivation takes a seat back, so it answers to the plan limit the
+            // same way creating a user does; it used to skip the check entirely.
+            usageLimitService.assertCanActivateUser(org);
             user.setStatus(UserStatus.ACTIVE);
             userRepository.save(user);
         }

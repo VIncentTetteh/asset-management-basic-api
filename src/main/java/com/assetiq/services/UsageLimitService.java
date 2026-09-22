@@ -8,6 +8,15 @@ public interface UsageLimitService {
 
     void assertCanCreateEmployee(Organisation organisation);
 
+    /**
+     * Refuses reactivating a user when every seat the plan allows is already taken
+     * by an active user. Reactivation used to skip the plan check entirely, so a
+     * tenant could deactivate, downgrade, and reactivate its way past the limit.
+     *
+     * @throws org.springframework.security.access.AccessDeniedException when no seat is free
+     */
+    void assertCanActivateUser(Organisation organisation);
+
     void assertAdvancedAnalyticsAccess(Organisation organisation);
 
     /**

@@ -102,6 +102,23 @@ public class UsageLimitServiceImpl implements UsageLimitService {
     }
 
     @Override
+    public void assertCanActivateUser(Organisation organisation) {
+        // A seat is an active user: deactivating frees one, reactivating takes one.
+        long activeSeats = userRepository.countByOrganisationAndStatusAndDeletedAtIsNull(
+                organisation, com.assetiq.enums.UserStatus.ACTIVE);
+        if (licenseLimits.isPresent()) {
+            licenseLimits.get().assertCanCreateUser(activeSeats);
+            return;
+        }
+        SubscriptionPlan plan = resolveEffectivePlan(organisation);
+        if (activeSeats >= plan.getMaxEmployees()) {
+            throw new AccessDeniedException(
+                    "All " + plan.getMaxEmployees() + " seats on your current plan are in use. "
+                            + "Deactivate another user or upgrade your subscription.");
+        }
+    }
+
+    @Override
     public void assertAdvancedAnalyticsAccess(Organisation organisation) {
         if (licenseLimits.isPresent()) {
             // Standalone mode: check feature flag from license payload

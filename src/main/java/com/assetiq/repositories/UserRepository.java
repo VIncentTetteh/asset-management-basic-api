@@ -94,6 +94,9 @@ public interface UserRepository extends JpaRepository<User, UUID> {
 
     long countByOrganisationAndDeletedAtIsNull(Organisation organisation);
 
+    /** Seats actually in use: a deactivated user holds none. */
+    long countByOrganisationAndStatusAndDeletedAtIsNull(Organisation organisation, com.assetiq.enums.UserStatus status);
+
     Optional<User> findByEmployeeId(String userEmployeeId);
 
     List<User> findByOrganisationAndRole_NameContainingIgnoreCaseAndDeletedAtIsNull(Organisation org, String roleName);

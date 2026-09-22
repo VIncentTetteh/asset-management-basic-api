@@ -172,6 +172,27 @@ class UserServiceImplSecurityTest {
     }
 
     @Test
+    void reactivationIsRefusedWhenEveryPlanSeatIsTaken() {
+        target.setStatus(UserStatus.INACTIVE);
+        actAs("boss@example.com", "ROLE_ADMIN");
+        Mockito.doThrow(new AccessDeniedException("All 5 seats on your current plan are in use."))
+                .when(usageLimitService).assertCanActivateUser(org);
+
+        assertThatThrownBy(() -> service.activateUser(target.getId()))
+                .isInstanceOf(AccessDeniedException.class);
+        assertThat(target.getStatus()).isEqualTo(UserStatus.INACTIVE);
+    }
+
+    @Test
+    void reactivatingAnAlreadyActiveUserDoesNotConsumeASeat() {
+        actAs("boss@example.com", "ROLE_ADMIN");
+
+        service.activateUser(target.getId());
+
+        Mockito.verify(usageLimitService, Mockito.never()).assertCanActivateUser(org);
+    }
+
+    @Test
     void putClearsTheDepartmentAndCreateNeedsAPassword() {
         actAs("boss@example.com", "ROLE_ADMIN");
         target.setDepartment(new com.assetiq.models.Department());
