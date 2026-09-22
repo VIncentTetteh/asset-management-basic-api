@@ -285,6 +285,11 @@ app:
 
   # ── Multi-cloud asset discovery ──────────────────────────────────────────
   cloud:
+    sync:
+      # Provider sync uses THIS server's cloud credentials. Keep it off on the
+      # hosted multi-tenant service (it would expose the platform's own account);
+      # enable only on a single-customer / standalone deployment.
+      enabled: ${APP_CLOUD_SYNC_ENABLED:false}
     azure:
       # Azure AD tenant (directory) ID
       tenant-id: ${AZURE_TENANT_ID:}

@@ -119,9 +119,20 @@ public class CloudAssetController {
     @PostMapping("/{id}/cost")
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_CLOUD_ASSETS')")
     public ResponseEntity<Void> recordCost(@PathVariable UUID id, @RequestBody Map<String, Object> body) {
-        String billingMonth = (String) body.get("billingMonth");
-        BigDecimal amount = new BigDecimal(body.get("amount").toString());
-        String serviceName = (String) body.getOrDefault("serviceName", null);
+        Object rawMonth = body.get("billingMonth");
+        Object rawAmount = body.get("amount");
+        if (rawMonth == null || rawAmount == null) {
+            throw new IllegalArgumentException("billingMonth and amount are required");
+        }
+        BigDecimal amount;
+        try {
+            amount = new BigDecimal(rawAmount.toString());
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("amount must be a number");
+        }
+        String billingMonth = rawMonth.toString();
+        Object rawService = body.get("serviceName");
+        String serviceName = rawService == null ? null : rawService.toString();
         cloudAssetService.recordMonthlyCost(id, billingMonth, amount, serviceName);
         return ResponseEntity.noContent().build();
     }

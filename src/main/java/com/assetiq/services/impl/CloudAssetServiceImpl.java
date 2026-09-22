@@ -45,6 +45,20 @@ public class CloudAssetServiceImpl extends TenantAwareService implements CloudAs
 
     private static final int TOP_ASSET_COUNT = 5;
 
+    /**
+     * Provider sync reads inventory with the <em>server's</em> cloud credentials
+     * (instance role / env / service account), not the tenant's. On the hosted
+     * multi-tenant service that is the platform's own account, so any tenant
+     * admin could import the platform's infrastructure into their tenant. Off
+     * unless a single-customer (standalone) deployment turns it on.
+     */
+    @org.springframework.beans.factory.annotation.Value("${app.cloud.sync.enabled:false}")
+    private boolean syncEnabled;
+
+    void setSyncEnabled(boolean syncEnabled) {
+        this.syncEnabled = syncEnabled;
+    }
+
     public CloudAssetServiceImpl(OrganisationRepository organisationRepository,
                                  CloudAssetRepository cloudAssetRepo,
                                  CloudCostRecordRepository costRepo,
@@ -93,7 +107,7 @@ public class CloudAssetServiceImpl extends TenantAwareService implements CloudAs
     public CloudAssetDto getById(UUID id) {
         Organisation org = requireTenantOrg();
         CloudAsset asset = cloudAssetRepo.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
-                .orElseThrow(() -> new NoSuchElementException("Cloud asset not found: " + id));
+                .orElseThrow(() -> new jakarta.persistence.EntityNotFoundException("Cloud asset not found: " + id));
         return toDto(asset);
     }
 
@@ -101,7 +115,7 @@ public class CloudAssetServiceImpl extends TenantAwareService implements CloudAs
     public CloudAssetDto update(UUID id, CloudAssetDto dto) {
         Organisation org = requireTenantOrg();
         CloudAsset asset = cloudAssetRepo.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
-                .orElseThrow(() -> new NoSuchElementException("Cloud asset not found: " + id));
+                .orElseThrow(() -> new jakarta.persistence.EntityNotFoundException("Cloud asset not found: " + id));
         mapToEntity(dto, asset, org);
         asset.setLastSyncAt(Instant.now());
         return toDto(cloudAssetRepo.save(asset));
@@ -111,7 +125,7 @@ public class CloudAssetServiceImpl extends TenantAwareService implements CloudAs
     public void delete(UUID id) {
         Organisation org = requireTenantOrg();
         CloudAsset asset = cloudAssetRepo.findByIdAndOrganisationAndDeletedAtIsNull(id, org)
-                .orElseThrow(() -> new NoSuchElementException("Cloud asset not found: " + id));
+                .orElseThrow(() -> new jakarta.persistence.EntityNotFoundException("Cloud asset not found: " + id));
         asset.setDeletedAt(Instant.now());
         cloudAssetRepo.save(asset);
     }
@@ -179,8 +193,14 @@ public class CloudAssetServiceImpl extends TenantAwareService implements CloudAs
     public void recordMonthlyCost(UUID assetId, String billingMonth, BigDecimal amount, String serviceName) {
         Organisation org = requireTenantOrg();
         CloudAsset asset = cloudAssetRepo.findByIdAndOrganisationAndDeletedAtIsNull(assetId, org)
-                .orElseThrow(() -> new NoSuchElementException("Cloud asset not found: " + assetId));
+                .orElseThrow(() -> new jakarta.persistence.EntityNotFoundException("Cloud asset not found: " + assetId));
 
+        if (billingMonth == null || !billingMonth.matches("\\d{4}-(0[1-9]|1[0-2])")) {
+            throw new IllegalArgumentException("billingMonth must be YYYY-MM");
+        }
+        if (amount == null || amount.signum() < 0) {
+            throw new IllegalArgumentException("amount must be zero or more");
+        }
         LocalDate month = LocalDate.parse(billingMonth + "-01");
 
         CloudCostRecord record = new CloudCostRecord();
@@ -197,6 +217,7 @@ public class CloudAssetServiceImpl extends TenantAwareService implements CloudAs
 
     @Override
     public int syncFromCloud(CloudProvider provider, List<String> regions) {
+        requireSyncEnabled();
         Organisation org = requireTenantOrg();
         int upserted = cloudSyncDispatcher.syncProvider(provider, org, regions);
         log.info("[CloudSync] syncFromCloud({}) complete for org {} — {} asset(s) upserted",
@@ -206,6 +227,7 @@ public class CloudAssetServiceImpl extends TenantAwareService implements CloudAs
 
     @Override
     public int syncAll(List<String> regions) {
+        requireSyncEnabled();
         Organisation org = requireTenantOrg();
         int upserted = cloudSyncDispatcher.syncAll(org, regions);
         log.info("[CloudSync] syncAll complete for org {} — {} total asset(s) upserted",
@@ -214,6 +236,12 @@ public class CloudAssetServiceImpl extends TenantAwareService implements CloudAs
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────────
+
+    private void requireSyncEnabled() {
+        if (!syncEnabled) {
+            throw new com.assetiq.services.FeatureDisabledException("cloud-sync", true);
+        }
+    }
 
     private void mapToEntity(CloudAssetDto dto, CloudAsset entity, Organisation org) {
         entity.setName(dto.getName());
