@@ -1,6 +1,7 @@
 package com.assetiq.controllers.v1;
 
 import com.assetiq.dto.OrganisationDto;
+import com.assetiq.security.PlatformAdminGuard;
 import com.assetiq.services.OrganisationService;
 import com.assetiq.validation.OnCreate;
 import org.springframework.http.ResponseEntity;
@@ -17,14 +18,27 @@ import java.util.UUID;
 public class OrganisationController {
 
     private final OrganisationService organisationService;
+    private final PlatformAdminGuard platformAdminGuard;
 
-    public OrganisationController(OrganisationService organisationService) {
+    public OrganisationController(OrganisationService organisationService,
+                                  PlatformAdminGuard platformAdminGuard) {
         this.organisationService = organisationService;
+        this.platformAdminGuard = platformAdminGuard;
     }
 
+    /**
+     * Creates a tenant. Operators only: any tenant admin used to be able to POST
+     * here and stand up an organisation nobody was billing for. Customers sign
+     * themselves up through /tenant/register, which goes through the plan and
+     * the billing record. Invisible (404) to everyone else, like the other
+     * platform operations.
+     */
     @PostMapping
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_ORGANIZATION_SETTINGS')")
+    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<OrganisationDto> create(@Validated(OnCreate.class) @RequestBody OrganisationDto dto) {
+        if (!platformAdminGuard.isPlatformAdmin()) {
+            return ResponseEntity.notFound().build();
+        }
         return ResponseEntity.ok(organisationService.create(dto));
     }
 

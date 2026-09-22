@@ -18,6 +18,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -27,13 +28,44 @@ class OrganisationControllerTest {
     @Mock
     private OrganisationService organisationService;
 
+    @Mock
+    private com.assetiq.security.PlatformAdminGuard platformAdminGuard;
+
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
-        mockMvc = MockMvcBuilders.standaloneSetup(new OrganisationController(organisationService))
+        mockMvc = MockMvcBuilders.standaloneSetup(new OrganisationController(organisationService, platformAdminGuard))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
+    }
+
+    @Test
+    void create_isInvisibleToATenantAdmin() throws Exception {
+        // Any tenant admin could stand up an unbilled organisation here; customers
+        // sign themselves up through /tenant/register instead.
+        when(platformAdminGuard.isPlatformAdmin()).thenReturn(false);
+
+        mockMvc.perform(post("/api/v1/organisations")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Squatter Ltd\"}"))
+                .andExpect(status().isNotFound());
+
+        org.mockito.Mockito.verify(organisationService, org.mockito.Mockito.never()).create(any());
+    }
+
+    @Test
+    void create_isAllowedForAPlatformOperator() throws Exception {
+        when(platformAdminGuard.isPlatformAdmin()).thenReturn(true);
+        com.assetiq.dto.OrganisationDto created = new com.assetiq.dto.OrganisationDto();
+        created.setName("Acme Ltd");
+        when(organisationService.create(any())).thenReturn(created);
+
+        mockMvc.perform(post("/api/v1/organisations")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Acme Ltd\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.name").value("Acme Ltd"));
     }
 
     @Test
