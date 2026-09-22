@@ -3,6 +3,7 @@ package com.assetiq.validation;
 import com.assetiq.dto.ContractDto;
 import com.assetiq.dto.LeaseRecordDto;
 import com.assetiq.dto.PurchaseOrderRejectRequest;
+import com.assetiq.dto.VendorPerformanceReviewDto;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
@@ -77,6 +78,16 @@ class FinanceDtoRulesTest {
         dto.setNoticePeriodDays(0);
         assertThat(invalidFields(dto)).containsExactly("monthlyPayment");
         dto.setMonthlyPayment(new BigDecimal("0.01"));
+        assertThat(invalidFields(dto)).isEmpty();
+    }
+
+    @Test
+    void vendorReview_periodIsRequired() {
+        VendorPerformanceReviewDto dto = new VendorPerformanceReviewDto();
+        dto.setRating(new BigDecimal("3.00"));
+        assertThat(invalidFields(dto)).containsExactlyInAnyOrder("periodStart", "periodEnd");
+        dto.setPeriodStart(java.time.LocalDate.of(2026, 1, 1));
+        dto.setPeriodEnd(java.time.LocalDate.of(2026, 3, 31));
         assertThat(invalidFields(dto)).isEmpty();
     }
 }
