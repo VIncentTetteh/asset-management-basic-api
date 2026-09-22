@@ -336,6 +336,10 @@ app:
       report-prefix: ${APP_STORAGE_S3_REPORT_PREFIX:reports}
       import-prefix: ${APP_STORAGE_S3_IMPORT_PREFIX:imports}
       presign-minutes: ${APP_STORAGE_S3_PRESIGN_MINUTES:15}
+    # Buckets a tenant admin may point their storage at, comma-separated. The
+    # platform bucket (app.storage.s3.bucket) is always allowed; empty means it
+    # is the only one, which is the safe default for the hosted deployment.
+    allowed-buckets: ${APP_STORAGE_ALLOWED_BUCKETS:}
     org-override:
       allowed: ${APP_STORAGE_ORG_OVERRIDE_ALLOWED:true}
   billing:

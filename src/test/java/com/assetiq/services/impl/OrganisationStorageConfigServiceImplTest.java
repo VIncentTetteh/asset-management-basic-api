@@ -1,6 +1,7 @@
 package com.assetiq.services.impl;
 
 import com.assetiq.dto.OrganisationStorageConfigDto;
+import com.assetiq.exceptions.FieldValidationException;
 import com.assetiq.dto.OrganisationStorageConfigResponse;
 import com.assetiq.models.Organisation;
 import com.assetiq.models.OrganisationStorageConfig;
@@ -21,6 +22,9 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
@@ -67,6 +71,55 @@ class OrganisationStorageConfigServiceImplTest {
 
         assertThat(config.getBucketName()).isNull();
         assertThat(r.getBucketOverride()).isNull();
+    }
+
+    @Test
+    void aBucketOffTheAllowListIsRefusedWithAFieldError() {
+        // The server writes with its own credentials: without the allow-list an
+        // admin could aim the platform at any bucket those credentials can reach.
+        OrganisationStorageConfigDto dto = new OrganisationStorageConfigDto();
+        dto.setBucketName("someone-elses-bucket");
+
+        assertThatThrownBy(() -> service.upsert(org.getId(), dto))
+                .isInstanceOf(FieldValidationException.class)
+                .hasMessageContaining("not an allowed storage bucket");
+        assertThat(((FieldValidationException) catchThrowable(() -> service.upsert(org.getId(), dto))).getField())
+                .isEqualTo("bucketName");
+        assertThat(config.getBucketName()).isNull();
+    }
+
+    @Test
+    void thePlatformBucketIsAlwaysAllowedAndTheListAddsToIt() {
+        service.setAllowedBuckets(java.util.List.of("assetiq-eu", " AssetIQ-Archive "));
+
+        OrganisationStorageConfigDto platform = new OrganisationStorageConfigDto();
+        platform.setBucketName("assetiq-global");
+        assertThatCode(() -> service.upsert(org.getId(), platform)).doesNotThrowAnyException();
+
+        OrganisationStorageConfigDto listed = new OrganisationStorageConfigDto();
+        listed.setBucketName("assetiq-eu");
+        assertThatCode(() -> service.upsert(org.getId(), listed)).doesNotThrowAnyException();
+        assertThat(config.getBucketName()).isEqualTo("assetiq-eu");
+
+        // Matching is case-insensitive and ignores the spaces around a list entry.
+        OrganisationStorageConfigDto spaced = new OrganisationStorageConfigDto();
+        spaced.setBucketName("assetiq-archive");
+        assertThatCode(() -> service.upsert(org.getId(), spaced)).doesNotThrowAnyException();
+
+        OrganisationStorageConfigDto other = new OrganisationStorageConfigDto();
+        other.setBucketName("assetiq-us");
+        assertThatThrownBy(() -> service.upsert(org.getId(), other))
+                .isInstanceOf(FieldValidationException.class);
+    }
+
+    @Test
+    void clearingTheOverrideIsAlwaysAllowed() {
+        config.setBucketName("assetiq-global");
+        OrganisationStorageConfigDto dto = new OrganisationStorageConfigDto();
+        dto.setBucketName("");
+
+        assertThatCode(() -> service.upsert(org.getId(), dto)).doesNotThrowAnyException();
+        assertThat(config.getBucketName()).isNull();
     }
 
     @Test

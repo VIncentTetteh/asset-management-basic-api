@@ -14,6 +14,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -28,8 +32,23 @@ public class OrganisationStorageConfigServiceImpl implements OrganisationStorage
     @org.springframework.beans.factory.annotation.Value("${app.storage.s3.bucket:}")
     private String globalBucket;
 
+    /**
+     * Buckets a tenant admin may point storage at, beyond the platform bucket.
+     *
+     * <p>The server writes with its own IAM role, so without this an admin could
+     * name any bucket those credentials can reach — another tenant's, or an
+     * internal one — and have the platform write their reports into it. Empty
+     * (the default) means only {@code app.storage.s3.bucket} is allowed.
+     */
+    @org.springframework.beans.factory.annotation.Value("${app.storage.allowed-buckets:}")
+    private List<String> allowedBuckets = List.of();
+
     void setGlobalBucket(String globalBucket) {
         this.globalBucket = globalBucket;
+    }
+
+    void setAllowedBuckets(List<String> allowedBuckets) {
+        this.allowedBuckets = allowedBuckets;
     }
 
     public OrganisationStorageConfigServiceImpl(
@@ -93,7 +112,9 @@ public class OrganisationStorageConfigServiceImpl implements OrganisationStorage
         // Blank clears the override (the global bucket applies). Saving the global
         // bucket's name as an override used to pin it to this organisation.
         if (dto.getBucketName() != null) {
-            config.setBucketName(dto.getBucketName().isBlank() ? null : dto.getBucketName().trim());
+            String bucket = dto.getBucketName().isBlank() ? null : dto.getBucketName().trim();
+            requireAllowedBucket(bucket);
+            config.setBucketName(bucket);
         }
 
         if (dto.getReportPrefix() != null && !dto.getReportPrefix().isBlank()) {
@@ -125,6 +146,35 @@ public class OrganisationStorageConfigServiceImpl implements OrganisationStorage
                 .createdBy(config.getCreatedBy())
                 .modifiedBy(config.getModifiedBy())
                 .build();
+    }
+
+    /**
+     * Refuses a bucket that is not on the allow-list. Storage is written with the
+     * server's own credentials, so an unchecked override let a tenant admin aim
+     * the platform at any bucket those credentials could reach.
+     */
+    private void requireAllowedBucket(String bucket) {
+        if (bucket == null) return;
+        Set<String> allowed = allowedBucketSet();
+        if (allowed.contains(bucket.toLowerCase(Locale.ROOT))) return;
+        String choices = allowed.isEmpty()
+                ? "No bucket override is configured for this deployment."
+                : "Allowed: " + String.join(", ", allowed) + ".";
+        throw new com.assetiq.exceptions.FieldValidationException("bucketName",
+                "\"" + bucket + "\" is not an allowed storage bucket. " + choices
+                        + " Leave it blank to use the platform bucket.");
+    }
+
+    /** The platform bucket plus anything {@code app.storage.allowed-buckets} names. */
+    private Set<String> allowedBucketSet() {
+        Set<String> allowed = new LinkedHashSet<>();
+        if (hasText(globalBucket)) allowed.add(globalBucket.trim().toLowerCase(Locale.ROOT));
+        if (allowedBuckets != null) {
+            for (String bucket : allowedBuckets) {
+                if (hasText(bucket)) allowed.add(bucket.trim().toLowerCase(Locale.ROOT));
+            }
+        }
+        return allowed;
     }
 
     private String defaultBucket() {
