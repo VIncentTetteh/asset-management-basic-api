@@ -52,7 +52,11 @@ public class ContractDto {
     @Size(max = 3)
     private String currency;
 
-    private boolean autoRenew;
+    /**
+     * Boxed so a PATCH that leaves the field out keeps the stored value; a primitive
+     * defaulted to false and silently switched auto-renew off on unrelated edits.
+     */
+    private Boolean autoRenew;
 
     @Size(max = 500)
     private String documentUrl;
@@ -105,8 +109,8 @@ public class ContractDto {
     public String getCurrency() { return currency; }
     public void setCurrency(String currency) { this.currency = currency; }
 
-    public boolean isAutoRenew() { return autoRenew; }
-    public void setAutoRenew(boolean autoRenew) { this.autoRenew = autoRenew; }
+    public Boolean getAutoRenew() { return autoRenew; }
+    public void setAutoRenew(Boolean autoRenew) { this.autoRenew = autoRenew; }
 
     public String getDocumentUrl() { return documentUrl; }
     public void setDocumentUrl(String documentUrl) { this.documentUrl = documentUrl; }

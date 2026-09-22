@@ -100,7 +100,7 @@ public class ContractServiceImpl extends TenantAwareService implements ContractS
         if (dto.getCurrency() != null) contract.setCurrency(CurrencyResolver.normaliseIsoCode(dto.getCurrency()));
         if (dto.getDocumentUrl() != null) contract.setDocumentUrl(dto.getDocumentUrl());
         if (dto.getNotes() != null) contract.setNotes(dto.getNotes());
-        contract.setAutoRenew(dto.isAutoRenew());
+        if (dto.getAutoRenew() != null) contract.setAutoRenew(dto.getAutoRenew());
 
         if (dto.getSupplierId() != null) {
             supplierRepository.findByIdAndOrganisationAndDeletedAtIsNull(dto.getSupplierId(), org)
@@ -134,7 +134,7 @@ public class ContractServiceImpl extends TenantAwareService implements ContractS
         contract.setAlertDaysBefore(dto.getAlertDaysBefore() != null ? dto.getAlertDaysBefore() : 30);
         contract.setValue(dto.getValue());
         contract.setCurrency(currencyResolver.resolveOrDefault(dto.getCurrency()));
-        contract.setAutoRenew(dto.isAutoRenew());
+        contract.setAutoRenew(Boolean.TRUE.equals(dto.getAutoRenew()));
         contract.setDocumentUrl(dto.getDocumentUrl());
         contract.setNotes(dto.getNotes());
         contract.setOrganisation(org);
