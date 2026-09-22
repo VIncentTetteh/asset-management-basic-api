@@ -103,7 +103,22 @@ class CheckoutServiceImplCheckInTest {
 
         assertThat(out.getStatus()).isEqualTo(CheckoutStatus.RETURNED);
         assertThat(out.getConditionOnReturn()).isEqualTo("Damaged");
+        assertThat(out.getCheckedInByName()).isEqualTo("Front Desk");
         assertThat(out.getNotes()).isEqualTo("Charger included\nReturn notes: Screen cracked");
         verify(notificationService).notifyOrgAdmins(eq(org), any(), anyString(), contains("Ama Mensah"), any(), any());
+    }
+
+    @Test
+    void overdueIsReadableByEveryoneWhoCanReadTheList() throws Exception {
+        java.lang.reflect.Method list = com.assetiq.controllers.v1.CheckoutController.class.getMethod("listByOrg");
+        java.lang.reflect.Method overdue = null;
+        for (java.lang.reflect.Method m : com.assetiq.controllers.v1.CheckoutController.class.getMethods()) {
+            org.springframework.web.bind.annotation.GetMapping get =
+                    m.getAnnotation(org.springframework.web.bind.annotation.GetMapping.class);
+            if (get != null && java.util.Arrays.asList(get.value()).contains("/overdue")) overdue = m;
+        }
+        assertThat(overdue).isNotNull();
+        assertThat(overdue.getAnnotation(org.springframework.security.access.prepost.PreAuthorize.class).value())
+                .isEqualTo(list.getAnnotation(org.springframework.security.access.prepost.PreAuthorize.class).value());
     }
 }

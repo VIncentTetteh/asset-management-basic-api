@@ -87,7 +87,8 @@ public class CheckoutController {
 
     /** Returns all ACTIVE checkout records whose expected return date is in the past. */
     @GetMapping("/overdue")
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','CHECKOUT_ASSET')")
+    // Same readers as the list: the overdue view is a filter of it.
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','CHECKOUT_ASSET','VIEW_ASSETS')")
     public ResponseEntity<List<CheckoutRecordDto>> listOverdue() {
         return ResponseEntity.ok(checkoutService.listOverdue());
     }

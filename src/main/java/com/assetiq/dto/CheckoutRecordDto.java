@@ -2,6 +2,7 @@ package com.assetiq.dto;
 
 import com.assetiq.enums.CheckoutStatus;
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -29,6 +30,9 @@ public class CheckoutRecordDto {
     private LocalDate expectedReturnDate;
     private LocalDate actualReturnDate;
     private UUID checkedInById;
+    /** Who checked the asset back in (read-only). */
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private String checkedInByName;
     /** Stored in a VARCHAR(50) column. */
     @Size(max = 50)
     private String conditionOnCheckout;

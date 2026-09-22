@@ -284,6 +284,7 @@ public class CheckoutServiceImpl extends TenantAwareService implements CheckoutS
         dto.setActualReturnDate(r.getActualReturnDate());
         if (r.getCheckedInBy() != null) {
             dto.setCheckedInById(r.getCheckedInBy().getId());
+            dto.setCheckedInByName(r.getCheckedInBy().getFirstName() + " " + r.getCheckedInBy().getLastName());
         }
         dto.setConditionOnCheckout(r.getConditionOnCheckout());
         dto.setConditionOnReturn(r.getConditionOnReturn());
