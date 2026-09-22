@@ -24,8 +24,15 @@ public interface CloudAssetService {
     /** Cost summary with breakdown by provider and environment */
     CloudCostSummaryDto getCostSummary();
 
-    /** Record a monthly cost entry for a cloud asset */
+    /**
+     * Records the cost of a cloud asset for a month. Upsert on (asset, month,
+     * service): recording the same month and service again replaces the amount.
+     * A blank service name means the asset as a whole.
+     */
     void recordMonthlyCost(UUID assetId, String billingMonth, java.math.BigDecimal amount, String serviceName);
+
+    /** Recorded monthly costs of one asset, newest month first. */
+    Page<com.assetiq.dto.CloudCostRecordDto> listCosts(UUID assetId, Pageable pageable);
 
     /**
      * Discover and upsert cloud assets for the specified provider.

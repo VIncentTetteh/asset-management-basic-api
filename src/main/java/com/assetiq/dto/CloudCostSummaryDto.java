@@ -10,7 +10,11 @@ import java.util.Map;
 @Data
 public class CloudCostSummaryDto {
 
-    /** Total estimated monthly cost across all cloud assets */
+    /**
+     * Monthly cost across all cloud assets for {@link #actualsMonth}: an asset with
+     * recorded costs for that month counts at their sum, any other asset at its
+     * monthly estimate.
+     */
     private BigDecimal totalMonthlyCost;
 
     /** ISO-4217 code every amount in this summary is expressed in (tenant base currency). */
@@ -27,6 +31,12 @@ public class CloudCostSummaryDto {
 
     /** Cost breakdown by environment (DEV, STAGING, PROD) */
     private Map<String, BigDecimal> costByEnvironment;
+
+    /** The month (YYYY-MM, UTC) whose recorded actuals replace estimates. */
+    private String actualsMonth;
+
+    /** How many assets counted at recorded actuals rather than their estimate. */
+    private int assetsWithActuals;
 
     /** Top 5 most expensive assets, compared and reported in {@link #currency} */
     private List<CloudAssetCostEntry> topAssets;

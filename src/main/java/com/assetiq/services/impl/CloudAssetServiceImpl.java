@@ -2,6 +2,7 @@ package com.assetiq.services.impl;
 
 import com.assetiq.cloudsync.CloudSyncDispatcher;
 import com.assetiq.dto.CloudAssetDto;
+import com.assetiq.dto.CloudCostRecordDto;
 import com.assetiq.dto.CloudCostSummaryDto;
 import com.assetiq.enums.CloudEnvironment;
 import com.assetiq.enums.CloudProvider;
@@ -23,12 +24,14 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -45,6 +48,13 @@ public class CloudAssetServiceImpl extends TenantAwareService implements CloudAs
     private final MoneyAggregator moneyAggregator;
 
     private static final int TOP_ASSET_COUNT = 5;
+
+    /** Decides the "current month" of the cost summary; replaceable in tests. */
+    private java.time.Clock clock = java.time.Clock.systemUTC();
+
+    void setClock(java.time.Clock clock) {
+        this.clock = clock;
+    }
 
     /**
      * Provider sync reads inventory with the <em>server's</em> cloud credentials
@@ -138,27 +148,40 @@ public class CloudAssetServiceImpl extends TenantAwareService implements CloudAs
         Organisation org = requireTenantOrg();
         List<CloudAsset> assets = cloudAssetRepo.findByOrganisationAndDeletedAtIsNull(org);
 
-        // Convert every estimate into the tenant base currency before summing or
+        // Rule: for the current month (UTC), an asset with recorded costs counts at
+        // the sum of those actuals (all services); an asset without any counts at its
+        // monthly estimate. Actuals win because they are what was billed.
+        LocalDate currentMonth = LocalDate.now(clock).withDayOfMonth(1);
+        Map<UUID, List<CloudCostRecord>> actuals = costRepo
+                .findByOrganisationAndBillingMonthAndDeletedAtIsNull(org, currentMonth).stream()
+                .filter(r -> r.getCloudAsset() != null && r.getAmount() != null)
+                .collect(Collectors.groupingBy(r -> r.getCloudAsset().getId()));
+
+        // Convert every amount into the tenant base currency before summing or
         // ranking; assets whose currency has no rate are excluded and reported.
         CurrencyConversion fx = moneyAggregator.begin(org);
         MoneyAccumulator total = fx.newAccumulator();
         Map<CloudProvider, MoneyAccumulator> byProviderAcc = new EnumMap<>(CloudProvider.class);
         Map<String, MoneyAccumulator> byEnvAcc = new LinkedHashMap<>();
         List<Map.Entry<CloudAsset, BigDecimal>> converted = new ArrayList<>();
+        int assetsWithActuals = 0;
 
         for (CloudAsset a : assets) {
-            if (a.getMonthlyCostEstimate() == null) continue;
-            Optional<BigDecimal> inBase = fx.toBase(a.getMonthlyCostEstimate(), a.getCurrency());
+            List<Map.Entry<BigDecimal, String>> amounts = monthlyAmounts(a, actuals.get(a.getId()));
+            if (amounts.isEmpty()) continue;
+            Optional<BigDecimal> inBase = toBase(fx, amounts);
             if (inBase.isEmpty()) continue;
+            if (actuals.containsKey(a.getId())) assetsWithActuals++;
             converted.add(Map.entry(a, inBase.get()));
-            total.add(a.getMonthlyCostEstimate(), a.getCurrency());
-            if (a.getProvider() != null) {
-                byProviderAcc.computeIfAbsent(a.getProvider(), k -> fx.newAccumulator())
-                        .add(a.getMonthlyCostEstimate(), a.getCurrency());
-            }
-            if (a.getEnvironment() != null) {
-                byEnvAcc.computeIfAbsent(a.getEnvironment().toUpperCase(), k -> fx.newAccumulator())
-                        .add(a.getMonthlyCostEstimate(), a.getCurrency());
+            for (Map.Entry<BigDecimal, String> m : amounts) {
+                total.add(m.getKey(), m.getValue());
+                if (a.getProvider() != null) {
+                    byProviderAcc.computeIfAbsent(a.getProvider(), k -> fx.newAccumulator()).add(m.getKey(), m.getValue());
+                }
+                if (a.getEnvironment() != null) {
+                    byEnvAcc.computeIfAbsent(a.getEnvironment().toUpperCase(), k -> fx.newAccumulator())
+                            .add(m.getKey(), m.getValue());
+                }
             }
         }
 
@@ -188,7 +211,31 @@ public class CloudAssetServiceImpl extends TenantAwareService implements CloudAs
         summary.setCostByProvider(byProvider);
         summary.setCostByEnvironment(byEnv);
         summary.setTopAssets(topAssets);
+        summary.setActualsMonth(YearMonth.from(currentMonth).toString());
+        summary.setAssetsWithActuals(assetsWithActuals);
         return summary;
+    }
+
+    /** This month's amounts for an asset: its recorded actuals, else its estimate. */
+    private static List<Map.Entry<BigDecimal, String>> monthlyAmounts(CloudAsset a, List<CloudCostRecord> actuals) {
+        if (actuals != null && !actuals.isEmpty()) {
+            return actuals.stream()
+                    .map(r -> Map.entry(r.getAmount(), r.getCurrency() != null ? r.getCurrency() : a.getCurrency()))
+                    .collect(Collectors.toList());
+        }
+        if (a.getMonthlyCostEstimate() == null) return List.of();
+        return List.of(Map.entry(a.getMonthlyCostEstimate(), a.getCurrency()));
+    }
+
+    /** Sum in the base currency, or empty when any amount has no exchange rate. */
+    private static Optional<BigDecimal> toBase(CurrencyConversion fx, List<Map.Entry<BigDecimal, String>> amounts) {
+        BigDecimal sum = BigDecimal.ZERO;
+        for (Map.Entry<BigDecimal, String> m : amounts) {
+            Optional<BigDecimal> v = fx.toBase(m.getKey(), m.getValue());
+            if (v.isEmpty()) return Optional.empty();
+            sum = sum.add(v.get());
+        }
+        return Optional.of(sum);
     }
 
     @Override
@@ -204,15 +251,47 @@ public class CloudAssetServiceImpl extends TenantAwareService implements CloudAs
             throw new IllegalArgumentException("amount must be zero or more");
         }
         LocalDate month = LocalDate.parse(billingMonth + "-01");
+        String service = serviceName == null || serviceName.isBlank() ? null : serviceName.trim();
+        if (service != null && service.length() > 200) {
+            throw new IllegalArgumentException("serviceName must be at most 200 characters");
+        }
 
-        CloudCostRecord record = new CloudCostRecord();
+        // Upsert on (asset, month, service): recording a month again corrects it
+        // instead of adding a second row that the summary would double count.
+        CloudCostRecord record = (service == null
+                ? costRepo.findFirstByCloudAssetAndBillingMonthAndServiceNameIsNullAndDeletedAtIsNull(asset, month)
+                : costRepo.findFirstByCloudAssetAndBillingMonthAndServiceNameAndDeletedAtIsNull(asset, month, service))
+                .orElseGet(CloudCostRecord::new);
         record.setCloudAsset(asset);
         record.setBillingMonth(month);
         record.setAmount(amount);
         record.setCurrency(asset.getCurrency() != null ? asset.getCurrency() : currencyResolver.defaultForCurrentTenant());
-        record.setServiceName(serviceName);
+        record.setServiceName(service);
         record.setOrganisation(org);
         costRepo.save(record);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Page<CloudCostRecordDto> listCosts(UUID assetId, Pageable pageable) {
+        Organisation org = requireTenantOrg();
+        CloudAsset asset = cloudAssetRepo.findByIdAndOrganisationAndDeletedAtIsNull(assetId, org)
+                .orElseThrow(() -> new jakarta.persistence.EntityNotFoundException("Cloud asset not found: " + assetId));
+        Pageable newestFirst = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(),
+                Sort.by(Sort.Order.desc("billingMonth"), Sort.Order.asc("serviceName")));
+        return costRepo.findByCloudAssetAndDeletedAtIsNull(asset, newestFirst).map(CloudAssetServiceImpl::toCostDto);
+    }
+
+    private static CloudCostRecordDto toCostDto(CloudCostRecord r) {
+        CloudCostRecordDto dto = new CloudCostRecordDto();
+        dto.setId(r.getId());
+        dto.setBillingMonth(r.getBillingMonth() != null ? YearMonth.from(r.getBillingMonth()).toString() : null);
+        dto.setAmount(r.getAmount());
+        dto.setCurrency(r.getCurrency());
+        dto.setServiceName(r.getServiceName());
+        dto.setCreatedAt(r.getCreatedAt());
+        dto.setUpdatedAt(r.getUpdatedAt());
+        return dto;
     }
 
     // ── Cloud Sync ────────────────────────────────────────────────────────────

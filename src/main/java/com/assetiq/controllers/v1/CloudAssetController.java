@@ -1,6 +1,7 @@
 package com.assetiq.controllers.v1;
 
 import com.assetiq.dto.CloudAssetDto;
+import com.assetiq.dto.CloudCostRecordDto;
 import com.assetiq.dto.CloudCostSummaryDto;
 import com.assetiq.dto.PagedResponseDto;
 import com.assetiq.enums.CloudProvider;
@@ -28,6 +29,9 @@ import java.util.UUID;
 @RequestMapping("/api/v1/cloud-assets")
 @PreAuthorize("isAuthenticated()")
 public class CloudAssetController {
+
+    private static final int DEFAULT_COST_PAGE = 24;
+    private static final int MAX_COST_PAGE = 100;
 
     private final CloudAssetService cloudAssetService;
 
@@ -135,6 +139,29 @@ public class CloudAssetController {
         String serviceName = rawService == null ? null : rawService.toString();
         cloudAssetService.recordMonthlyCost(id, billingMonth, amount, serviceName);
         return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * GET /api/v1/cloud-assets/{id}/costs?limit=&offset=
+     * Recorded monthly costs of one asset, newest month first.
+     */
+    @GetMapping("/{id}/costs")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','VIEW_ASSETS','VIEW_CLOUD_ASSETS','MANAGE_CLOUD_ASSETS','VIEW_REPORTS')")
+    public ResponseEntity<PagedResponseDto<CloudCostRecordDto>> costs(
+            @PathVariable UUID id,
+            @RequestParam(required = false) Integer limit,
+            @RequestParam(required = false) Long offset) {
+        int effectiveLimit = (limit != null && limit > 0) ? Math.min(limit, MAX_COST_PAGE) : DEFAULT_COST_PAGE;
+        long effectiveOffset = (offset != null && offset >= 0) ? offset : 0;
+        Page<CloudCostRecordDto> page = cloudAssetService.listCosts(id,
+                PageRequest.of((int) (effectiveOffset / effectiveLimit), effectiveLimit));
+
+        PagedResponseDto<CloudCostRecordDto> response = new PagedResponseDto<>();
+        response.setTotal(page.getTotalElements());
+        response.setLimit(effectiveLimit);
+        response.setOffset(effectiveOffset);
+        response.setItems(page.getContent());
+        return ResponseEntity.ok(response);
     }
 
     /**
