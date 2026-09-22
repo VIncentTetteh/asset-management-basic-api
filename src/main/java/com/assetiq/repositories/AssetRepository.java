@@ -37,6 +37,13 @@ public interface AssetRepository extends JpaRepository<Asset, UUID>, JpaSpecific
 
         boolean existsByNameIgnoreCaseAndOrganisationAndDeletedAtIsNull(String name, Organisation organisation);
 
+        /** Rename checks: the same scopes as create, excluding the asset being renamed. */
+        boolean existsByNameIgnoreCaseAndOrganisationAndDepartmentAndDeletedAtIsNullAndIdNot(
+                        String name, Organisation organisation, Department department, java.util.UUID id);
+
+        boolean existsByNameIgnoreCaseAndOrganisationAndDeletedAtIsNullAndIdNot(
+                        String name, Organisation organisation, java.util.UUID id);
+
         // Organisation-scoped queries — EntityGraph prevents N+1 on common relationships
         @EntityGraph(attributePaths = {"organisation", "department", "category", "location", "assignedUser", "supplier"})
         List<Asset> findAllByOrganisationAndDeletedAtIsNull(Organisation organisation);

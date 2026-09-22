@@ -399,6 +399,34 @@ class AssetServiceImplTest {
     }
 
     @Test
+    void renameIsTrimmedAndRefusedWhenAnotherAssetHasTheName() {
+        authenticate("ROLE_ADMIN");
+        service.update(asset.getId(), rename("  Laptop 2  "));
+        assertThat(asset.getName()).isEqualTo("Laptop 2");
+
+        when(assetRepository.existsByNameIgnoreCaseAndOrganisationAndDepartmentAndDeletedAtIsNullAndIdNot(
+                eq("Desk"), eq(org), any(), eq(asset.getId()))).thenReturn(true);
+        assertThatThrownBy(() -> service.update(asset.getId(), rename("Desk")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("same name");
+    }
+
+    @Test
+    void residualValueCannotExceedCost() {
+        authenticate("ROLE_ADMIN");
+        asset.setPurchaseCost(new BigDecimal("1000"));
+        AssetDto dto = new AssetDto();
+        dto.setResidualValue(new BigDecimal("1000.01"));
+        assertThatThrownBy(() -> service.update(asset.getId(), dto))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Residual value");
+
+        dto.setResidualValue(new BigDecimal("100"));
+        service.update(asset.getId(), dto);
+        assertThat(asset.getResidualValue()).isEqualByComparingTo("100");
+    }
+
+    @Test
     void statsCountPendingProcurementAndUnderRepair() {
         org.setBillingCurrency("GHS");
         when(assetRepository.countGroupedByStatus(org)).thenReturn(List.of(

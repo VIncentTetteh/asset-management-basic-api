@@ -312,6 +312,7 @@ public class AssetServiceImpl implements AssetService {
                     .ifPresent(asset::setPurchaseOrder);
         }
 
+        requireResidualWithinCost(asset);
         refreshBookValue(asset);
 
         try {
@@ -504,8 +505,14 @@ public class AssetServiceImpl implements AssetService {
                 .orElseThrow(() -> new ResourceNotFoundException("Asset not found"));
         Set<String> clears = validateClearFields(dto);
 
-        if (dto.getName() != null)
-            asset.setName(dto.getName());
+        String previousName = asset.getName();
+        if (dto.getName() != null) {
+            String name = dto.getName().trim();
+            if (name.isEmpty()) {
+                throw new IllegalArgumentException("Asset name is required");
+            }
+            asset.setName(name);
+        }
         if (dto.getAssetTag() != null)
             asset.setAssetTag(dto.getAssetTag());
         if (dto.getSerialNumber() != null)
@@ -587,6 +594,13 @@ public class AssetServiceImpl implements AssetService {
 
         clears.forEach(field -> CLEARABLE.get(field).clear().accept(asset));
 
+        if (!asset.getName().equals(previousName)) {
+            requireUniqueName(asset, org);
+        }
+        // Checked when either side changes, so legacy rows stay editable otherwise.
+        if (dto.getResidualValue() != null || dto.getPurchaseCost() != null) {
+            requireResidualWithinCost(asset);
+        }
         refreshBookValue(asset);
         Asset saved = assetRepository.save(asset);
         notificationService.notifyOrgAdmins(org, NotificationType.SYSTEM,
@@ -600,6 +614,30 @@ public class AssetServiceImpl implements AssetService {
     @Transactional
     public AssetDto patch(UUID id, AssetDto dto) {
         return update(id, dto);
+    }
+
+    /**
+     * A renamed asset must not collide with another live asset, in the same scope
+     * create uses: its department when it has one, else the organisation.
+     */
+    private void requireUniqueName(Asset asset, Organisation org) {
+        boolean duplicate = asset.getDepartment() != null
+                ? assetRepository.existsByNameIgnoreCaseAndOrganisationAndDepartmentAndDeletedAtIsNullAndIdNot(
+                        asset.getName(), org, asset.getDepartment(), asset.getId())
+                : assetRepository.existsByNameIgnoreCaseAndOrganisationAndDeletedAtIsNullAndIdNot(
+                        asset.getName(), org, asset.getId());
+        if (duplicate) {
+            throw new IllegalStateException("Asset with the same name already exists"
+                    + (asset.getDepartment() != null ? " in this department" : " in this organisation"));
+        }
+    }
+
+    /** An asset cannot be worth more at the end of its life than it cost. */
+    static void requireResidualWithinCost(Asset asset) {
+        if (asset.getResidualValue() != null && asset.getPurchaseCost() != null
+                && asset.getResidualValue().compareTo(asset.getPurchaseCost()) > 0) {
+            throw new IllegalArgumentException("Residual value cannot exceed the purchase cost");
+        }
     }
 
     /** Loads a parent asset in the organisation, refusing the asset itself or one of its components. */
