@@ -56,8 +56,11 @@ public class SsoConfigServiceImpl implements SsoConfigService {
         SsoProvider provider = dto.getProvider() != null ? dto.getProvider() : SsoProvider.GOOGLE;
         config.setProvider(provider);
         config.setClientId(dto.getClientId());
-        // Only update secret if a non-masked value is supplied
-        if (dto.getClientSecret() != null && !dto.getClientSecret().startsWith("****")) {
+        // Only update the secret when a real value is supplied: the form sends ""
+        // for "leave blank to keep existing", which used to overwrite the stored
+        // secret with an empty one and break sign-in.
+        if (dto.getClientSecret() != null && !dto.getClientSecret().isBlank()
+                && !dto.getClientSecret().startsWith("****")) {
             config.setClientSecret(secretCryptoService.encrypt(dto.getClientSecret()));
         }
         config.setIssuerUri(dto.getIssuerUri());
