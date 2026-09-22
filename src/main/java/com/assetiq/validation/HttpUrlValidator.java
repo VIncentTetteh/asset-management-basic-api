@@ -22,10 +22,12 @@ public class HttpUrlValidator implements ConstraintValidator<HttpUrl, String> {
     private static final Pattern SCHEME = Pattern.compile("^([A-Za-z][A-Za-z0-9+.\\-]*):(?!\\s)");
 
     private boolean allowPlainText;
+    private boolean httpsOnly;
 
     @Override
     public void initialize(HttpUrl annotation) {
         this.allowPlainText = annotation.allowPlainText();
+        this.httpsOnly = annotation.httpsOnly();
     }
 
     @Override
@@ -38,7 +40,8 @@ public class HttpUrlValidator implements ConstraintValidator<HttpUrl, String> {
         if (!hasScheme) {
             return allowPlainText;
         }
-        return isAbsoluteHttpUrl(value.strip());
+        String url = value.strip();
+        return isAbsoluteHttpUrl(url) && (!httpsOnly || url.regionMatches(true, 0, "https:", 0, 6));
     }
 
     static boolean isAbsoluteHttpUrl(String value) {

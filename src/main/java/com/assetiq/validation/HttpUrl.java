@@ -37,6 +37,9 @@ public @interface HttpUrl {
     /** Also accept plain text that has no URL scheme (a reference rather than a link). */
     boolean allowPlainText() default false;
 
+    /** Accept only https (e.g. an OpenID Connect issuer, which the spec requires to be https). */
+    boolean httpsOnly() default false;
+
     Class<?>[] groups() default {};
 
     Class<? extends Payload>[] payload() default {};

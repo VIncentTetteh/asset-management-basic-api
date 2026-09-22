@@ -1,5 +1,8 @@
 package com.assetiq.dto;
 
+import com.assetiq.validation.HttpUrl;
+import jakarta.validation.constraints.Pattern;
+
 import com.assetiq.enums.SsoProvider;
 
 
@@ -34,24 +37,37 @@ public class OrgSsoConfigDto {
      */
     private String clientSecret;
 
+    /** OpenID Connect issuer / discovery base: an absolute https URL. */
     @Size(max = 255)
+    @HttpUrl(httpsOnly = true, message = "must be an https:// URL")
     private String issuerUri;
 
     @Size(max = 255)
     private String scopes;
 
+    @HttpUrl
     private String redirectUri;
 
     // ── SAML fields ───────────────────────────────────────────────────────────
 
+    @HttpUrl
     private String idpMetadataUrl;
 
     @Size(max = 255)
     private String spEntityId;
 
+    @HttpUrl
     private String assertionConsumerServiceUrl;
 
     /** Email domain for SSO auto-discovery (e.g. "company.com"). Stored on the Organisation. */
     @Size(max = 255)
+    @Pattern(regexp = EMAIL_DOMAIN_PATTERN, message = "must be a domain such as company.com")
     private String emailDomain;
+
+    /**
+     * Blank, or a DNS name with at least two labels: letters, digits and inner
+     * hyphens, 63 characters a label, ending in an alphabetic TLD. No scheme, "@" or path.
+     */
+    public static final String EMAIL_DOMAIN_PATTERN =
+            "^\\s*$|^\\s*(?=.{1,253}\\s*$)([A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+[A-Za-z]{2,63}\\s*$";
 }
