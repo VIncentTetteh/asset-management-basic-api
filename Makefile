@@ -14,19 +14,28 @@ run: build
 clean:
 	mvn clean
 
-docker-build:
-	docker build -t $(APP_NAME):latest .
+# Local single-arch build for development. The tag comes from git so a local
+# image is never ambiguous; `latest` is not used anywhere, because for a
+# self-hosted operator a moving tag means an unattended schema migration.
+LOCAL_TAG ?= $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/^v//' || echo dev)
 
-# Run the container exposing the port
+docker-build:
+	docker build -t $(APP_NAME):$(LOCAL_TAG) --build-arg VERSION=$(LOCAL_TAG) .
+
+# Run the container exposing the port. Mirrors the compose hardening so a local
+# run surfaces read-only-filesystem problems here rather than in production.
 docker-run:
-	docker run --rm -p $(PORT):8080 --name $(APP_NAME) $(APP_NAME):latest
+	docker run --rm -p $(PORT):8080 --name $(APP_NAME) \
+	  --read-only --tmpfs /tmp:rw,exec,mode=1777 \
+	  --cap-drop ALL --security-opt no-new-privileges \
+	  $(APP_NAME):$(LOCAL_TAG)
 
 test:
 	mvn test
 
 # quick image clean
 docker-clean:
-	docker image rm -f $(APP_NAME):latest || true
+	docker image rm -f $(APP_NAME):$(LOCAL_TAG) || true
 
 # ── Local dev backend (Docker Postgres/Redis + spring-boot:run) ────────────
 # Mirrors the manual local-dev setup: Postgres/Redis run in Docker on
@@ -129,3 +138,42 @@ backend-status:
 		&& echo "Health check: OK" \
 		|| echo "Health check: FAILED"
 
+
+# ── Self-hosted distribution ───────────────────────────────────────────────
+# Multi-arch image build/publish for the self-hosted SKU. See
+# scripts/publish-images.sh for the one-time ECR Public repository setup an
+# operator must do before the first push.
+#
+# The version is derived from `git describe --tags --always`, never `latest`:
+# a self-hosted operator who tracks a moving tag gets an unattended schema
+# migration on their next container restart.
+#
+#   make images-build                        # all platforms, pushes nothing
+#   make images-push ECR_ALIAS=yourAlias     # build + push to ECR Public
+#   make images-version                      # print the tag that would be used
+
+.PHONY: images-build images-push images-version ecr-login selfhosted-smoke
+
+# Build every target platform without pushing. Multi-arch images cannot be
+# loaded into the local image store, so this validates the build rather than
+# producing something runnable; use `make docker-build` for a local image.
+images-build:
+	./scripts/publish-images.sh
+
+images-push:
+	@test -n "$(ECR_ALIAS)" || { echo "ECR_ALIAS is required, e.g. make images-push ECR_ALIAS=assetiq"; exit 1; }
+	./scripts/publish-images.sh --push --alias $(ECR_ALIAS)
+
+images-version:
+	@git describe --tags --always 2>/dev/null | sed 's/^v//'
+
+# ECR Public tokens are issued from us-east-1 regardless of where you deploy,
+# and last 12 hours.
+ecr-login:
+	aws ecr-public get-login-password --region us-east-1 \
+	  | docker login --username AWS --password-stdin public.ecr.aws
+
+# Bring the self-hosted compose stack up from source and assert the backend
+# reports healthy with Flyway migrated. Tears down on exit either way.
+selfhosted-smoke:
+	./assetiq-standalone/scripts/smoke-compose.sh
