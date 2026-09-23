@@ -25,6 +25,15 @@ import java.util.UUID;
 @FeatureFlagGate("commercial.governed-ai")
 public class AIInsightsController {
 
+    /**
+     * Read authorities for predictive insights. Kept identical to the
+     * {@code AiDataSection.INSIGHTS} authority set so the assistant and the
+     * insights API expose the same records to the same people.
+     */
+    private static final String READ_INSIGHTS =
+            "hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','VIEW_MAINTENANCE','SCHEDULE_MAINTENANCE',"
+            + "'CONDUCT_AUDIT','VIEW_REPORTS')";
+
     private final PredictiveMaintenanceService predictiveService;
     private final AiChatService                aiChatService;
 
@@ -47,8 +56,17 @@ public class AIInsightsController {
      * Clients send only the user message + recent conversation history.
      * No organisation data needs to be included in the request — the backend
      * owns retrieval, so web, mobile, and desktop all share the same logic.
+     *
+     * <p>Retrieval is scoped to the caller's organisation and further narrowed
+     * to the record types the caller's authorities already permit, so the
+     * assistant can never be used to read past the UI's own permission checks.
+     *
+     * <p>Status codes: 200 with an answer; 200 with {@code degraded=true} when
+     * the AI provider is unconfigured, throttled or down; 429 when the caller or
+     * the organisation has used its allowance; 404 when the feature flag is off.
      */
     @PostMapping("/chat")
+    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','ROLE_USER','USE_AI_ASSISTANT')")
     public ResponseEntity<AiChatResponse> chat(@Valid @RequestBody AiChatRequest request) {
         return ResponseEntity.ok(aiChatService.chat(request));
     }
@@ -69,6 +87,7 @@ public class AIInsightsController {
      * GET /api/v1/ai/insights?type=MAINTENANCE_DUE&severity=HIGH&unresolvedOnly=true
      */
     @GetMapping("/insights")
+    @PreAuthorize(READ_INSIGHTS)
     public ResponseEntity<List<PredictiveInsightDto>> list(
             @RequestParam(required = false) String type,
             @RequestParam(required = false) String severity,
@@ -80,6 +99,7 @@ public class AIInsightsController {
      * GET /api/v1/ai/insights/{id}
      */
     @GetMapping("/insights/{id}")
+    @PreAuthorize(READ_INSIGHTS)
     public ResponseEntity<PredictiveInsightDto> getById(@PathVariable UUID id) {
         return ResponseEntity.ok(predictiveService.getById(id));
     }
@@ -97,6 +117,7 @@ public class AIInsightsController {
      * GET /api/v1/ai/insights/summary
      */
     @GetMapping("/insights/summary")
+    @PreAuthorize(READ_INSIGHTS)
     public ResponseEntity<Map<String, Object>> summary() {
         return ResponseEntity.ok(predictiveService.getSummary());
     }

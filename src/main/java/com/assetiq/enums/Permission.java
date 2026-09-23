@@ -117,6 +117,10 @@ public enum Permission {
     VIEW_VENDOR_REVIEWS,
     MANAGE_VENDOR_REVIEWS,
 
+    // AI assistant — lets a role that is not ROLE_USER/admin use the assistant.
+    // Retrieval is still limited to that role's other view permissions.
+    USE_AI_ASSISTANT,
+
     // Employee management (HR records + onboarding/offboarding with asset handover)
     VIEW_EMPLOYEES,
     MANAGE_EMPLOYEES,
