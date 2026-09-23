@@ -2,15 +2,26 @@ package com.assetiq.services.impl;
 
 import com.assetiq.dto.AssetDto;
 import com.assetiq.dto.AssetImportResultDto;
+import com.assetiq.imports.ImportBeanValidator;
+import com.assetiq.imports.ImportEngine;
+import com.assetiq.imports.ImportReferenceResolver;
+import com.assetiq.imports.SpreadsheetReader;
+import com.assetiq.imports.handlers.AssetImportHandler;
 import com.assetiq.models.Department;
 import com.assetiq.models.Organisation;
 import com.assetiq.models.User;
 import com.assetiq.multitenancy.TenantContext;
 import com.assetiq.repositories.*;
 import com.assetiq.services.AssetService;
+import com.assetiq.services.CategoryService;
+import com.assetiq.services.DepartmentService;
 import com.assetiq.services.FeatureFlagService;
+import com.assetiq.services.LocationService;
+import com.assetiq.services.SupplierService;
 import com.assetiq.services.UsageLimitService;
 import com.assetiq.storage.FileStorageService;
+import jakarta.validation.Validation;
+import jakarta.validation.ValidatorFactory;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
@@ -23,6 +34,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.io.ByteArrayOutputStream;
@@ -36,7 +48,11 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
-/** Row parsing and reference resolution of the .xlsx asset import. */
+/**
+ * The historical positional .xlsx asset import, which now runs on the generic import
+ * engine. These assertions are unchanged from before that refactor on purpose: the
+ * legacy layout must keep behaving exactly as it did.
+ */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
 class AssetImportServiceImplTest {
@@ -53,22 +69,38 @@ class AssetImportServiceImplTest {
     @Mock LocationRepository locationRepository;
     @Mock SupplierRepository supplierRepository;
     @Mock DepartmentRepository departmentRepository;
+    @Mock EmployeeRepository employeeRepository;
     @Mock UserRepository userRepository;
     @Mock OrganisationRepository organisationRepository;
+    @Mock CategoryService categoryService;
+    @Mock LocationService locationService;
+    @Mock SupplierService supplierService;
+    @Mock DepartmentService departmentService;
     @Mock UsageLimitService usageLimitService;
     @Mock FileStorageService storageService;
     @Mock TransactionTemplate transactionTemplate;
+    @Mock PlatformTransactionManager transactionManager;
     @Mock FeatureFlagService featureFlagService;
+
+    private static final ValidatorFactory VALIDATOR_FACTORY = Validation.buildDefaultValidatorFactory();
 
     private AssetImportServiceImpl service;
     private Organisation org;
 
     @BeforeEach
     void setUp() {
-        service = new AssetImportServiceImpl(assetService, assetRepository, customFieldRepository,
+        ImportReferenceResolver referenceResolver = new ImportReferenceResolver(
                 categoryRepository, locationRepository, supplierRepository, departmentRepository,
-                userRepository, organisationRepository, usageLimitService, storageService,
-                transactionTemplate, featureFlagService);
+                userRepository, employeeRepository, assetRepository,
+                categoryService, locationService, supplierService, departmentService);
+        ImportBeanValidator beanValidator = new ImportBeanValidator(VALIDATOR_FACTORY.getValidator());
+        AssetImportHandler handler = new AssetImportHandler(assetService, assetRepository,
+                customFieldRepository, referenceResolver, usageLimitService, featureFlagService,
+                transactionTemplate, beanValidator);
+
+        service = new AssetImportServiceImpl(organisationRepository, handler,
+                new ImportEngine(transactionManager), new SpreadsheetReader(), storageService);
+
         org = new Organisation();
         org.setId(UUID.randomUUID());
         TenantContext.setOrganisationId(org.getId());
@@ -128,7 +160,7 @@ class AssetImportServiceImplTest {
 
     @Test
     void extraColumnsAreRejectedWhenCustomFieldsAreDisabled() throws Exception {
-        when(featureFlagService.isEnabledFor(eq(AssetImportServiceImpl.CUSTOM_FIELDS_FLAG), any())).thenReturn(false);
+        when(featureFlagService.isEnabledFor(eq(AssetImportHandler.CUSTOM_FIELDS_FLAG), any())).thenReturn(false);
 
         AssetImportResultDto result = service.importFromExcelBytes("a.xlsx", null,
                 workbook("Colour", row -> row.createCell(STANDARD_COLUMNS).setCellValue("Blue")), false);
@@ -141,7 +173,7 @@ class AssetImportServiceImplTest {
 
     @Test
     void extraColumnsBecomeCustomFieldsWhenEnabled() throws Exception {
-        when(featureFlagService.isEnabledFor(eq(AssetImportServiceImpl.CUSTOM_FIELDS_FLAG), any())).thenReturn(true);
+        when(featureFlagService.isEnabledFor(eq(AssetImportHandler.CUSTOM_FIELDS_FLAG), any())).thenReturn(true);
         when(assetRepository.findByIdAndOrganisationAndDeletedAtIsNull(any(), eq(org)))
                 .thenReturn(Optional.of(new com.assetiq.models.Asset()));
 
@@ -151,6 +183,21 @@ class AssetImportServiceImplTest {
         assertThat(result.getErrors()).isEmpty();
         assertThat(result.getImported()).isEqualTo(1);
         verify(customFieldRepository).save(any());
+    }
+
+    /** A reference the tenant does not have names the column the user wrote, not ours. */
+    @Test
+    void unknownReferenceNamesTheUsersOwnColumnHeader() throws Exception {
+        AssetImportResultDto result = service.importFromExcelBytes("a.xlsx", null,
+                workbook(null, row -> row.createCell(16).setCellValue("Laptops")), false);
+
+        assertThat(result.getImported()).isZero();
+        assertThat(result.getErrors()).singleElement().satisfies(e -> {
+            assertThat(e.getRow()).isEqualTo(2);
+            assertThat(e.getColumn()).isEqualTo("col16");
+            assertThat(e.getField()).isEqualTo("category");
+            assertThat(e.getMessage()).contains("Laptops");
+        });
     }
 
     /** A workbook with a header row (plus an optional extra header) and one data row named "Laptop". */
