@@ -141,4 +141,67 @@ public interface AssetRepository extends JpaRepository<Asset, UUID>, JpaSpecific
                         "AND (a.lastScannedAt IS NULL OR a.lastScannedAt <= :cutoff)")
         Page<Asset> findInactiveInStock(
                         @Param("cutoff") Instant cutoff, Pageable pageable);
+
+        /**
+         * Every live asset of one tenant as a slim valuation row: the columns the
+         * depreciation engine needs plus the identifiers the UI links on.
+         *
+         * <p>Cost: one pass over {@code asset} filtered by
+         * {@code (organisation_id, deleted_at)} with four left joins on primary
+         * keys ({@code department}, {@code location}, {@code category},
+         * {@code depreciation_policy}). No entity is hydrated, no lazy proxy is
+         * touched, and the category policy — an N+1 when assets are loaded as
+         * entities — arrives in the same row.
+         */
+        @Query("SELECT new com.assetiq.services.insights.AssetValuationRow("
+                        + "a.id, a.name, a.assetTag, a.currency, a.purchaseCost, a.residualValue, "
+                        + "a.usefulLifeMonths, a.depreciationMethod, a.purchaseDate, a.warrantyExpiryDate, "
+                        + "a.insurancePolicyExpiry, a.status, a.condition, u.id, "
+                        + "d.id, d.name, l.id, l.name, c.id, c.name, "
+                        + "p.usefulLifeMonths, p.method, p.salvageValuePercent, a.updatedAt, a.lastScannedAt) "
+                        + "FROM Asset a "
+                        + "LEFT JOIN a.assignedUser u "
+                        + "LEFT JOIN a.department d "
+                        + "LEFT JOIN a.location l "
+                        + "LEFT JOIN a.category c "
+                        + "LEFT JOIN c.depreciationPolicy p "
+                        + "WHERE a.organisation = :org AND a.deletedAt IS NULL")
+        List<com.assetiq.services.insights.AssetValuationRow> findValuationRows(@Param("org") Organisation org);
+
+        /**
+         * Assets whose warranty lapses on or before {@code cutoff} (already lapsed
+         * included), scoped to one tenant, as slim due-rows. The amount is the
+         * original purchase cost — AssetIQ cannot price the cover itself, and the
+         * caller says so rather than implying the figure is a book value.
+         *
+         * <p>Cost: an index range scan on {@code warranty_expiry_date} within the
+         * tenant plus a primary-key join to {@code department}.
+         */
+        @Query("SELECT new com.assetiq.services.insights.DueRow("
+                        + "a.id, a.name, a.assetTag, a.warrantyExpiryDate, a.purchaseCost, null, a.currency, "
+                        + "d.id, d.name) "
+                        + "FROM Asset a LEFT JOIN a.department d "
+                        + "WHERE a.organisation = :org AND a.deletedAt IS NULL "
+                        + "AND a.warrantyExpiryDate IS NOT NULL AND a.warrantyExpiryDate <= :cutoff "
+                        + "AND a.status NOT IN ('DISPOSED','RETIRED') "
+                        + "ORDER BY a.warrantyExpiryDate ASC")
+        List<com.assetiq.services.insights.DueRow> findWarrantyDueBy(
+                        @Param("org") Organisation org, @Param("cutoff") LocalDate cutoff);
+
+        /** The same, for insurance policy expiry; the amount is the annual premium. */
+        @Query("SELECT new com.assetiq.services.insights.DueRow("
+                        + "a.id, a.name, a.assetTag, a.insurancePolicyExpiry, a.insurancePremiumPerYear, "
+                        + "a.purchaseCost, a.currency, d.id, d.name) "
+                        + "FROM Asset a LEFT JOIN a.department d "
+                        + "WHERE a.organisation = :org AND a.deletedAt IS NULL "
+                        + "AND a.insurancePolicyExpiry IS NOT NULL AND a.insurancePolicyExpiry <= :cutoff "
+                        + "AND a.status NOT IN ('DISPOSED','RETIRED') "
+                        + "ORDER BY a.insurancePolicyExpiry ASC")
+        List<com.assetiq.services.insights.DueRow> findInsuranceDueBy(
+                        @Param("org") Organisation org, @Param("cutoff") LocalDate cutoff);
+
+        /** Live assets by status for one tenant, for the nightly snapshot. */
+        @Query("SELECT COUNT(a) FROM Asset a WHERE a.organisation = :org AND a.deletedAt IS NULL "
+                        + "AND a.status IN ('IN_USE','IN_STOCK','RESERVED')")
+        long countActive(@Param("org") Organisation org);
 }

@@ -33,4 +33,22 @@ public interface LeaseRecordRepository extends JpaRepository<LeaseRecord, UUID> 
             + "WHERE r.deletedAt IS NULL AND r.endDate < :today AND (r.autoRenew IS NULL OR r.autoRenew = false) "
             + "AND r.status = com.assetiq.enums.LeaseStatus.ACTIVE")
     int expirePastEndDate(@Param("today") LocalDate today, @Param("now") java.time.Instant now);
+
+    /**
+     * Active leases ending on or before {@code cutoff}, as slim due-rows. The
+     * amount is the monthly payment — what continues to be paid if the notice
+     * period is missed.
+     *
+     * <p>Cost: an index range scan on {@code end_date} within the tenant plus
+     * primary-key joins to {@code asset} and {@code supplier}.
+     */
+    @Query("SELECT new com.assetiq.services.insights.DueRow("
+            + "r.id, s.name, a.assetTag, r.endDate, r.monthlyPayment, null, r.currency, a.id, a.name) "
+            + "FROM LeaseRecord r LEFT JOIN r.asset a LEFT JOIN r.lessor s "
+            + "WHERE r.organisation = :org AND r.deletedAt IS NULL AND r.endDate <= :cutoff "
+            + "AND r.status = com.assetiq.enums.LeaseStatus.ACTIVE "
+            + "ORDER BY r.endDate ASC")
+    List<com.assetiq.services.insights.DueRow> findDueBy(@Param("org") Organisation org,
+                                                         @Param("cutoff") LocalDate cutoff);
+
 }

@@ -52,4 +52,30 @@ public interface SoftwareLicenseRepository extends JpaRepository<SoftwareLicense
             + "WHERE l.deletedAt IS NULL AND l.expiryDate < :today AND (l.autoRenew IS NULL OR l.autoRenew = false) "
             + "AND l.status IN (com.assetiq.enums.LicenseStatus.ACTIVE, com.assetiq.enums.LicenseStatus.EXPIRING_SOON)")
     int expirePastExpiryDate(@Param("today") LocalDate today, @Param("now") java.time.Instant now);
+
+    /**
+     * Live licences expiring on or before {@code cutoff}, including ones already
+     * past expiry, as slim due-rows. The renewal cost is the primary figure and
+     * the purchase cost the fallback.
+     *
+     * <p>Cost: an index range scan on {@code expiry_date} within the tenant.
+     */
+    @Query("SELECT new com.assetiq.services.insights.DueRow("
+            + "l.id, l.name, l.vendor, l.expiryDate, l.annualRenewalCost, l.purchaseCost, l.currency, "
+            + "a.id, a.name) "
+            + "FROM SoftwareLicense l LEFT JOIN l.asset a "
+            + "WHERE l.organisation = :org AND l.deletedAt IS NULL "
+            + "AND l.expiryDate IS NOT NULL AND l.expiryDate <= :cutoff "
+            + "AND l.status <> com.assetiq.enums.LicenseStatus.CANCELLED "
+            + "ORDER BY l.expiryDate ASC")
+    List<com.assetiq.services.insights.DueRow> findDueBy(@Param("org") Organisation org,
+                                                         @Param("cutoff") LocalDate cutoff);
+
+    /** Seats purchased and seats in use across the tenant's live, uncancelled licences. */
+    @Query("SELECT COALESCE(SUM(l.totalSeats), 0), COALESCE(SUM(l.usedSeats), 0) "
+            + "FROM SoftwareLicense l WHERE l.organisation = :org AND l.deletedAt IS NULL "
+            + "AND l.status NOT IN (com.assetiq.enums.LicenseStatus.CANCELLED, "
+            + "com.assetiq.enums.LicenseStatus.EXPIRED)")
+    List<Object[]> sumSeats(@Param("org") Organisation org);
+
 }

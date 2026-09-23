@@ -110,25 +110,47 @@ public final class DepreciationCalculator {
     /** Resolve the effective inputs for {@code asset} without calculating. */
     public static Inputs resolve(Asset asset, LocalDate asOf) {
         DepreciationPolicy policy = asset.getCategory() != null ? asset.getCategory().getDepreciationPolicy() : null;
-        BigDecimal cost = asset.getPurchaseCost();
+        return resolve(asset.getPurchaseCost(), asset.getResidualValue(), asset.getUsefulLifeMonths(),
+                asset.getDepreciationMethod(), asset.getPurchaseDate(),
+                asset.getStatus() == AssetStatus.DISPOSED,
+                policy != null ? policy.getUsefulLifeMonths() : null,
+                policy != null ? policy.getMethod() : null,
+                policy != null ? policy.getSalvageValuePercent() : null,
+                asOf);
+    }
 
-        Integer life = positive(asset.getUsefulLifeMonths());
-        if (life == null && policy != null) {
-            life = positive(policy.getUsefulLifeMonths());
+    /**
+     * Resolve the effective inputs from loose fields rather than a hydrated
+     * {@link Asset}. Aggregate queries read a slim projection instead of whole
+     * entities, and must resolve depreciation parameters exactly as the entity
+     * path does — so both paths land here and cannot drift apart.
+     *
+     * <p>Asset fields win; each one that is absent (or a non-positive useful
+     * life) falls back to the category's {@link DepreciationPolicy}.
+     */
+    public static Inputs resolve(BigDecimal cost,
+                                 BigDecimal assetResidualValue,
+                                 Integer assetUsefulLifeMonths,
+                                 DepreciationMethod assetMethod,
+                                 LocalDate inServiceDate,
+                                 boolean disposed,
+                                 Integer policyUsefulLifeMonths,
+                                 DepreciationMethod policyMethod,
+                                 BigDecimal policySalvageValuePercent,
+                                 LocalDate asOf) {
+        Integer life = positive(assetUsefulLifeMonths);
+        if (life == null) {
+            life = positive(policyUsefulLifeMonths);
         }
 
-        DepreciationMethod method = asset.getDepreciationMethod();
-        if (method == null && policy != null) {
-            method = policy.getMethod();
+        DepreciationMethod method = assetMethod != null ? assetMethod : policyMethod;
+
+        BigDecimal residual = assetResidualValue;
+        if (residual == null && policySalvageValuePercent != null && cost != null) {
+            residual = cost.multiply(policySalvageValuePercent).divide(HUNDRED, MC);
         }
 
-        BigDecimal residual = asset.getResidualValue();
-        if (residual == null && policy != null && policy.getSalvageValuePercent() != null && cost != null) {
-            residual = cost.multiply(policy.getSalvageValuePercent()).divide(HUNDRED, MC);
-        }
-
-        return new Inputs(cost, residual, life, method, asset.getPurchaseDate(), asOf,
-                asset.getStatus() == AssetStatus.DISPOSED);
+        return new Inputs(cost, residual, life, method, inServiceDate, asOf, disposed);
     }
 
     /** Calculate from already-resolved inputs. */

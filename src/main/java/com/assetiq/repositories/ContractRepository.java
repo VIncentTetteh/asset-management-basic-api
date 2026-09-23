@@ -44,4 +44,22 @@ public interface ContractRepository extends JpaRepository<Contract, UUID> {
             + "WHERE c.deletedAt IS NULL AND c.endDate < :today AND c.autoRenew = false "
             + "AND c.status IN (com.assetiq.enums.ContractStatus.ACTIVE, com.assetiq.enums.ContractStatus.EXPIRING_SOON)")
     int expirePastEndDate(@Param("today") LocalDate today, @Param("now") java.time.Instant now);
+
+    /**
+     * Live contracts ending on or before {@code cutoff}, including ones already
+     * past their end date, as slim due-rows.
+     *
+     * <p>Cost: an index range scan on {@code end_date} within the tenant plus a
+     * primary-key join to {@code supplier}.
+     */
+    @Query("SELECT new com.assetiq.services.insights.DueRow("
+            + "c.id, c.title, c.contractNumber, c.endDate, c.value, null, c.currency, s.id, s.name) "
+            + "FROM Contract c LEFT JOIN c.supplier s "
+            + "WHERE c.organisation = :org AND c.deletedAt IS NULL AND c.endDate <= :cutoff "
+            + "AND c.status NOT IN (com.assetiq.enums.ContractStatus.EXPIRED, "
+            + "com.assetiq.enums.ContractStatus.TERMINATED) "
+            + "ORDER BY c.endDate ASC")
+    List<com.assetiq.services.insights.DueRow> findDueBy(@Param("org") Organisation org,
+                                                         @Param("cutoff") LocalDate cutoff);
+
 }

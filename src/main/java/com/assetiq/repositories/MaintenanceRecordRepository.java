@@ -34,4 +34,45 @@ public interface MaintenanceRecordRepository extends JpaRepository<MaintenanceRe
 
     Set<MaintenanceRecord> findByOrganisationAndNextDueDateBeforeAndDeletedAtIsNull(
             Organisation organisation, LocalDate date);
+
+    /**
+     * Open maintenance falling due on or before {@code cutoff}, including work
+     * already overdue, as a slim due-row.
+     *
+     * <p>Cost: an index range scan on {@code next_due_date} within the tenant,
+     * joined to {@code asset} on its primary key. Nothing is loaded as an entity,
+     * so the asset name costs no extra round trip.
+     */
+    @org.springframework.data.jpa.repository.Query(
+            "SELECT new com.assetiq.services.insights.DueRow("
+            + "r.id, a.name, r.description, r.nextDueDate, r.cost, null, r.currency, a.id, a.name) "
+            + "FROM MaintenanceRecord r LEFT JOIN r.asset a "
+            + "WHERE r.organisation = :org AND r.deletedAt IS NULL "
+            + "AND r.nextDueDate IS NOT NULL AND r.nextDueDate <= :cutoff "
+            + "AND r.status NOT IN (com.assetiq.enums.MaintenanceStatus.COMPLETED, "
+            + "com.assetiq.enums.MaintenanceStatus.CANCELLED) "
+            + "ORDER BY r.nextDueDate ASC")
+    java.util.List<com.assetiq.services.insights.DueRow> findDueBy(
+            @org.springframework.data.repository.query.Param("org") Organisation org,
+            @org.springframework.data.repository.query.Param("cutoff") LocalDate cutoff);
+
+    /** How many open maintenance jobs are past their due date, whatever the reporting period. */
+    @org.springframework.data.jpa.repository.Query(
+            "SELECT COUNT(r) FROM MaintenanceRecord r WHERE r.organisation = :org AND r.deletedAt IS NULL "
+            + "AND r.nextDueDate IS NOT NULL AND r.nextDueDate < :today "
+            + "AND r.status NOT IN (com.assetiq.enums.MaintenanceStatus.COMPLETED, "
+            + "com.assetiq.enums.MaintenanceStatus.CANCELLED)")
+    long countOverdue(@org.springframework.data.repository.query.Param("org") Organisation org,
+                      @org.springframework.data.repository.query.Param("today") LocalDate today);
+
+    /** Distinct assets with maintenance open and past due, whatever the reporting period. */
+    @org.springframework.data.jpa.repository.Query(
+            "SELECT COUNT(DISTINCT r.asset.id) FROM MaintenanceRecord r "
+            + "WHERE r.organisation = :org AND r.deletedAt IS NULL AND r.asset IS NOT NULL "
+            + "AND r.nextDueDate IS NOT NULL AND r.nextDueDate <= :today "
+            + "AND r.status NOT IN (com.assetiq.enums.MaintenanceStatus.COMPLETED, "
+            + "com.assetiq.enums.MaintenanceStatus.CANCELLED)")
+    long countAssetsNeedingMaintenance(@org.springframework.data.repository.query.Param("org") Organisation org,
+                                       @org.springframework.data.repository.query.Param("today") LocalDate today);
+
 }

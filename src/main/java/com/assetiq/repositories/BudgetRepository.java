@@ -38,4 +38,20 @@ public interface BudgetRepository extends JpaRepository<Budget, UUID> {
             "AND b.totalAmount IS NOT NULL AND b.totalAmount > 0 " +
             "AND b.spentAmount IS NOT NULL")
     Page<Budget> findActiveWithSpend(Pageable pageable);
+
+    /**
+     * Budgets of one tenant whose period overlaps {@code [from, to]}.
+     *
+     * <p>Overlap, not containment: a budget running Apr-Mar is part of how a
+     * calendar year was spent even though neither endpoint falls inside it.
+     *
+     * <p>Cost: an indexed range scan on {@code (organisation_id, period_start)}.
+     */
+    @Query("SELECT b FROM Budget b WHERE b.organisation = :org AND b.deletedAt IS NULL "
+            + "AND b.periodStart <= :to AND b.periodEnd >= :from "
+            + "ORDER BY b.periodStart DESC")
+    List<Budget> findOverlapping(@Param("org") Organisation org,
+                                 @Param("from") java.time.LocalDate from,
+                                 @Param("to") java.time.LocalDate to);
+
 }
