@@ -51,7 +51,10 @@ import java.util.UUID;
 @Transactional(readOnly = true)
 public class CostWasteService {
 
-    /** Default idleness threshold; a quarter of neglect is a decision, not an oversight. */
+    /**
+     * Default gap-in-sightings threshold; half a year unseen is a decision, not
+     * an oversight. Named "idle" for the query parameter the UI already sends.
+     */
     public static final int DEFAULT_IDLE_DAYS = 180;
     public static final int MAX_IDLE_DAYS = 3650;
     /** Records listed under each finding, so a response stays a page, not a dump. */
@@ -60,13 +63,16 @@ public class CostWasteService {
 
     private final AssetRepository assetRepository;
     private final SoftwareLicenseRepository licenseRepository;
+    private final AssetSightingService sightingService;
     private final MoneyAggregator moneyAggregator;
 
     public CostWasteService(AssetRepository assetRepository,
                             SoftwareLicenseRepository licenseRepository,
+                            AssetSightingService sightingService,
                             MoneyAggregator moneyAggregator) {
         this.assetRepository = assetRepository;
         this.licenseRepository = licenseRepository;
+        this.sightingService = sightingService;
         this.moneyAggregator = moneyAggregator;
     }
 
@@ -112,7 +118,10 @@ public class CostWasteService {
                                List<Map<String, Object>> findings, Set<UUID> flagged,
                                MoneyAccumulator capitalTiedUp) {
         List<AssetValuationRow> rows = assetRepository.findValuationRows(org);
-        Instant idleCutoff = Instant.now().minus(Duration.ofDays(idleDays));
+        // Two grouped queries for the whole tenant; nothing per asset.
+        Map<UUID, AssetSighting> sightings = sightingService.sightingsFor(org);
+        Instant now = Instant.now();
+        Instant unseenCutoff = now.minus(Duration.ofDays(idleDays));
 
         Finding fullyDepreciated = new Finding(fx,
                 "FULLY_DEPRECIATED_ACTIVE",
@@ -122,13 +131,17 @@ public class CostWasteService {
                         + "purchase rather than a planned one.",
                 Map.of("fullyDepreciated", "true"));
 
-        Finding idle = new Finding(fx,
-                "IDLE_IN_STOCK",
-                "In stock or reserved and untouched for " + idleDays + "+ days",
-                "Assets held in stock or reserved that nobody has scanned or edited for "
-                        + idleDays + " days. Idleness is inferred from the last scan, falling back to the "
-                        + "last edit — AssetIQ records no usage telemetry, so this says 'nobody has "
-                        + "touched the record', not 'nobody has used the thing'.",
+        Finding unseen = new Finding(fx,
+                "NOT_SEEN_IN_STOCK",
+                "In stock or reserved and not seen for " + idleDays + "+ days",
+                "Assets held in stock or reserved that nobody is recorded as having seen for "
+                        + idleDays + " days. A sighting means a scan, a checkout or check-in, or a "
+                        + "physical audit verification — somebody was in the same room as the asset. "
+                        + "Editing the record is not a sighting and does not count here. AssetIQ "
+                        + "records no usage telemetry, so this says 'nobody has seen it', never "
+                        + "'nobody is using it'. Assets with no sighting at all are included only "
+                        + "once their record has existed for at least this long, so a tenant who has "
+                        + "just imported their stock is not told it has gone missing.",
                 Map.of("status", "IN_STOCK"));
 
         Finding unassigned = new Finding(fx,
@@ -167,12 +180,22 @@ public class CostWasteService {
                         : "Useful life ended " + endOfLife);
             }
 
-            if ((row.status() == AssetStatus.IN_STOCK || row.status() == AssetStatus.RESERVED)) {
-                Instant touched = row.lastTouchedAt();
-                if (touched != null && touched.isBefore(idleCutoff)) {
-                    long days = ChronoUnit.DAYS.between(touched, Instant.now());
-                    idle.add(row, depreciation, (row.lastScannedAt() != null ? "Last scanned " : "Last edited ")
-                            + days + " days ago");
+            if (row.status() == AssetStatus.IN_STOCK || row.status() == AssetStatus.RESERVED) {
+                AssetSighting sighting = AssetSightingService.sightingFor(
+                        row.id(), row.lastScannedAt(), sightings);
+                if (sighting != null) {
+                    if (sighting.at().isBefore(unseenCutoff)) {
+                        unseen.add(row, depreciation, sighting.describe(now));
+                    }
+                } else {
+                    // Never scanned, checked out or audited. The record's age is a
+                    // lower bound on the gap, and is reported as exactly that.
+                    Instant recordActivity = row.lastRecordActivityAt();
+                    if (recordActivity != null && recordActivity.isBefore(unseenCutoff)) {
+                        unseen.add(row, depreciation, "Never scanned, checked out or audited; "
+                                + "record unchanged for "
+                                + ChronoUnit.DAYS.between(recordActivity, now) + " days");
+                    }
                 }
             }
 
@@ -190,7 +213,7 @@ public class CostWasteService {
             }
         }
 
-        for (Finding f : List.of(fullyDepreciated, idle, unassigned, missing, unusable)) {
+        for (Finding f : List.of(fullyDepreciated, unseen, unassigned, missing, unusable)) {
             findings.add(f.toMap(limit, showMoney));
             f.contributeDistinct(flagged, capitalTiedUp);
         }

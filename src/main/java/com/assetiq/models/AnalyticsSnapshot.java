@@ -46,8 +46,18 @@ public class AnalyticsSnapshot extends BaseEntity {
     @Column(name = "active_asset_count", nullable = false)
     private long activeAssetCount;
 
+    /**
+     * Assets in stock or reserved that nobody is recorded as having seen for
+     * {@code CostWasteService.DEFAULT_IDLE_DAYS} days — a sighting being a scan,
+     * a checkout or check-in, or an audit verification.
+     *
+     * <p>The column is still called {@code idle_asset_count}: it was created one
+     * migration ago under that name, migrations here are expand-only, and
+     * renaming a column to fix a word is not worth a rewrite. The name in the
+     * API and in this field is the accurate one.
+     */
     @Column(name = "idle_asset_count", nullable = false)
-    private long idleAssetCount;
+    private long notSeenAssetCount;
 
     @Column(name = "unassigned_in_use_count", nullable = false)
     private long unassignedInUseCount;

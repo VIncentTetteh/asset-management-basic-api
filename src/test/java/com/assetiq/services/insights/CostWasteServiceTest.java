@@ -7,6 +7,8 @@ import com.assetiq.enums.LicenseType;
 import com.assetiq.models.Organisation;
 import com.assetiq.models.SoftwareLicense;
 import com.assetiq.repositories.AssetRepository;
+import com.assetiq.repositories.AuditItemRepository;
+import com.assetiq.repositories.CheckoutRecordRepository;
 import com.assetiq.repositories.SoftwareLicenseRepository;
 import com.assetiq.services.money.MoneyTestSupport;
 import org.junit.jupiter.api.BeforeEach;
@@ -26,6 +28,8 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -36,6 +40,8 @@ class CostWasteServiceTest {
 
     @Mock AssetRepository assetRepository;
     @Mock SoftwareLicenseRepository licenseRepository;
+    @Mock CheckoutRecordRepository checkoutRepository;
+    @Mock AuditItemRepository auditItemRepository;
 
     private CostWasteService service;
     private Organisation org;
@@ -43,7 +49,12 @@ class CostWasteServiceTest {
 
     @BeforeEach
     void setUp() {
+        // No checkouts and no audits by default: the only sightings a test sees
+        // are the ones it sets up on the asset row itself.
+        lenient().when(checkoutRepository.findLatestHandlingPerAsset(any())).thenReturn(List.of());
+        lenient().when(auditItemRepository.findLatestVerificationPerAsset(any())).thenReturn(List.of());
         service = new CostWasteService(assetRepository, licenseRepository,
+                new AssetSightingService(checkoutRepository, auditItemRepository),
                 MoneyTestSupport.aggregatorWithRates(Map.of("USD", "10")));
         org = InsightTestFixtures.org("GHS");
     }
@@ -61,12 +72,12 @@ class CostWasteServiceTest {
                 // Fully depreciated 2 months ago and still in service.
                 InsightTestFixtures.asset("Laptop", "GHS", "1000")
                         .depreciatedOver(12, today.minusMonths(14)).build(),
-                // In stock and untouched for a year.
+                // In stock, last scanned a year ago: a real gap in sightings.
                 InsightTestFixtures.asset("Spare", "GHS", "500")
-                        .status(AssetStatus.IN_STOCK).touchedDaysAgo(365).build(),
-                // In stock but touched last week: not idle.
+                        .status(AssetStatus.IN_STOCK).scannedDaysAgo(365).touchedDaysAgo(365).build(),
+                // In stock and scanned last week: seen recently, not flagged.
                 InsightTestFixtures.asset("Fresh", "GHS", "500")
-                        .status(AssetStatus.IN_STOCK).touchedDaysAgo(7).build(),
+                        .status(AssetStatus.IN_STOCK).scannedDaysAgo(7).touchedDaysAgo(7).build(),
                 // In use with nobody holding it.
                 InsightTestFixtures.asset("Orphan", "GHS", "300").unassigned().build(),
                 InsightTestFixtures.asset("Gone", "GHS", "200").status(AssetStatus.MISSING).build(),
@@ -80,7 +91,7 @@ class CostWasteServiceTest {
         Map<String, Object> r = service.costWaste(org, null, null, everything);
 
         assertThat(finding(r, "FULLY_DEPRECIATED_ACTIVE").get("count")).isEqualTo(1L);
-        assertThat(finding(r, "IDLE_IN_STOCK").get("count")).isEqualTo(1L);
+        assertThat(finding(r, "NOT_SEEN_IN_STOCK").get("count")).isEqualTo(1L);
         assertThat(finding(r, "UNASSIGNED_IN_USE").get("count")).isEqualTo(1L);
         assertThat(finding(r, "MISSING").get("count")).isEqualTo(1L);
         assertThat(finding(r, "UNUSABLE_CONDITION").get("count")).isEqualTo(1L);

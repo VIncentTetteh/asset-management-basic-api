@@ -70,15 +70,16 @@ public record AssetValuationRow(
     }
 
     /**
-     * The most recent moment anybody is known to have touched this asset:
-     * a scan if there is one, otherwise the last edit. Never invented — null
-     * when the asset has neither, and callers must say so rather than treating
-     * it as "idle forever".
+     * The last time this asset's <em>record</em> changed.
+     *
+     * <p>Not a sighting, and not evidence of use: an import, a category rename
+     * or a corrected serial number all move it without anybody going near the
+     * asset. It is only good for one thing — bounding how long an asset with no
+     * sighting at all has gone unseen — and callers must describe it as record
+     * activity, never as idleness. For a real sighting see
+     * {@link AssetSightingService}.
      */
-    public Instant lastTouchedAt() {
-        if (lastScannedAt != null && updatedAt != null) {
-            return lastScannedAt.isAfter(updatedAt) ? lastScannedAt : updatedAt;
-        }
-        return lastScannedAt != null ? lastScannedAt : updatedAt;
+    public Instant lastRecordActivityAt() {
+        return updatedAt;
     }
 }

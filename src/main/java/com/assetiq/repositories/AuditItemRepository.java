@@ -66,4 +66,17 @@ public interface AuditItemRepository extends JpaRepository<AuditItem, UUID> {
                            @Param("discrepancyType") AuditDiscrepancyType discrepancyType,
                            @Param("searchPattern") String searchPattern,
                            Pageable pageable);
+
+    /**
+     * Per asset, the latest moment a physical audit confirmed it was there.
+     *
+     * <p>The strongest sighting AssetIQ holds: somebody stood in front of the
+     * asset and said so. Cost: one grouped scan of the tenant's audit items,
+     * restricted to verified rows. Rows are {@code [assetId, verifiedAt]}.
+     */
+    @Query("SELECT i.asset.id, MAX(i.verifiedAt) FROM AuditItem i "
+            + "WHERE i.organisation = :organisation AND i.deletedAt IS NULL "
+            + "AND i.asset IS NOT NULL AND i.verifiedAt IS NOT NULL GROUP BY i.asset.id")
+    List<Object[]> findLatestVerificationPerAsset(@Param("organisation") Organisation organisation);
+
 }

@@ -19,6 +19,8 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 import java.util.Optional;
 
 /**
@@ -31,24 +33,27 @@ import java.util.Optional;
 @Service
 public class AnalyticsSnapshotService {
 
-    /** Matches {@link CostWasteService#DEFAULT_IDLE_DAYS} so "idle" means one thing. */
-    private static final int IDLE_DAYS = CostWasteService.DEFAULT_IDLE_DAYS;
+    /** Matches {@link CostWasteService#DEFAULT_IDLE_DAYS} so "not seen" means one thing. */
+    private static final int UNSEEN_DAYS = CostWasteService.DEFAULT_IDLE_DAYS;
 
     private final AssetRepository assetRepository;
     private final MaintenanceRecordRepository maintenanceRepository;
     private final SoftwareLicenseRepository licenseRepository;
     private final AnalyticsSnapshotRepository snapshotRepository;
+    private final AssetSightingService sightingService;
     private final MoneyAggregator moneyAggregator;
 
     public AnalyticsSnapshotService(AssetRepository assetRepository,
                                     MaintenanceRecordRepository maintenanceRepository,
                                     SoftwareLicenseRepository licenseRepository,
                                     AnalyticsSnapshotRepository snapshotRepository,
+                                    AssetSightingService sightingService,
                                     MoneyAggregator moneyAggregator) {
         this.assetRepository = assetRepository;
         this.maintenanceRepository = maintenanceRepository;
         this.licenseRepository = licenseRepository;
         this.snapshotRepository = snapshotRepository;
+        this.sightingService = sightingService;
         this.moneyAggregator = moneyAggregator;
     }
 
@@ -72,10 +77,12 @@ public class AnalyticsSnapshotService {
         MoneyAccumulator accumulated = fx.newAccumulator();
         MoneyAccumulator monthly = fx.newAccumulator();
 
-        Instant idleCutoff = Instant.now().minus(Duration.ofDays(IDLE_DAYS));
+        Map<UUID, AssetSighting> sightings = sightingService.sightingsFor(org);
+        Instant now = Instant.now();
+        Instant unseenCutoff = now.minus(Duration.ofDays(UNSEEN_DAYS));
         long assetCount = 0;
         long active = 0;
-        long idle = 0;
+        long notSeen = 0;
         long unassigned = 0;
         long fullyDepreciated = 0;
 
@@ -93,9 +100,13 @@ public class AnalyticsSnapshotService {
             if (row.active()) {
                 active++;
             }
-            if ((row.status() == AssetStatus.IN_STOCK || row.status() == AssetStatus.RESERVED)
-                    && row.lastTouchedAt() != null && row.lastTouchedAt().isBefore(idleCutoff)) {
-                idle++;
+            if (row.status() == AssetStatus.IN_STOCK || row.status() == AssetStatus.RESERVED) {
+                AssetSighting sighting = AssetSightingService.sightingFor(
+                        row.id(), row.lastScannedAt(), sightings);
+                Instant lastEvidence = sighting != null ? sighting.at() : row.lastRecordActivityAt();
+                if (lastEvidence != null && lastEvidence.isBefore(unseenCutoff)) {
+                    notSeen++;
+                }
             }
             if (row.status() == AssetStatus.IN_USE && row.assignedUserId() == null) {
                 unassigned++;
@@ -112,7 +123,7 @@ public class AnalyticsSnapshotService {
         snapshot.setComplete(fx.isComplete());
         snapshot.setAssetCount(assetCount);
         snapshot.setActiveAssetCount(active);
-        snapshot.setIdleAssetCount(idle);
+        snapshot.setNotSeenAssetCount(notSeen);
         snapshot.setUnassignedInUseCount(unassigned);
         snapshot.setFullyDepreciatedCount(fullyDepreciated);
         snapshot.setTotalCost(cost.amount());

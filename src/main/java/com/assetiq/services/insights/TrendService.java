@@ -100,7 +100,7 @@ public class TrendService {
             p.put("date", s.getSnapshotDate().toString());
             p.put("assetCount", s.getAssetCount());
             p.put("activeAssetCount", s.getActiveAssetCount());
-            p.put("idleAssetCount", s.getIdleAssetCount());
+            p.put("notSeenAssetCount", s.getNotSeenAssetCount());
             p.put("unassignedInUseCount", s.getUnassignedInUseCount());
             p.put("fullyDepreciatedCount", s.getFullyDepreciatedCount());
             p.put("overdueMaintenanceCount", s.getOverdueMaintenanceCount());
@@ -140,7 +140,7 @@ public class TrendService {
         change.put("to", last.getSnapshotDate().toString());
         change.put("assetCount", last.getAssetCount() - first.getAssetCount());
         change.put("activeAssetCount", last.getActiveAssetCount() - first.getActiveAssetCount());
-        change.put("idleAssetCount", last.getIdleAssetCount() - first.getIdleAssetCount());
+        change.put("notSeenAssetCount", last.getNotSeenAssetCount() - first.getNotSeenAssetCount());
         change.put("unassignedInUseCount", last.getUnassignedInUseCount() - first.getUnassignedInUseCount());
         change.put("overdueMaintenanceCount",
                 last.getOverdueMaintenanceCount() - first.getOverdueMaintenanceCount());

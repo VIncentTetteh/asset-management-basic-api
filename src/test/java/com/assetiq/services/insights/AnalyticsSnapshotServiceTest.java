@@ -5,6 +5,8 @@ import com.assetiq.models.AnalyticsSnapshot;
 import com.assetiq.models.Organisation;
 import com.assetiq.repositories.AnalyticsSnapshotRepository;
 import com.assetiq.repositories.AssetRepository;
+import com.assetiq.repositories.AuditItemRepository;
+import com.assetiq.repositories.CheckoutRecordRepository;
 import com.assetiq.repositories.MaintenanceRecordRepository;
 import com.assetiq.repositories.SoftwareLicenseRepository;
 import com.assetiq.services.money.MoneyTestSupport;
@@ -36,6 +38,8 @@ class AnalyticsSnapshotServiceTest {
     @Mock MaintenanceRecordRepository maintenanceRepository;
     @Mock SoftwareLicenseRepository licenseRepository;
     @Mock AnalyticsSnapshotRepository snapshotRepository;
+    @Mock CheckoutRecordRepository checkoutRepository;
+    @Mock AuditItemRepository auditItemRepository;
 
     private AnalyticsSnapshotService service;
     private Organisation org;
@@ -43,8 +47,11 @@ class AnalyticsSnapshotServiceTest {
 
     @BeforeEach
     void setUp() {
+        lenient().when(checkoutRepository.findLatestHandlingPerAsset(any())).thenReturn(List.of());
+        lenient().when(auditItemRepository.findLatestVerificationPerAsset(any())).thenReturn(List.of());
         service = new AnalyticsSnapshotService(assetRepository, maintenanceRepository,
                 licenseRepository, snapshotRepository,
+                new AssetSightingService(checkoutRepository, auditItemRepository),
                 MoneyTestSupport.aggregatorWithRates(Map.of("USD", "15")));
         org = InsightTestFixtures.org("GHS");
         lenient().when(snapshotRepository.save(any())).thenAnswer(i -> i.getArgument(0));
@@ -65,7 +72,8 @@ class AnalyticsSnapshotServiceTest {
                 InsightTestFixtures.asset("B", "USD", "100")
                         .depreciatedOver(10, today.minusMonths(2)).build(),           // 20 USD written off
                 InsightTestFixtures.asset("C", "GHS", "200")
-                        .status(AssetStatus.IN_STOCK).touchedDaysAgo(400).build(),    // idle
+                        .status(AssetStatus.IN_STOCK).scannedDaysAgo(400)
+                        .touchedDaysAgo(400).build(),                                 // not seen for a year
                 InsightTestFixtures.asset("D", "GHS", "300").unassigned().build(),    // in use, nobody holds it
                 InsightTestFixtures.asset("E", "GHS", "999")
                         .status(AssetStatus.DISPOSED).build()));                      // off the books
@@ -76,7 +84,7 @@ class AnalyticsSnapshotServiceTest {
 
         assertThat(snapshot.getAssetCount()).isEqualTo(4L);
         assertThat(snapshot.getActiveAssetCount()).isEqualTo(4L);
-        assertThat(snapshot.getIdleAssetCount()).isEqualTo(1L);
+        assertThat(snapshot.getNotSeenAssetCount()).isEqualTo(1L);
         assertThat(snapshot.getUnassignedInUseCount()).isEqualTo(1L);
         assertThat(snapshot.getFullyDepreciatedCount()).isEqualTo(1L);
         assertThat(snapshot.getTotalCost().toPlainString()).isEqualTo("3000.00");   // 1000 + 1500 + 200 + 300
