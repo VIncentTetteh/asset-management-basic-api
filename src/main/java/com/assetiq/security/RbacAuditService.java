@@ -155,6 +155,41 @@ public class RbacAuditService {
                 "POST", "/users/me/password");
     }
 
+    // ── Invitation events ─────────────────────────────────────────────────────
+
+    /**
+     * Records that someone was invited, and to which role. The target is the
+     * invitation, not an address: who was invited is answerable from the
+     * invitation row, and the audit trail is read by people who do not need every
+     * mailbox in it.
+     */
+    @Transactional
+    public void recordInvitationSent(UUID invitationId, String roleName) {
+        persist(AuditEventType.INVITATION_SENT,
+                invitationId.toString(), null, roleName,
+                "POST", "/api/v1/invitations");
+    }
+
+    /** Records that an invitation was withdrawn before redemption. */
+    @Transactional
+    public void recordInvitationRevoked(UUID invitationId, String roleName) {
+        persist(AuditEventType.INVITATION_REVOKED,
+                invitationId.toString(), roleName, null,
+                "POST", "/api/v1/invitations/" + invitationId + "/revoke");
+    }
+
+    /**
+     * Records a redeemed invitation. Written by an unauthenticated request, so
+     * there is no actor email — the invitation's inviter is the accountable party
+     * and is recorded on the INVITATION_SENT event this one pairs with.
+     */
+    @Transactional
+    public void recordInvitationAccepted(UUID invitationId, UUID newUserId, String roleName) {
+        persist(AuditEventType.INVITATION_ACCEPTED,
+                invitationId.toString(), null, newUserId + " as " + roleName,
+                "POST", "/api/v1/invitations/accept");
+    }
+
     // ── Auth events ───────────────────────────────────────────────────────────
 
     /**

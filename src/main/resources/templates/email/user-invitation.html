@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>You have been invited</title>
+</head>
+<!--
+  Invitation to join an organisation. Unlike email/user-invite.html — which is
+  sent when an administrator creates an account outright and therefore has to
+  put a temporary password in the message — this one carries a single-use link
+  and no credential of the recipient's. Nothing here is worth stealing except
+  the link, and the link expires.
+-->
+<body style="margin:0;padding:0;background-color:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f1f5f9;padding:48px 16px;">
+    <tr>
+      <td align="center">
+        <table width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;">
+
+          <tr>
+            <td style="background:linear-gradient(135deg,#0f172a 0%,#1e3a5f 100%);border-radius:12px 12px 0 0;padding:32px 40px;text-align:center;">
+              <span style="color:#f8fafc;font-size:22px;font-weight:700;letter-spacing:-0.3px;" th:text="${appName}">AssetIQ</span>
+              <p style="color:#93c5fd;font-size:13px;margin:4px 0 0 0;">Enterprise Asset Management</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background:#6366f1;height:4px;"></td>
+          </tr>
+
+          <tr>
+            <td style="background:#ffffff;padding:40px;border-left:1px solid #e2e8f0;border-right:1px solid #e2e8f0;">
+
+              <h1 style="color:#0f172a;font-size:22px;font-weight:700;margin:0 0 6px 0;text-align:center;">
+                Join <span th:text="${organisationName}">your organisation</span>
+              </h1>
+              <p style="color:#64748b;font-size:14px;margin:0 0 32px 0;text-align:center;">
+                <span th:if="${inviterName}" th:text="${inviterName}">A colleague</span><span th:unless="${inviterName}">An administrator</span>
+                has invited you to <span th:text="${organisationName}">your organisation</span> on <span th:text="${appName}">AssetIQ</span>.
+              </p>
+
+              <p style="color:#1e293b;font-size:15px;margin:0 0 12px 0;">
+                Hi <strong th:text="${firstName} ?: 'there'">there</strong>,
+              </p>
+              <p style="color:#475569;font-size:15px;line-height:1.65;margin:0 0 24px 0;">
+                Accept the invitation below to set your password and get access. You will join as
+                <strong th:text="${roleName}">a team member</strong><span th:if="${roleDescription}">
+                  — <span th:text="${roleDescription}">what that role can do</span></span>.
+              </p>
+
+              <div th:if="${note}" style="background:#f8fafc;border-left:3px solid #6366f1;border-radius:4px;padding:14px 18px;margin-bottom:24px;">
+                <p style="color:#475569;font-size:14px;font-style:italic;margin:0;" th:text="${note}">A note from the person who invited you.</p>
+              </div>
+
+              <div th:if="${permissions != null and !permissions.isEmpty()}" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:20px;margin-bottom:28px;">
+                <p style="color:#0f172a;font-size:13px;font-weight:700;margin:0 0 12px 0;text-transform:uppercase;letter-spacing:0.6px;">What you will be able to do</p>
+                <ul style="color:#475569;font-size:14px;line-height:1.7;margin:0;padding-left:20px;">
+                  <li th:each="permission : ${permissions}" th:text="${permission}">See the asset register</li>
+                </ul>
+              </div>
+
+              <div style="text-align:center;margin-bottom:28px;">
+                <a th:href="${acceptUrl}" href="#"
+                   style="display:inline-block;background:#6366f1;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;padding:14px 36px;border-radius:8px;">
+                  Accept invitation
+                </a>
+              </div>
+
+              <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:14px 18px;margin-bottom:28px;">
+                <p style="color:#92400e;font-size:13px;margin:0;">
+                  &#9888;&nbsp; This link works once and expires in
+                  <span th:text="${expiresHours}">168</span> hours. Do not forward it — anyone holding it can join in your place.
+                </p>
+              </div>
+
+              <hr style="border:none;border-top:1px solid #f1f5f9;margin:24px 0;"/>
+              <p style="color:#94a3b8;font-size:13px;line-height:1.5;margin:0;">
+                If you were not expecting this invitation you can ignore this email — nothing has been created in your name.
+                Questions? Contact
+                <a th:href="'mailto:' + ${supportEmail}" style="color:#3b82f6;text-decoration:none;" th:text="${supportEmail}">support</a>.
+              </p>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:0 0 12px 12px;padding:18px 40px;text-align:center;">
+              <p style="color:#94a3b8;font-size:12px;margin:0;">© <span th:text="${appName}">AssetIQ</span></p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

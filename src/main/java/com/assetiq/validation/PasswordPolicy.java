@@ -5,7 +5,8 @@ import java.nio.charset.StandardCharsets;
 /**
  * The one password policy, applied by {@link ValidPassword} to every place a
  * password is chosen: tenant registration, {@code /auth/register}, password
- * reset, admin-created users and self-service password change. The web app
+ * reset, admin-created users, accepting an invitation, and self-service
+ * password change. The web app
  * mirrors these numbers in {@code src/lib/field-limits.ts}.
  */
 public final class PasswordPolicy {

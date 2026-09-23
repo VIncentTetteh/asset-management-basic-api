@@ -113,7 +113,7 @@ public class TenantRegistrationServiceImpl implements TenantRegistrationService 
         Role adminRole = roleRepository.findByNameAndOrganisationId("ADMIN", savedOrg.getId()).orElseGet(() -> {
             Role r = new Role();
             r.setName("ADMIN");
-            r.setDescription("Organisation administrator with full permissions");
+            r.setDescription("Full access to everything, including people, roles, billing and settings. Keep at least two people in this role so nobody is locked out.");
             r.setGrantAllPermissions(true);
             r.setSystemRole(true);
             r.setOrganisation(savedOrg);
@@ -130,7 +130,7 @@ public class TenantRegistrationServiceImpl implements TenantRegistrationService 
         roleRepository.findByNameAndOrganisationId("USER", savedOrg.getId()).orElseGet(() -> {
             Role r = new Role();
             r.setName("USER");
-            r.setDescription("Standard user role with limited permissions");
+            r.setDescription("Day-to-day access: can see assets, colleagues, departments and reports, but cannot change them. A safe default for a new colleague.");
             r.setOrganisation(savedOrg);
             r.setCreatedBy(request.getAdminEmail());
             // Minimal view permissions via join table

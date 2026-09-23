@@ -51,6 +51,13 @@ public class EmailServiceImpl implements EmailService {
         log.info("[EMAIL] SMTP host: {}", smtpHost);
     }
 
+    @Override
+    public boolean isEnabled() {
+        return emailEnabled
+                && smtpHost != null && !smtpHost.isBlank()
+                && mailSenderProvider.getIfAvailable() != null;
+    }
+
     /**
      * Dispatched async: email must never block a request thread (a hung SMTP
      * socket previously held the caller's DB connection and starved the pool).

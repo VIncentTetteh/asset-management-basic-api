@@ -65,4 +65,15 @@ public enum AuditEventType {
 
     /** A user changed their own password (POST /users/me/password). */
     PASSWORD_CHANGED,
+
+    // ── Invitation events ─────────────────────────────────────────────────────
+
+    /** An administrator invited someone to join the organisation with a chosen role. */
+    INVITATION_SENT,
+
+    /** An invitation was withdrawn before it was redeemed. */
+    INVITATION_REVOKED,
+
+    /** An invitation was redeemed and the account created. */
+    INVITATION_ACCEPTED,
 }

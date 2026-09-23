@@ -9,6 +9,20 @@ public interface UsageLimitService {
     void assertCanCreateEmployee(Organisation organisation);
 
     /**
+     * Refuses when the organisation could not take {@code additionalSeats} more
+     * people on its current plan.
+     *
+     * <p>{@link #assertCanCreateEmployee} answers "is there one seat free right
+     * now", which is the wrong question when seats are being promised ahead of
+     * time: ten invitations sent against one free seat all pass that check and
+     * nine of them become a dead link. Invitation sending therefore reserves
+     * against the outstanding ones too.
+     *
+     * @throws org.springframework.security.access.AccessDeniedException when the plan cannot take them
+     */
+    void assertCanAddUsers(Organisation organisation, long additionalSeats);
+
+    /**
      * Refuses reactivating a user when every seat the plan allows is already taken
      * by an active user. Reactivation used to skip the plan check entirely, so a
      * tenant could deactivate, downgrade, and reactivate its way past the limit.

@@ -101,6 +101,13 @@ public class SecurityConfig {
                 .requestMatchers("/api/v1/auth/sso/**").permitAll()
                 // /auth/profile, /auth/refresh, /auth/logout remain AUTHENTICATED (see anyRequest below)
 
+                // ── Invitations: redeeming a link ──────────────────────────────────
+                // Necessarily public — the invitee has no account until they accept.
+                // The token in the body is the credential; everything that decides
+                // what they can do comes from the stored invitation, never the request.
+                .requestMatchers(HttpMethod.POST, "/api/v1/invitations/lookup").permitAll()
+                .requestMatchers(HttpMethod.POST, "/api/v1/invitations/accept").permitAll()
+
                 // ── MFA challenge — called during login before a full JWT is issued ──
                 .requestMatchers(HttpMethod.POST, "/api/v1/mfa/challenge").permitAll()
 

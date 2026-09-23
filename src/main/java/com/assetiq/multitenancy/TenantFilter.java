@@ -124,7 +124,13 @@ public class TenantFilter extends OncePerRequestFilter {
                 || path.equals("/api/v1/auth/verify-email")
                 || path.equals("/api/v1/auth/resend-verification")
                 || path.equals("/api/v1/auth/refresh")
-                || path.equals("/api/v1/auth/logout");
+                || path.equals("/api/v1/auth/logout")
+                // An invitee has no organisation until they accept; the token they
+                // present names it. The service resolves it from there and ignores
+                // any tenant header, which an unauthenticated caller could set to
+                // anything.
+                || path.equals("/api/v1/invitations/lookup")
+                || path.equals("/api/v1/invitations/accept");
     }
 
     private UUID extractOrgIdFromToken(Authentication auth) {

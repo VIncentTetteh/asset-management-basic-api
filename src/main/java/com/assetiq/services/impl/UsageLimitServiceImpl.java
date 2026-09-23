@@ -117,6 +117,28 @@ public class UsageLimitServiceImpl implements UsageLimitService {
     }
 
     @Override
+    public void assertCanAddUsers(Organisation organisation, long additionalSeats) {
+        long wanted = Math.max(1L, additionalSeats);
+        long userCount = userRepository.countByOrganisationAndDeletedAtIsNull(organisation);
+        if (licenseLimits.isPresent()) {
+            // The licence check refuses when the count it is given has already
+            // reached the ceiling, so reserving n seats means asking about the
+            // count that would exist after n-1 of them were taken.
+            licenseLimits.get().assertCanCreateUser(userCount + wanted - 1);
+            return;
+        }
+        SubscriptionPlan plan = resolveEffectivePlan(organisation);
+        int limit = seatLimit(plan);
+        if (userCount + wanted > limit) {
+            long free = Math.max(0L, limit - userCount);
+            throw new AccessDeniedException(
+                    "Your plan allows " + limit + " people and " + free + " of those seats are free"
+                            + " once the invitations you have already sent are counted."
+                            + " Revoke an outstanding invitation, deactivate a user, or upgrade your subscription.");
+        }
+    }
+
+    @Override
     public void assertCanActivateUser(Organisation organisation) {
         // A seat is an active user: deactivating frees one, reactivating takes one.
         long activeSeats = userRepository.countByOrganisationAndStatusAndDeletedAtIsNull(

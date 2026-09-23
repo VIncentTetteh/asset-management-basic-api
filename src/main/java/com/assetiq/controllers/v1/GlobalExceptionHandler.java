@@ -203,6 +203,19 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                 HttpStatus.TOO_MANY_REQUESTS);
     }
 
+    // An application-level allowance is spent (invitation sending, for example).
+    // Same 429 + Retry-After shape as the AI quota above so a client has one
+    // back-off path, with its own code so the message can be shown as-is.
+    @ExceptionHandler(com.assetiq.exceptions.TooManyRequestsException.class)
+    public ResponseEntity<Object> handleTooManyRequests(com.assetiq.exceptions.TooManyRequestsException ex) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.add(HttpHeaders.RETRY_AFTER, String.valueOf(ex.getRetryAfterSeconds()));
+        return new ResponseEntity<>(
+                errorBody(429, ex.getMessage(), "RATE_LIMITED"),
+                headers,
+                HttpStatus.TOO_MANY_REQUESTS);
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Object> handleUnexpected(Exception ex) {
         log.error("Unexpected error", ex);
