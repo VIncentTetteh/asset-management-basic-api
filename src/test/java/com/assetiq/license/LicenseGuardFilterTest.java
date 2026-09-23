@@ -14,13 +14,17 @@ import static org.mockito.Mockito.*;
 class LicenseGuardFilterTest {
 
     LicenseService licenseService;
+    /** Enforcement switched ON — the opt-in configuration. */
     LicenseGuardFilter filter;
+    /** The shipped default: enforcement OFF. */
+    LicenseGuardFilter defaultFilter;
     ObjectMapper objectMapper = new ObjectMapper();
 
     @BeforeEach
     void setUp() {
         licenseService = mock(LicenseService.class);
-        filter = new LicenseGuardFilter(licenseService, objectMapper);
+        filter = new LicenseGuardFilter(licenseService, objectMapper, true);
+        defaultFilter = new LicenseGuardFilter(licenseService, objectMapper);
     }
 
     // ── Cloud / valid license — all methods pass ──────────────────────────────
@@ -116,6 +120,42 @@ class LicenseGuardFilterTest {
         var chain = new MockFilterChain();
 
         filter.doFilterInternal(req, res, chain);
+
+        assertThat(res.getStatus()).isEqualTo(200);
+        assertThat(chain.getRequest()).isNotNull();
+    }
+
+    // ── Default configuration: a licence condition never blocks a write ───────
+
+    @Test
+    @DisplayName("by default a read-only licence does NOT block writes")
+    void byDefault_readOnlyDoesNotBlockWrites() throws Exception {
+        // The regression this pins: LicenseService used to mark the licence
+        // read-only whenever the vendor licence server was unreachable, so a
+        // customer's dropped outbound connection returned 402 on every write.
+        when(licenseService.getCurrentState()).thenReturn(
+            LicenseState.error("Cannot reach license server. Check your internet connection."));
+
+        var req   = new MockHttpServletRequest("POST", "/api/v1/assets");
+        var res   = new MockHttpServletResponse();
+        var chain = new MockFilterChain();
+
+        defaultFilter.doFilterInternal(req, res, chain);
+
+        assertThat(res.getStatus()).isEqualTo(200);
+        assertThat(chain.getRequest()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("by default an expired licence does NOT block writes either")
+    void byDefault_expiredDoesNotBlockWrites() throws Exception {
+        when(licenseService.getCurrentState()).thenReturn(LicenseState.expired("expired"));
+
+        var req   = new MockHttpServletRequest("DELETE", "/api/v1/assets/123");
+        var res   = new MockHttpServletResponse();
+        var chain = new MockFilterChain();
+
+        defaultFilter.doFilterInternal(req, res, chain);
 
         assertThat(res.getStatus()).isEqualTo(200);
         assertThat(chain.getRequest()).isNotNull();

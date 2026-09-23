@@ -16,7 +16,7 @@ import java.util.Map;
 public record LicenseState(
 
     /** Raw status string matching the License Server vocabulary. */
-    String status,          // valid | grace_period | expired | revoked | not_found | error
+    String status,          // valid | grace_period | expired | revoked | not_found | unlicensed | error
 
     /** true when write operations must be blocked. */
     boolean readOnly,
@@ -62,6 +62,22 @@ public record LicenseState(
                                 null, null, null, message);
     }
 
+    /**
+     * No key has been supplied. Distinct from {@link #error(String)}: an
+     * installation with no licence key is unlicensed, which is a commercial
+     * state, not a fault. It is not read-only — entitlement falls back to the
+     * free tier and the operator keeps full access to their own data.
+     */
+    public static LicenseState unlicensed(String message) {
+        return new LicenseState("unlicensed", false, null, null, 0, 0,
+                                Map.of(), Map.of(), null, message);
+    }
+
+    /**
+     * Something is wrong with the key itself — a bad signature, an unreadable
+     * response. Never used for "the licence server could not be reached": see
+     * {@code LicenseService#buildStateFromLocalClaims}.
+     */
     public static LicenseState error(String message) {
         return new LicenseState("error", true, null, null, 0, 0,
                                 null, null, null, message);

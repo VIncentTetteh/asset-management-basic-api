@@ -25,7 +25,27 @@ import java.util.Set;
  * In cloud mode this filter class is never loaded into the Spring context,
  * so cloud behaviour is completely unchanged.</p>
  *
- * <p>Read-only enforcement rules:</p>
+ * <h2>Enforcement is OFF by default</h2>
+ * <p>{@code app.license.enforcement.block-writes} defaults to {@code false}, so
+ * this filter logs and lets the request through. Blocking writes is opt-in.</p>
+ *
+ * <p>Why: the state this filter reads was, until recently, set to read-only
+ * whenever {@link LicenseService} could not reach the vendor licence server. A
+ * dropped outbound connection at a customer site therefore became an outage of
+ * their asset register — every write 402 — for a licence that was valid and said
+ * so in its own signature. {@code LicenseService} no longer derives read-only
+ * from a network failure, which fixes the cause; leaving the switch off as well
+ * means no future change to state derivation can quietly turn a licensing
+ * condition into an outage.</p>
+ *
+ * <p>The self-hosted path that replaced this one,
+ * {@link com.assetiq.license.offline.OfflineLicenseService}, does not call home
+ * at all and degrades an absent, expired or tampered key to the free tier. This
+ * filter is retained because {@code APP_MODE=standalone} installations and the
+ * {@code /api/v1/license/status} endpoint still consume {@link LicenseService};
+ * deleting it would break them for no gain.</p>
+ *
+ * <p>Enforcement rules when {@code app.license.enforcement.block-writes=true}:</p>
  * <ul>
  *   <li>GET, HEAD, OPTIONS — always allowed (read access preserved)</li>
  *   <li>POST, PUT, PATCH, DELETE — blocked with HTTP 402 when license is read-only</li>
@@ -60,9 +80,30 @@ public class LicenseGuardFilter extends OncePerRequestFilter {
     private final LicenseService licenseService;
     private final ObjectMapper   objectMapper;
 
+    /**
+     * Opt-in hard stop. Off by default: a licensing condition must degrade, not
+     * take the customer's installation down.
+     */
+    private final boolean blockWrites;
+
     public LicenseGuardFilter(LicenseService licenseService, ObjectMapper objectMapper) {
+        this(licenseService, objectMapper, false);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public LicenseGuardFilter(
+            LicenseService licenseService,
+            ObjectMapper objectMapper,
+            @org.springframework.beans.factory.annotation.Value(
+                    "${app.license.enforcement.block-writes:false}") boolean blockWrites) {
         this.licenseService = licenseService;
         this.objectMapper   = objectMapper;
+        this.blockWrites    = blockWrites;
+        if (blockWrites) {
+            log.warn("[LICENSE] Write blocking is ENABLED "
+                     + "(app.license.enforcement.block-writes=true). A read-only licence state "
+                     + "will return HTTP 402 on every mutating request.");
+        }
     }
 
     @Override
@@ -75,6 +116,17 @@ public class LicenseGuardFilter extends OncePerRequestFilter {
         if (WRITE_METHODS.contains(method) && !isExempt(path)) {
             LicenseState state = licenseService.getCurrentState();
             if (state.readOnly()) {
+                if (!blockWrites) {
+                    // Degrade, never hard-stop. The licence condition is worth a log
+                    // line and a banner in the UI (via /api/v1/license/status); it is
+                    // not worth refusing to record an asset movement.
+                    log.warn("[LICENSE] {} {} allowed despite licence status '{}': write blocking "
+                             + "is disabled (app.license.enforcement.block-writes=false). {}",
+                             method, path, state.status(),
+                             state.message() == null ? "" : state.message());
+                    chain.doFilter(req, res);
+                    return;
+                }
                 log.debug("License read-only guard blocked {} {}", method, path);
                 res.setStatus(402);
                 res.setContentType("application/json;charset=UTF-8");

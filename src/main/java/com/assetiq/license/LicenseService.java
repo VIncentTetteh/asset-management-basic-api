@@ -151,7 +151,10 @@ public class LicenseService {
     void refreshState() {
         String keyToken = resolveKeyToken();
         if (keyToken == null || keyToken.isBlank()) {
-            cachedState.set(LicenseState.error(
+            // Unlicensed, not broken. Entitlement falls back to the free tier via
+            // LicensePlanLimitsService; writes are not blocked. See
+            // LicenseGuardFilter for why nothing here hard-stops the application.
+            cachedState.set(LicenseState.unlicensed(
                 "No license key configured. Enter your key at Settings → License."));
             return;
         }
@@ -239,6 +242,29 @@ public class LicenseService {
 
     // ── Local fallback ────────────────────────────────────────────────────────
 
+    /**
+     * Resolves entitlement from the signed key alone, after the licence server
+     * could not be reached.
+     *
+     * <p>This method used to return {@code LicenseState.error(...)} — which is a
+     * read-only state — when the server had been unreachable for longer than the
+     * grace period, or when it had never been reached at all after the first 24
+     * hours. Combined with {@link LicenseGuardFilter} that turned a network
+     * problem at the customer's site into an outage of their asset register:
+     * every write returning HTTP 402, for a licence that is perfectly valid and
+     * says so in its own signature.</p>
+     *
+     * <p>It no longer does. A failure to reach the server produces the state the
+     * key itself asserts. The key is an RS256 document verified locally against a
+     * public key baked into the build, so its plan, its limits and its expiry are
+     * exactly as trustworthy offline as online. What the server adds is
+     * revocation — a signal that only ever arrives from a <em>successful</em>
+     * call — and revocation is a vendor-side commercial event, not something
+     * worth holding a customer's data hostage over when the network is down.</p>
+     *
+     * <p>An expired key past its grace window is still read-only: that is the key
+     *'s own claim, established offline, not an inference from a missing packet.</p>
+     */
     @SuppressWarnings("unchecked")
     private LicenseState buildStateFromLocalClaims(Claims claims) {
         Instant expiresAt       = claims.getExpiration().toInstant();
@@ -249,33 +275,30 @@ public class LicenseService {
         long daysRemaining      = Duration.between(Instant.now(), expiresAt).toDays();
         Instant lastRemote      = getLastRemoteValidationAt();
 
-        // Key not yet expired
+        // Key not yet expired: honour it, however long the server has been away.
         if (Instant.now().isBefore(expiresAt)) {
             if (lastRemote == null) {
-                // Never successfully validated remotely — conservative: allow up to 1 day
-                boolean withinInitialGrace = Duration.between(
-                    getSettingsUpdatedAt(), Instant.now()).toHours() < 24;
-                return withinInitialGrace
-                    ? LicenseState.valid(plan, expiresAt, daysRemaining, graceDays, limits, features, null)
-                    : LicenseState.error("Cannot reach license server. Check your internet connection.");
+                log.warn("Licence server has never been reached. Continuing on the signed key "
+                         + "(plan={}, expires={}); writes are NOT blocked.", plan, expiresAt);
+            } else {
+                long hoursSinceValidation = Duration.between(lastRemote, Instant.now()).toHours();
+                if (hoursSinceValidation >= (long) graceDays * 24) {
+                    log.warn("Licence server unreachable for {}h (grace {}d). Continuing on the "
+                             + "signed key (plan={}, expires={}); writes are NOT blocked.",
+                             hoursSinceValidation, graceDays, plan, expiresAt);
+                }
             }
-            // Was validated before — use grace period from last successful check
-            long hoursSinceValidation = Duration.between(lastRemote, Instant.now()).toHours();
-            long gracePeriodHours     = (long) graceDays * 24;
-            return hoursSinceValidation < gracePeriodHours
-                ? LicenseState.valid(plan, expiresAt, daysRemaining, graceDays, limits, features, lastRemote)
-                : LicenseState.error("Cannot reach license server. Grace period exceeded — contact support.");
+            return LicenseState.valid(plan, expiresAt, daysRemaining, graceDays,
+                                      limits, features, lastRemote);
         }
 
-        // Key is past its expiry date
-        if (lastRemote != null) {
-            Instant graceEnd = expiresAt.plusSeconds((long) graceDays * 86400);
-            if (Instant.now().isBefore(graceEnd)) {
-                long graceDaysLeft = Duration.between(Instant.now(), graceEnd).toDays();
-                return LicenseState.gracePeriod(plan, expiresAt, 0,
-                    graceDays, limits, features, lastRemote,
-                    "License expired. " + graceDaysLeft + " grace day(s) remaining.");
-            }
+        // Key is past its own expiry date — a fact from the signature, not the network.
+        Instant graceEnd = expiresAt.plusSeconds((long) graceDays * 86400);
+        if (Instant.now().isBefore(graceEnd)) {
+            long graceDaysLeft = Duration.between(Instant.now(), graceEnd).toDays();
+            return LicenseState.gracePeriod(plan, expiresAt, 0,
+                graceDays, limits, features, lastRemote,
+                "License expired. " + graceDaysLeft + " grace day(s) remaining.");
         }
         return LicenseState.expired("License has expired. Renew at https://portal.assetiq.io");
     }
