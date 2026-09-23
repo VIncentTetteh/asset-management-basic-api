@@ -93,7 +93,13 @@ Resources:
         # IMDSv2 required. IMDSv1 lets any SSRF in the application read the
         # instance role's credentials with a single unauthenticated GET.
         HttpTokens: required
-        HttpPutResponseHopLimit: 1
+        # 2, not 1: the app runs in a Docker container, which is one extra network
+        # hop from the instance. At a limit of 1 the AWS SDK inside the container
+        # cannot reach IMDS at all, so it finds no credentials and every S3 call
+        # fails — which is exactly how document uploads broke. IMDSv2 tokens are
+        # still required, so an SSRF in the application must still be able to issue
+        # a PUT (not just a GET) to get anywhere.
+        HttpPutResponseHopLimit: 2
       UserData:
         Fn::Base64: !Sub
           - |
