@@ -1,0 +1,83 @@
+{{- if .Values.ingress.enabled }}
+{{- if not .Values.ingress.host }}
+{{- fail "ingress.enabled is true but ingress.host is empty: the session cookie is SameSite=Strict, so the API and the UI MUST share one host." }}
+{{- end }}
+{{- $tag := include "assetiq.backend.tag" . }}
+{{- $hosts := prepend .Values.ingress.extraHosts .Values.ingress.host }}
+{{- $backendSvc := include "assetiq.backend.fullname" . }}
+{{- $backendPort := .Values.backend.service.port }}
+{{- $webSvc := include "assetiq.web.fullname" . }}
+{{- $webPort := .Values.web.service.port }}
+{{- $extraPaths := .Values.ingress.extraPaths }}
+{{- $backendEnabled := .Values.backend.enabled }}
+{{- $webEnabled := .Values.web.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "assetiq.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "assetiq.labels" (dict "root" $ "component" "ingress" "version" $tag) | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        {{- range $hosts }}
+        - {{ . | quote }}
+        {{- end }}
+      {{- if .Values.ingress.tls.secretName }}
+      secretName: {{ .Values.ingress.tls.secretName }}
+      {{- else }}
+      {{- fail "ingress.tls.enabled is true but ingress.tls.secretName is empty" }}
+      {{- end }}
+  {{- end }}
+  rules:
+    {{- range $host := $hosts }}
+    - host: {{ $host | quote }}
+      http:
+        paths:
+          {{- /* Most-specific first: operator-supplied overrides, then the API
+                 prefixes, then the catch-all to the static web bundle. */}}
+          {{- range $extraPaths }}
+          - path: {{ .path }}
+            pathType: {{ default "Prefix" .pathType }}
+            backend:
+              service:
+                name: {{ .service }}
+                port:
+                  number: {{ .port }}
+          {{- end }}
+          {{- if $backendEnabled }}
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $backendSvc }}
+                port:
+                  number: {{ $backendPort }}
+          - path: /actuator
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $backendSvc }}
+                port:
+                  number: {{ $backendPort }}
+          {{- end }}
+          {{- if $webEnabled }}
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $webSvc }}
+                port:
+                  number: {{ $webPort }}
+          {{- end }}
+    {{- end }}
+{{- end }}

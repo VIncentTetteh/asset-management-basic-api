@@ -1,0 +1,29 @@
+{{- if and .Values.web.enabled .Values.web.pdb.enabled }}
+{{- $tag := include "assetiq.web.tag" . }}
+{{- if and .Values.web.pdb.minAvailable .Values.web.pdb.maxUnavailable }}
+{{- fail "web.pdb: set exactly one of minAvailable or maxUnavailable" }}
+{{- end }}
+{{- $replicas := int .Values.web.replicaCount }}
+{{- if .Values.web.autoscaling.enabled }}
+{{- $replicas = int .Values.web.autoscaling.minReplicas }}
+{{- end }}
+{{- if and .Values.web.pdb.minAvailable (le $replicas 1) }}
+{{- fail "web.pdb.enabled with a single replica would block every voluntary eviction (node drains, cluster upgrades). Set web.replicaCount >= 2 or enable autoscaling with minReplicas >= 2." }}
+{{- end }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "assetiq.web.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "assetiq.labels" (dict "root" $ "component" "web" "version" $tag) | nindent 4 }}
+spec:
+  {{- if .Values.web.pdb.maxUnavailable }}
+  maxUnavailable: {{ .Values.web.pdb.maxUnavailable }}
+  {{- else }}
+  minAvailable: {{ .Values.web.pdb.minAvailable }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "assetiq.selectorLabels" (dict "root" $ "component" "web") | nindent 6 }}
+{{- end }}

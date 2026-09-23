@@ -1,0 +1,253 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# AssetIQ — PRODUCTION overlay
+#
+#   helm upgrade --install assetiq infra/helm/assetiq \
+#     -n assetiq --create-namespace \
+#     -f infra/helm/assetiq/values-production.yaml \
+#     --set image.registry=123456789012.dkr.ecr.eu-central-1.amazonaws.com \
+#     --set image.tag="$(git describe --tags --always)" \
+#     --set backend.existingSecret=assetiq-backend
+#
+# This file layers on top of values.yaml. It contains NO secret material and
+# never will — secrets come from `backend.existingSecret` (see README).
+#
+# Values you MUST still supply per environment (they are environment-specific
+# and wrong-by-default here):
+#   image.registry, image.tag, backend.existingSecret,
+#   ingress.host, ingress.tls.secretName,
+#   backend.database.url/host, backend.redis.host,
+#   backend.app.corsAllowedOrigins, backend.storage.s3.bucket
+# ─────────────────────────────────────────────────────────────────────────────
+
+image:
+  # Tag is intentionally left as the chart default so a deploy that forgets
+  # `--set image.tag=...` ships a known-wrong version rather than a silent
+  # `latest`. Helper `assetiq.image` hard-fails on empty and on `latest`.
+  pullPolicy: IfNotPresent
+
+# ── Backend ──────────────────────────────────────────────────────────────────
+backend:
+  # Two replicas is the floor: maxUnavailable=0 + PDB minAvailable=1 means a
+  # rollout or node drain never drops below one serving pod.
+  replicaCount: 2
+
+  springProfiles: "prod"
+
+  database:
+    # Hibernate validates only; Flyway owns DDL.
+    ddlAuto: "validate"
+
+  app:
+    mode: "cloud"
+    emailEnabled: true
+
+  storage:
+    s3:
+      # Mandatory at >1 replica: the local uploads mount is a per-pod emptyDir.
+      enabled: true
+      bucket: ""
+      region: "eu-central-1"
+
+  # Tighter than dev: the JVM gets a real heap, and the CPU limit is set high
+  # enough that a GC pause is not turned into a throttling stall.
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "1536Mi"
+    limits:
+      cpu: "2000m"
+      memory: "2Gi"
+
+  # Longer drain window for in-flight report generation.
+  terminationGracePeriodSeconds: 90
+  preStopSleepSeconds: 15
+
+  serviceAccount:
+    create: true
+    annotations: {}
+    # IRSA role granting s3:PutObject/GetObject on the uploads bucket only:
+    #   eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/assetiq-prod-backend
+    automountServiceAccountToken: false
+
+  pdb:
+    enabled: true
+    minAvailable: 1
+
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 8
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 85
+    behavior:
+      scaleUp:
+        stabilizationWindowSeconds: 60
+        policies:
+          - type: Percent
+            value: 100
+            periodSeconds: 60
+      scaleDown:
+        # Slow scale-down: JVM warm-up is expensive and heap never shrinks, so
+        # flapping costs more than the idle replicas do.
+        stabilizationWindowSeconds: 600
+        policies:
+          - type: Pods
+            value: 1
+            periodSeconds: 180
+
+  # Spread across zones first, then nodes. DoNotSchedule on zones is safe at
+  # >= 2 replicas in a 3-AZ cluster; ScheduleAnyway on hostname keeps a burst
+  # scale-up from pending when one zone is full.
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: DoNotSchedule
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/name: assetiq
+          app.kubernetes.io/component: backend
+    - maxSkew: 1
+      topologyKey: kubernetes.io/hostname
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/name: assetiq
+          app.kubernetes.io/component: backend
+
+# ── Web ──────────────────────────────────────────────────────────────────────
+web:
+  replicaCount: 2
+
+  resources:
+    requests:
+      cpu: "50m"
+      memory: "64Mi"
+    limits:
+      cpu: "500m"
+      memory: "192Mi"
+
+  serviceAccount:
+    create: true
+    automountServiceAccountToken: false
+
+  pdb:
+    enabled: true
+    minAvailable: 1
+
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+    behavior:
+      scaleDown:
+        stabilizationWindowSeconds: 300
+
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: DoNotSchedule
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/name: assetiq
+          app.kubernetes.io/component: web
+    - maxSkew: 1
+      topologyKey: kubernetes.io/hostname
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/name: assetiq
+          app.kubernetes.io/component: web
+
+# ── Ingress ──────────────────────────────────────────────────────────────────
+ingress:
+  enabled: true
+  className: "nginx"
+  # OVERRIDE per environment.
+  host: "assetiq.example.com"
+  annotations:
+    # cert-manager issues and renews the TLS certificate named below.
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    # Asset uploads (CSV imports, attachments).
+    nginx.ingress.kubernetes.io/proxy-body-size: "25m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "120"
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      more_set_headers "X-Content-Type-Options: nosniff";
+      more_set_headers "X-Frame-Options: DENY";
+      more_set_headers "Referrer-Policy: strict-origin-when-cross-origin";
+  tls:
+    enabled: true
+    secretName: "assetiq-tls"
+
+# ── NetworkPolicy ────────────────────────────────────────────────────────────
+networkPolicy:
+  enabled: true
+
+  ingressController:
+    namespaceSelector:
+      kubernetes.io/metadata.name: ingress-nginx
+    podSelector:
+      app.kubernetes.io/name: ingress-nginx
+
+  dns:
+    namespaceSelector:
+      kubernetes.io/metadata.name: kube-system
+    podSelector:
+      k8s-app: kube-dns
+
+  # Managed RDS / ElastiCache live outside the cluster: select by CIDR, not by
+  # pod. Replace these with your actual data-subnet ranges.
+  postgres:
+    # `null` (not `{}`) — Helm deep-merges maps, so an empty map would leave the
+    # default in-cluster namespaceSelector in place and widen the policy.
+    namespaceSelector: null
+    podSelector: null
+    cidrs:
+      - 10.0.16.0/20
+  redis:
+    namespaceSelector: null
+    podSelector: null
+    cidrs:
+      - 10.0.16.0/20
+
+  # Paystack, S3 and the mail API. Narrow externalHttpsCidrs to the provider
+  # ranges (or a NAT/egress-proxy CIDR) once they are known.
+  allowExternalHttps: true
+  externalHttpsCidrs: []
+
+  smtp:
+    enabled: false
+    port: 587
+    cidrs: []
+
+  monitoring:
+    namespaceSelector:
+      kubernetes.io/metadata.name: monitoring
+    podSelector:
+      app.kubernetes.io/name: prometheus
+
+# ── Metrics ──────────────────────────────────────────────────────────────────
+metrics:
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+    scrapeTimeout: 10s
+    path: /actuator/prometheus
+    labels:
+      # Must match the Prometheus Operator's serviceMonitorSelector.
+      release: kube-prometheus-stack
+
+# ── External Secrets ─────────────────────────────────────────────────────────
+# Off by default even in production: enable it only where an ESO SecretStore
+# already exists. Remote key NAMES only — no values here, ever.
+externalSecret:
+  enabled: false
+  secretStoreRef:
+    name: "aws-secretsmanager"
+    kind: ClusterSecretStore
+  refreshInterval: "1h"
+  remoteKey: "assetiq/prod/backend"

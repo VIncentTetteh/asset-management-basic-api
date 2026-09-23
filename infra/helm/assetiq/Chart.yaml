@@ -1,0 +1,37 @@
+apiVersion: v2
+name: assetiq
+description: AssetIQ Enterprise Asset Manager - Spring Boot API + statically exported Next.js web UI
+type: application
+
+# Chart version: bumped on every chart change (SemVer).
+version: 0.1.0
+
+# Default application version. CI overrides both the appVersion label and
+# image tags with the git-describe tag at package/deploy time:
+#   helm upgrade --install ... --set image.tag="$(git describe --tags --always)"
+appVersion: "0.0.1"
+
+keywords:
+  - assetiq
+  - asset-management
+  - itam
+  - spring-boot
+  - nextjs
+
+home: https://github.com/org/Enterprise-Asset-Manager
+sources:
+  - https://github.com/org/Enterprise-Asset-Manager
+
+maintainers:
+  - name: AssetIQ Platform Team
+
+annotations:
+  category: ApplicationServer
+  licenses: Proprietary
+
+# NOTE: This chart deliberately declares NO dependencies.
+# PostgreSQL 16 and Redis 7 are EXTERNAL to the chart and must be provisioned
+# separately (RDS/Aurora + ElastiCache, or an operator-managed cluster).
+# Bundling a database subchart would produce a stateful, un-backed-up datastore
+# whose lifecycle is tied to `helm uninstall`. Point the chart at managed
+# endpoints via backend.database.* and backend.redis.*.

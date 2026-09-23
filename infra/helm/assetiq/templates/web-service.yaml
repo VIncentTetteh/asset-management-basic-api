@@ -1,0 +1,23 @@
+{{- if .Values.web.enabled }}
+{{- $tag := include "assetiq.web.tag" . }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "assetiq.web.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "assetiq.labels" (dict "root" $ "component" "web" "version" $tag) | nindent 4 }}
+  {{- with .Values.web.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.web.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.web.service.port }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "assetiq.selectorLabels" (dict "root" $ "component" "web") | nindent 4 }}
+{{- end }}

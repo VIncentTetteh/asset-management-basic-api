@@ -1,0 +1,447 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# AssetIQ — DEFAULT values (evaluation / dev profile)
+#
+# These defaults are deliberately SINGLE-REPLICA and are NOT suitable for
+# production: a single replica means a rolling update or a node drain is a
+# user-visible outage. Use values-production.yaml for any shared environment.
+#
+# PostgreSQL 16 and Redis 7 are EXTERNAL to this chart. Point backend.database.*
+# and backend.redis.* at your managed endpoints (RDS/Aurora, ElastiCache).
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Override the generated resource name prefix.
+nameOverride: ""
+fullnameOverride: ""
+
+# ── Images ───────────────────────────────────────────────────────────────────
+image:
+  registry: ""            # e.g. 123456789012.dkr.ecr.eu-central-1.amazonaws.com
+  # Default tag for BOTH workloads unless overridden per workload below.
+  # "0.0.1" is a placeholder matching Chart.appVersion. CI MUST override it with
+  # the immutable git-describe tag:
+  #   --set image.tag="$(git describe --tags --always --dirty)"
+  # `latest` is never permitted in any environment.
+  tag: "0.0.1"
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+  # - name: ecr-pull-secret
+
+# ── Backend (Spring Boot 3.3 / Java 21) ──────────────────────────────────────
+backend:
+  enabled: true
+
+  image:
+    repository: assetiq/backend
+    tag: ""               # inherits image.tag when empty
+    pullPolicy: ""        # inherits image.pullPolicy when empty
+
+  # Single replica by default — evaluation only. See note at top of file.
+  replicaCount: 1
+
+  # Container / Service port. Spring binds ${PORT:${SERVER_PORT:8080}}; we set
+  # SERVER_PORT from this value so the two can never drift.
+  containerPort: 8080
+
+  service:
+    type: ClusterIP
+    port: 8080
+    annotations: {}
+
+  # Spring profile(s). `prod` disables Swagger UI (see application-prod.yml).
+  springProfiles: "prod"
+
+  # ── Secrets ────────────────────────────────────────────────────────────────
+  # REQUIRED. The chart NEVER creates a Secret and ships NO secret values.
+  # Provide the name of a pre-existing Kubernetes Secret in this namespace, or
+  # let the ExternalSecret below create one with this exact name.
+  # Rendering fails loudly if this is empty.
+  existingSecret: ""
+
+  # Maps backend env var name -> key inside `existingSecret`.
+  # Entries marked optional: true are omitted from the pod spec entirely when
+  # `enabled` is false, so an unused integration never blocks startup.
+  secretEnv:
+    - name: SPRING_DATASOURCE_PASSWORD
+      key: spring-datasource-password
+    - name: APP_JWT_SECRET
+      key: app-jwt-secret
+    - name: APP_DATA_ENCRYPTION_KEY
+      key: app-data-encryption-key
+    - name: REDIS_PASSWORD
+      key: redis-password
+      optional: true
+    - name: PAYSTACK_SECRET_KEY
+      key: paystack-secret-key
+      optional: true
+    # Self-hosted offline licence key. Only consumed when
+    # backend.license.offlineEnabled is true.
+    - name: APP_LICENSE_OFFLINE_KEY
+      key: app-license-offline-key
+      optional: true
+
+  # ── External PostgreSQL 16 ─────────────────────────────────────────────────
+  database:
+    # Full JDBC URL. Non-secret (no password) — the password comes from the
+    # Secret above via SPRING_DATASOURCE_PASSWORD.
+    url: "jdbc:postgresql://postgresql.assetiq-data.svc.cluster.local:5432/assetiq?sslmode=require"
+    username: "assetiq"
+    # Flyway owns the schema; Hibernate must only validate it. Changing this to
+    # `update` lets Hibernate mutate a production schema out from under Flyway.
+    ddlAuto: "validate"
+    # Host/port used ONLY to build the egress NetworkPolicy rule. Must resolve
+    # to the same endpoint as `url`.
+    host: "postgresql.assetiq-data.svc.cluster.local"
+    port: 5432
+
+  # ── External Redis 7 ───────────────────────────────────────────────────────
+  redis:
+    host: "redis-master.assetiq-data.svc.cluster.local"
+    port: 6379
+
+  # ── Application configuration (NON-SECRET only) ────────────────────────────
+  app:
+    # cloud = hosted SaaS, standalone = self-hosted single-customer deployment.
+    mode: "cloud"
+    jwtExpiration: "900000"          # ms — 15 min access token
+    refreshTokenLifetime: "PT12H"    # ISO-8601 duration
+    # Comma-separated origins. With the same-origin Ingress below the browser
+    # never makes a cross-origin call, so this only needs to list the public
+    # host (plus any native/desktop client origins).
+    corsAllowedOrigins: "https://assetiq.local"
+    emailEnabled: false
+
+  license:
+    # Self-hosted offline licence mode (added in parallel to this chart).
+    offlineEnabled: false
+
+  storage:
+    s3:
+      enabled: false
+      bucket: ""
+      region: "eu-central-1"
+
+  # Free-form extra non-secret env vars, rendered into the ConfigMap.
+  extraEnv: {}
+  #   APP_PUBLIC_BASE_URL: https://assetiq.example.com
+
+  # Extra env vars sourced from other objects (configMapKeyRef, fieldRef, ...).
+  extraEnvFrom: []
+
+  # JVM flags. MaxRAMPercentage is already set in the image; override here if
+  # you change resources.limits.memory materially.
+  javaOpts: ""
+
+  # BOTH requests and limits are mandatory on every container.
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "768Mi"
+    limits:
+      cpu: "1000m"
+      memory: "1536Mi"
+
+  # Pod-level security context.
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    runAsGroup: 10001
+    fsGroup: 10001
+    fsGroupChangePolicy: OnRootMismatch
+    seccompProfile:
+      type: RuntimeDefault
+
+  # Container-level security context.
+  securityContext:
+    allowPrivilegeEscalation: false
+    privileged: false
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    runAsUser: 10001
+    runAsGroup: 10001
+    capabilities:
+      drop: ["ALL"]
+
+  # Probes. Spring exposes health groups at /actuator/health/{liveness,readiness}.
+  # Readiness includes db + redis; liveness is livenessState only, so a database
+  # outage degrades traffic routing instead of crash-looping every replica.
+  probes:
+    startup:
+      enabled: true
+      periodSeconds: 5
+      # 5s * 60 = 5 min budget for JVM boot + Flyway migration.
+      failureThreshold: 60
+      timeoutSeconds: 3
+    liveness:
+      initialDelaySeconds: 0
+      periodSeconds: 20
+      timeoutSeconds: 5
+      failureThreshold: 3
+    readiness:
+      initialDelaySeconds: 0
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
+      successThreshold: 1
+
+  # server.shutdown=graceful + spring.lifecycle.timeout-per-shutdown-phase=30s.
+  # terminationGracePeriodSeconds must exceed that, plus the preStop sleep.
+  terminationGracePeriodSeconds: 60
+  # Gives the ingress controller / kube-proxy time to stop sending new traffic
+  # before the JVM starts draining.
+  preStopSleepSeconds: 10
+
+  serviceAccount:
+    create: true
+    name: ""
+    annotations: {}
+    # IRSA: eks.amazonaws.com/role-arn: arn:aws:iam::<acct>:role/assetiq-backend
+    automountServiceAccountToken: false
+
+  podAnnotations: {}
+  podLabels: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  topologySpreadConstraints: []
+
+  # Extra volumes/mounts on top of the mandatory writable tmpfs mounts.
+  extraVolumes: []
+  extraVolumeMounts: []
+
+  pdb:
+    enabled: false          # production values turn this on
+    minAvailable: 1
+    maxUnavailable: ""
+
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+    behavior: {}
+
+# ── Web (Next.js static export served by nginx-unprivileged 1.27-alpine) ─────
+web:
+  enabled: true
+
+  image:
+    repository: assetiq/web
+    tag: ""
+    pullPolicy: ""
+
+  replicaCount: 1
+
+  # The image's nginx.conf has `listen 3000`. A port > 1024 is what allows the
+  # container to run as an unprivileged UID with no NET_BIND_SERVICE capability.
+  containerPort: 3000
+
+  service:
+    type: ClusterIP
+    port: 3000
+    annotations: {}
+
+  resources:
+    requests:
+      cpu: "25m"
+      memory: "48Mi"
+    limits:
+      cpu: "200m"
+      memory: "128Mi"
+
+  # uid/gid 101, NOT 10001. The web image is built FROM
+  # nginxinc/nginx-unprivileged, whose nginx user is uid 101 and which owns
+  # /var/cache/nginx and the exported assets as 101. Forcing a different uid
+  # here would work only by accident (the assets happen to be world-readable)
+  # and would break the moment the base image tightened its modes.
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 101
+    runAsGroup: 101
+    fsGroup: 101
+    fsGroupChangePolicy: OnRootMismatch
+    seccompProfile:
+      type: RuntimeDefault
+
+  securityContext:
+    allowPrivilegeEscalation: false
+    privileged: false
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    runAsUser: 101
+    runAsGroup: 101
+    capabilities:
+      drop: ["ALL"]
+
+  probes:
+    startup:
+      enabled: true
+      periodSeconds: 2
+      failureThreshold: 15
+      timeoutSeconds: 2
+    liveness:
+      initialDelaySeconds: 0
+      periodSeconds: 20
+      timeoutSeconds: 3
+      failureThreshold: 3
+    readiness:
+      initialDelaySeconds: 0
+      periodSeconds: 10
+      timeoutSeconds: 3
+      failureThreshold: 3
+      successThreshold: 1
+  # Path probed on the nginx container. `/` serves index.html from the export.
+  probePath: "/"
+
+  terminationGracePeriodSeconds: 30
+  preStopSleepSeconds: 5
+
+  serviceAccount:
+    create: true
+    name: ""
+    annotations: {}
+    automountServiceAccountToken: false
+
+  podAnnotations: {}
+  podLabels: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  topologySpreadConstraints: []
+
+  extraVolumes: []
+  extraVolumeMounts: []
+
+  pdb:
+    enabled: false
+    minAvailable: 1
+    maxUnavailable: ""
+
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 4
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+    behavior: {}
+
+# ── Ingress ──────────────────────────────────────────────────────────────────
+# SINGLE host. The browser session is an HttpOnly; SameSite=Strict cookie, so
+# the API must be reached same-origin: /api and /actuator go to the backend,
+# everything else to the web Service.
+ingress:
+  enabled: true
+  className: "nginx"
+  host: "assetiq.local"
+  annotations: {}
+  # Ordered most-specific first. pathType Prefix throughout.
+  extraPaths: []
+  tls:
+    enabled: false
+    secretName: ""
+  # Extra hostnames that should serve the same routes (e.g. a vanity domain).
+  extraHosts: []
+
+# ── NetworkPolicy ────────────────────────────────────────────────────────────
+# Default-deny ingress AND egress for every pod in this release, plus the
+# explicit allows below. Requires a CNI that enforces NetworkPolicy (Calico,
+# Cilium, AWS VPC CNI with policy enforcement enabled) — on a CNI that does not,
+# these objects are accepted silently and enforce nothing.
+networkPolicy:
+  enabled: false           # production values turn this on
+
+  # Namespace (and optional pod) selector identifying the ingress controller.
+  ingressController:
+    namespaceSelector:
+      kubernetes.io/metadata.name: ingress-nginx
+    podSelector: {}
+    #   app.kubernetes.io/name: ingress-nginx
+
+  # DNS egress. kube-dns/CoreDNS normally lives in kube-system.
+  dns:
+    namespaceSelector:
+      kubernetes.io/metadata.name: kube-system
+    podSelector: {}
+    #   k8s-app: kube-dns
+
+  # Egress to PostgreSQL. Either select the pods (in-cluster) or list CIDRs
+  # (managed RDS). Both are rendered when both are set.
+  postgres:
+    namespaceSelector:
+      kubernetes.io/metadata.name: assetiq-data
+    podSelector: {}
+    cidrs: []
+    #   - 10.0.16.0/20
+
+  redis:
+    namespaceSelector:
+      kubernetes.io/metadata.name: assetiq-data
+    podSelector: {}
+    cidrs: []
+
+  # Egress to the public internet on 443 — needed for Paystack, S3 and any
+  # HTTPS-based mail API. OFF by default: turn it on only if the deployment
+  # actually uses those integrations.
+  allowExternalHttps: false
+  # Restrict the 443 egress to specific destinations instead of 0.0.0.0/0.
+  externalHttpsCidrs: []
+  #   - 0.0.0.0/0
+
+  # Extra SMTP egress (port 587/465) when APP_EMAIL_ENABLED uses a real relay.
+  smtp:
+    enabled: false
+    port: 587
+    cidrs: []
+
+  # Allow the Prometheus scraper to reach backend:8080/actuator/prometheus.
+  monitoring:
+    namespaceSelector:
+      kubernetes.io/metadata.name: monitoring
+    podSelector: {}
+
+  extraEgress: []
+  extraIngress: []
+
+# ── Metrics / Prometheus Operator ────────────────────────────────────────────
+metrics:
+  serviceMonitor:
+    enabled: false         # production values turn this on
+    # Namespace the ServiceMonitor is created in. Empty = release namespace.
+    namespace: ""
+    interval: 30s
+    scrapeTimeout: 10s
+    path: /actuator/prometheus
+    # Label the Prometheus Operator's serviceMonitorSelector matches on.
+    labels: {}
+    #   release: kube-prometheus-stack
+    relabelings: []
+    metricRelabelings: []
+    honorLabels: false
+
+# ── External Secrets Operator (example) ──────────────────────────────────────
+# Disabled by default. When enabled the operator materialises a Secret named
+# `backend.existingSecret` from REMOTE keys only — this chart contains no secret
+# material of any kind and never will.
+externalSecret:
+  enabled: false
+  # ClusterSecretStore (or SecretStore) that already exists in the cluster.
+  secretStoreRef:
+    name: "aws-secretsmanager"
+    kind: ClusterSecretStore
+  refreshInterval: "1h"
+  # Path/name of the remote secret in the provider (AWS Secrets Manager, Vault...).
+  remoteKey: "assetiq/prod/backend"
+  # k8s secret key  <-  property inside the remote secret. NO VALUES, only names.
+  data:
+    - secretKey: spring-datasource-password
+      property: spring_datasource_password
+    - secretKey: app-jwt-secret
+      property: app_jwt_secret
+    - secretKey: app-data-encryption-key
+      property: app_data_encryption_key
+    - secretKey: redis-password
+      property: redis_password
+    - secretKey: paystack-secret-key
+      property: paystack_secret_key
+    - secretKey: app-license-offline-key
+      property: app_license_offline_key

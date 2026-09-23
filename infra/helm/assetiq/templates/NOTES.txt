@@ -1,0 +1,62 @@
+AssetIQ {{ .Chart.Version }} ({{ include "assetiq.backend.tag" . }}) released as "{{ .Release.Name }}" in namespace "{{ .Release.Namespace }}".
+
+{{ if .Values.ingress.enabled -}}
+URL
+  http{{ if .Values.ingress.tls.enabled }}s{{ end }}://{{ .Values.ingress.host }}/
+  API: http{{ if .Values.ingress.tls.enabled }}s{{ end }}://{{ .Values.ingress.host }}/api/v1
+{{- if not .Values.ingress.tls.enabled }}
+
+  WARNING: ingress.tls.enabled is false. The session cookie is HttpOnly and
+  SameSite=Strict but it is NOT Secure over plain HTTP - do not expose this
+  release to anything but a local cluster until TLS is on.
+{{- end }}
+{{- else -}}
+Ingress is disabled. Port-forward to reach the app:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "assetiq.web.fullname" . }} 3000:{{ .Values.web.service.port }}
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "assetiq.backend.fullname" . }} 8080:{{ .Values.backend.service.port }}
+{{- end }}
+
+Check rollout
+  kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include "assetiq.backend.fullname" . }}
+  kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include "assetiq.web.fullname" . }}
+
+Dependencies (EXTERNAL to this chart - the release will not become Ready without them)
+  PostgreSQL 16 : {{ .Values.backend.database.host }}:{{ .Values.backend.database.port }}
+  Redis 7       : {{ .Values.backend.redis.host }}:{{ .Values.backend.redis.port }}
+  Secret        : {{ include "assetiq.backend.secretName" . }}{{ if .Values.externalSecret.enabled }} (created by the ExternalSecret in this release){{ end }}
+
+Flyway runs the schema migration inside the backend on startup and holds an
+advisory lock, so multiple replicas are safe. There is deliberately no
+migration Job or Helm hook.
+
+{{- $warn := list }}
+{{- if and .Values.backend.enabled (not .Values.backend.autoscaling.enabled) (le (int .Values.backend.replicaCount) 1) }}
+{{- $warn = append $warn "backend.replicaCount is 1 - every rollout and node drain is a visible outage." }}
+{{- end }}
+{{- if and .Values.web.enabled (not .Values.web.autoscaling.enabled) (le (int .Values.web.replicaCount) 1) }}
+{{- $warn = append $warn "web.replicaCount is 1 - every rollout and node drain is a visible outage." }}
+{{- end }}
+{{- if not .Values.networkPolicy.enabled }}
+{{- $warn = append $warn "networkPolicy.enabled is false - pods can reach anything on the network." }}
+{{- end }}
+{{- if not .Values.metrics.serviceMonitor.enabled }}
+{{- $warn = append $warn "metrics.serviceMonitor.enabled is false - /actuator/prometheus is not being scraped." }}
+{{- end }}
+{{- if and .Values.backend.enabled (not (eq .Values.backend.database.ddlAuto "validate")) }}
+{{- $warn = append $warn (printf "SPRING_JPA_HIBERNATE_DDL_AUTO is '%s', not 'validate' - Hibernate can mutate the schema behind Flyway." .Values.backend.database.ddlAuto) }}
+{{- end }}
+{{- if and .Values.backend.enabled (not .Values.backend.storage.s3.enabled) (gt (int .Values.backend.replicaCount) 1) }}
+{{- $warn = append $warn "S3 storage is off with >1 backend replica - uploads land in a per-pod emptyDir and are lost on restart." }}
+{{- end }}
+{{- if $warn }}
+
+NOT PRODUCTION READY
+{{- range $warn }}
+  - {{ . }}
+{{- end }}
+
+  Deploy shared environments with:
+    helm upgrade --install {{ .Release.Name }} . -f values-production.yaml \
+      --set backend.existingSecret=assetiq-backend \
+      --set image.tag="$(git describe --tags --always)"
+{{- end }}

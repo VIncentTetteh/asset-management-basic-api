@@ -1,0 +1,158 @@
+{{- if .Values.backend.enabled }}
+{{- $tag := include "assetiq.backend.tag" . }}
+{{- $secretName := include "assetiq.backend.secretName" . }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "assetiq.backend.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "assetiq.labels" (dict "root" $ "component" "backend" "version" $tag) | nindent 4 }}
+spec:
+  {{- if not .Values.backend.autoscaling.enabled }}
+  replicas: {{ .Values.backend.replicaCount }}
+  {{- end }}
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      {{- include "assetiq.selectorLabels" (dict "root" $ "component" "backend") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "assetiq.labels" (dict "root" $ "component" "backend" "version" $tag) | nindent 8 }}
+        {{- with .Values.backend.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        # Roll the pods when non-secret configuration changes. Secret changes are
+        # deliberately NOT hashed here: the chart never reads Secret contents.
+        checksum/config: {{ include (print $.Template.BasePath "/backend-configmap.yaml") . | sha256sum }}
+        {{- with .Values.backend.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "assetiq.backend.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.backend.serviceAccount.automountServiceAccountToken }}
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.backend.podSecurityContext | nindent 8 }}
+      # Must exceed spring.lifecycle.timeout-per-shutdown-phase + preStop sleep.
+      terminationGracePeriodSeconds: {{ .Values.backend.terminationGracePeriodSeconds }}
+      {{- with .Values.backend.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.backend.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.backend.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.backend.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      volumes:
+        # readOnlyRootFilesystem: the JVM needs a writable /tmp for perf data,
+        # Tomcat's work dir and multipart staging.
+        - name: tmp
+          emptyDir: {}
+        # Local upload staging used when APP_STORAGE_S3_ENABLED=false. emptyDir
+        # is per-pod and ephemeral — enable S3 for any multi-replica deployment.
+        - name: uploads
+          emptyDir: {}
+        {{- with .Values.backend.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      containers:
+        - name: backend
+          image: {{ include "assetiq.image" (dict "root" $ "repository" .Values.backend.image.repository "tag" $tag) }}
+          imagePullPolicy: {{ default .Values.image.pullPolicy .Values.backend.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.backend.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.backend.containerPort }}
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "assetiq.backend.fullname" . }}
+            {{- with .Values.backend.extraEnvFrom }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          env:
+            {{- range .Values.backend.secretEnv }}
+            {{- if and (eq .name "APP_LICENSE_OFFLINE_KEY") (not $.Values.backend.license.offlineEnabled) }}
+            {{- /* offline licensing disabled: do not reference the key at all */ -}}
+            {{- else }}
+            - name: {{ .name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: {{ .key }}
+                  {{- if .optional }}
+                  optional: true
+                  {{- end }}
+            {{- end }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.backend.resources | nindent 12 }}
+          {{- if .Values.backend.probes.startup.enabled }}
+          # Startup probe carries the JVM boot + Flyway migration budget so the
+          # liveness probe can stay tight afterwards.
+          startupProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            periodSeconds: {{ .Values.backend.probes.startup.periodSeconds }}
+            failureThreshold: {{ .Values.backend.probes.startup.failureThreshold }}
+            timeoutSeconds: {{ .Values.backend.probes.startup.timeoutSeconds }}
+          {{- end }}
+          # Liveness is livenessState only — it does NOT touch the database, so a
+          # Postgres outage must never restart every replica.
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            initialDelaySeconds: {{ .Values.backend.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.backend.probes.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.backend.probes.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.backend.probes.liveness.failureThreshold }}
+          # Readiness includes db + redis: a dependency outage removes the pod
+          # from the Service instead of killing it.
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            initialDelaySeconds: {{ .Values.backend.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.backend.probes.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.backend.probes.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.backend.probes.readiness.failureThreshold }}
+            successThreshold: {{ .Values.backend.probes.readiness.successThreshold }}
+          {{- if gt (int .Values.backend.preStopSleepSeconds) 0 }}
+          lifecycle:
+            preStop:
+              # Let kube-proxy / the ingress controller observe the endpoint
+              # removal before Spring starts its graceful shutdown.
+              sleep:
+                seconds: {{ .Values.backend.preStopSleepSeconds }}
+          {{- end }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: uploads
+              mountPath: /app/uploads
+            {{- with .Values.backend.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+{{- end }}

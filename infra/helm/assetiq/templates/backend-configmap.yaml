@@ -1,0 +1,48 @@
+{{- if .Values.backend.enabled }}
+{{- $tag := include "assetiq.backend.tag" . }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "assetiq.backend.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "assetiq.labels" (dict "root" $ "component" "backend" "version" $tag) | nindent 4 }}
+data:
+  # ── Server ────────────────────────────────────────────────────────────────
+  SERVER_PORT: {{ .Values.backend.containerPort | quote }}
+  SPRING_PROFILES_ACTIVE: {{ .Values.backend.springProfiles | quote }}
+
+  # ── PostgreSQL 16 (external) ──────────────────────────────────────────────
+  SPRING_DATASOURCE_URL: {{ .Values.backend.database.url | quote }}
+  SPRING_DATASOURCE_USERNAME: {{ .Values.backend.database.username | quote }}
+  # Flyway owns the schema; Hibernate may only validate it.
+  SPRING_JPA_HIBERNATE_DDL_AUTO: {{ .Values.backend.database.ddlAuto | quote }}
+
+  # ── Redis 7 (external) ────────────────────────────────────────────────────
+  REDIS_HOST: {{ .Values.backend.redis.host | quote }}
+  REDIS_PORT: {{ .Values.backend.redis.port | quote }}
+
+  # ── Application ───────────────────────────────────────────────────────────
+  APP_MODE: {{ .Values.backend.app.mode | quote }}
+  APP_JWT_EXPIRATION: {{ .Values.backend.app.jwtExpiration | quote }}
+  APP_REFRESH_TOKEN_LIFETIME: {{ .Values.backend.app.refreshTokenLifetime | quote }}
+  APP_CORS_ALLOWED_ORIGINS: {{ .Values.backend.app.corsAllowedOrigins | quote }}
+  APP_EMAIL_ENABLED: {{ .Values.backend.app.emailEnabled | quote }}
+  APP_LICENSE_OFFLINE_ENABLED: {{ .Values.backend.license.offlineEnabled | quote }}
+
+  # ── Object storage ────────────────────────────────────────────────────────
+  APP_STORAGE_S3_ENABLED: {{ .Values.backend.storage.s3.enabled | quote }}
+  APP_STORAGE_S3_BUCKET: {{ .Values.backend.storage.s3.bucket | quote }}
+  APP_STORAGE_S3_REGION: {{ .Values.backend.storage.s3.region | quote }}
+  {{- with .Values.backend.javaOpts }}
+
+  JAVA_OPTS: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.backend.extraEnv }}
+
+  # ── extraEnv ──────────────────────────────────────────────────────────────
+  {{- range $k, $v := . }}
+  {{ $k }}: {{ $v | quote }}
+  {{- end }}
+  {{- end }}
+{{- end }}

@@ -1,0 +1,29 @@
+{{- if and .Values.backend.enabled .Values.backend.pdb.enabled }}
+{{- $tag := include "assetiq.backend.tag" . }}
+{{- if and .Values.backend.pdb.minAvailable .Values.backend.pdb.maxUnavailable }}
+{{- fail "backend.pdb: set exactly one of minAvailable or maxUnavailable" }}
+{{- end }}
+{{- $replicas := int .Values.backend.replicaCount }}
+{{- if .Values.backend.autoscaling.enabled }}
+{{- $replicas = int .Values.backend.autoscaling.minReplicas }}
+{{- end }}
+{{- if and .Values.backend.pdb.minAvailable (le $replicas 1) }}
+{{- fail "backend.pdb.enabled with a single replica would block every voluntary eviction (node drains, cluster upgrades). Set backend.replicaCount >= 2 or enable autoscaling with minReplicas >= 2." }}
+{{- end }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "assetiq.backend.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "assetiq.labels" (dict "root" $ "component" "backend" "version" $tag) | nindent 4 }}
+spec:
+  {{- if .Values.backend.pdb.maxUnavailable }}
+  maxUnavailable: {{ .Values.backend.pdb.maxUnavailable }}
+  {{- else }}
+  minAvailable: {{ .Values.backend.pdb.minAvailable }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "assetiq.selectorLabels" (dict "root" $ "component" "backend") | nindent 6 }}
+{{- end }}

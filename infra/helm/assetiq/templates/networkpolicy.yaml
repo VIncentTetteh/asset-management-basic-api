@@ -1,0 +1,262 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $tag := include "assetiq.backend.tag" . }}
+{{- $np := .Values.networkPolicy }}
+{{- /*
+NOTE: these objects are inert on a CNI that does not enforce NetworkPolicy.
+The API server accepts them silently, so "applied" is not "enforced" — verify
+with your CNI (Calico/Cilium policy logs) before treating this as a control.
+*/}}
+# ── 1. Default deny, ingress AND egress, for every pod in the release ────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "assetiq.fullname" . }}-default-deny
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "assetiq.labels" (dict "root" $ "component" "network" "version" $tag) | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "assetiq.releaseSelectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  # No ingress/egress rules => deny everything. The policies below add back
+  # exactly what each workload needs.
+---
+# ── 2. DNS egress for every pod in the release (UDP + TCP 53) ────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "assetiq.fullname" . }}-allow-dns
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "assetiq.labels" (dict "root" $ "component" "network" "version" $tag) | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "assetiq.releaseSelectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              {{- toYaml $np.dns.namespaceSelector | nindent 14 }}
+          {{- with $np.dns.podSelector }}
+          podSelector:
+            matchLabels:
+              {{- toYaml . | nindent 14 }}
+          {{- end }}
+      ports:
+        # TCP 53 matters: responses larger than 512 bytes fall back to TCP.
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+{{- if .Values.web.enabled }}
+---
+# ── 3. Ingress controller -> web:3000 ───────────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "assetiq.web.fullname" . }}-allow-ingress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "assetiq.labels" (dict "root" $ "component" "web" "version" (include "assetiq.web.tag" .)) | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "assetiq.selectorLabels" (dict "root" $ "component" "web") | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              {{- toYaml $np.ingressController.namespaceSelector | nindent 14 }}
+          {{- with $np.ingressController.podSelector }}
+          podSelector:
+            matchLabels:
+              {{- toYaml . | nindent 14 }}
+          {{- end }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.web.containerPort }}
+{{- end }}
+{{- if .Values.backend.enabled }}
+---
+# ── 4. Ingress controller (+ Prometheus) -> backend:8080 ────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "assetiq.backend.fullname" . }}-allow-ingress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "assetiq.labels" (dict "root" $ "component" "backend" "version" $tag) | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "assetiq.selectorLabels" (dict "root" $ "component" "backend") | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              {{- toYaml $np.ingressController.namespaceSelector | nindent 14 }}
+          {{- with $np.ingressController.podSelector }}
+          podSelector:
+            matchLabels:
+              {{- toYaml . | nindent 14 }}
+          {{- end }}
+        {{- if $np.monitoring }}
+        # Prometheus scrapes /actuator/prometheus on the same port.
+        - namespaceSelector:
+            matchLabels:
+              {{- toYaml $np.monitoring.namespaceSelector | nindent 14 }}
+          {{- with $np.monitoring.podSelector }}
+          podSelector:
+            matchLabels:
+              {{- toYaml . | nindent 14 }}
+          {{- end }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.backend.containerPort }}
+---
+# ── 5. backend egress -> PostgreSQL, Redis, and optional external endpoints ──
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "assetiq.backend.fullname" . }}-allow-egress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "assetiq.labels" (dict "root" $ "component" "backend" "version" $tag) | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "assetiq.selectorLabels" (dict "root" $ "component" "backend") | nindent 6 }}
+  policyTypes:
+    - Egress
+  egress:
+    # PostgreSQL 16
+    - to:
+        {{- if $np.postgres.namespaceSelector }}
+        - namespaceSelector:
+            matchLabels:
+              {{- toYaml $np.postgres.namespaceSelector | nindent 14 }}
+          {{- with $np.postgres.podSelector }}
+          podSelector:
+            matchLabels:
+              {{- toYaml . | nindent 14 }}
+          {{- end }}
+        {{- end }}
+        {{- range $np.postgres.cidrs }}
+        - ipBlock:
+            cidr: {{ . }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.backend.database.port }}
+    # Redis 7
+    - to:
+        {{- if $np.redis.namespaceSelector }}
+        - namespaceSelector:
+            matchLabels:
+              {{- toYaml $np.redis.namespaceSelector | nindent 14 }}
+          {{- with $np.redis.podSelector }}
+          podSelector:
+            matchLabels:
+              {{- toYaml . | nindent 14 }}
+          {{- end }}
+        {{- end }}
+        {{- range $np.redis.cidrs }}
+        - ipBlock:
+            cidr: {{ . }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.backend.redis.port }}
+    {{- if $np.allowExternalHttps }}
+    # Outbound HTTPS for Paystack / S3 / HTTPS mail APIs. Narrow this with
+    # networkPolicy.externalHttpsCidrs wherever the provider publishes ranges.
+    - to:
+        {{- if $np.externalHttpsCidrs }}
+        {{- range $np.externalHttpsCidrs }}
+        - ipBlock:
+            cidr: {{ . }}
+        {{- end }}
+        {{- else }}
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              # Keep the pod off RFC1918 space and the cloud metadata endpoint.
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.169.254/32
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: 443
+    {{- end }}
+    {{- if $np.smtp.enabled }}
+    # SMTP relay (only when APP_EMAIL_ENABLED uses a real relay, not an API).
+    - to:
+        {{- if $np.smtp.cidrs }}
+        {{- range $np.smtp.cidrs }}
+        - ipBlock:
+            cidr: {{ . }}
+        {{- end }}
+        {{- else }}
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.169.254/32
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: {{ $np.smtp.port }}
+    {{- end }}
+{{- end }}
+{{- with $np.extraIngress }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "assetiq.fullname" $ }}-extra-ingress
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "assetiq.labels" (dict "root" $ "component" "network" "version" $tag) | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "assetiq.releaseSelectorLabels" $ | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    {{- toYaml . | nindent 4 }}
+{{- end }}
+{{- with $np.extraEgress }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "assetiq.fullname" $ }}-extra-egress
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "assetiq.labels" (dict "root" $ "component" "network" "version" $tag) | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "assetiq.releaseSelectorLabels" $ | nindent 6 }}
+  policyTypes:
+    - Egress
+  egress:
+    {{- toYaml . | nindent 4 }}
+{{- end }}
+{{- end }}

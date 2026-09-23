@@ -1,0 +1,35 @@
+# Patterns to ignore when building packages.
+.DS_Store
+.git/
+.gitignore
+.bzr/
+.hg/
+.hgignore
+.svn/
+*.swp
+*.bak
+*.tmp
+*.orig
+*~
+.project
+.idea/
+*.tmproj
+.vscode/
+
+# Never package anything that could carry real values
+*.tfvars
+secrets.yaml
+secrets.*.yaml
+values-local.yaml
+values.local.yaml
+*.env
+.env*
+*.pem
+*.key
+*.p12
+*.jks
+
+# CI/dev scratch
+ci/
+tests/
+*.tgz
