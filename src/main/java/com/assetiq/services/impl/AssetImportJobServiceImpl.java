@@ -9,6 +9,11 @@ import com.assetiq.models.Organisation;
 import com.assetiq.repositories.AssetImportJobRepository;
 import com.assetiq.repositories.IdempotencyRecordRepository;
 import com.assetiq.repositories.OrganisationRepository;
+import com.assetiq.imports.ImportEntityType;
+import com.assetiq.imports.ImportPermissions;
+import com.assetiq.imports.ImportOptions;
+import com.assetiq.imports.ImportWizardService;
+import com.assetiq.models.ImportStagedUpload;
 import com.assetiq.services.AssetImportJobService;
 import com.assetiq.services.AssetImportService;
 import com.assetiq.storage.FileStorageService;
@@ -38,6 +43,8 @@ public class AssetImportJobServiceImpl extends com.assetiq.services.TenantAwareS
     private final FileStorageService storageService;
     private final ObjectMapper objectMapper;
     private final IdempotencyRecordRepository idempotencyRecordRepository;
+    private final ImportWizardService importWizardService;
+    private final ImportPermissions importPermissions;
 
     @Value("${app.storage.s3.import-prefix:imports}")
     private String importPrefix;
@@ -49,8 +56,12 @@ public class AssetImportJobServiceImpl extends com.assetiq.services.TenantAwareS
             AssetImportJobProcessor assetImportJobProcessor,
             IdempotencyRecordRepository idempotencyRecordRepository,
             FileStorageService storageService,
+            ImportWizardService importWizardService,
+            ImportPermissions importPermissions,
             ObjectMapper objectMapper) {
         super(organisationRepository);
+        this.importWizardService = importWizardService;
+        this.importPermissions = importPermissions;
         this.jobRepository = jobRepository;
         this.assetImportService = assetImportService;
         this.assetImportJobProcessor = assetImportJobProcessor;
@@ -152,10 +163,123 @@ public class AssetImportJobServiceImpl extends com.assetiq.services.TenantAwareS
 
         AssetImportJobDto dto = new AssetImportJobDto();
         dto.setJobId(jobId);
+        dto.setEntityType(ImportEntityType.ASSETS.slug());
         dto.setDryRun(dryRun);
         dto.setStatus(job.getStatus().name());
         dto.setResult(null);
         return dto;
+    }
+
+    /**
+     * Commit a staged upload.
+     *
+     * <p>The file's bytes are copied into the job's own storage key rather than
+     * referenced where they lie: the staged copy is on a clock and the cleanup job will
+     * delete it, and a job whose input vanished mid-run is not a failure mode worth
+     * having. The staged row itself is left alone so the same upload can be committed
+     * again (a first pass as a dry run, then for real).</p>
+     */
+    @Override
+    @Transactional
+    public AssetImportJobDto createMappedImportJob(ImportEntityType type,
+                                                   UUID uploadId,
+                                                   Map<String, Integer> mapping,
+                                                   ImportOptions options,
+                                                   String idempotencyKey) {
+        importPermissions.require(type);
+        Organisation org = requireTenantOrg();
+        ImportStagedUpload staged = importWizardService.requireStagedUpload(type, org, uploadId);
+        byte[] fileBytes = importWizardService.stagedBytes(staged);
+        ImportOptions effectiveOptions = options == null ? ImportOptions.defaults() : options;
+
+        String operation = "import-jobs/" + type.slug();
+        String trimmedIdempotencyKey = idempotencyKey == null ? null : idempotencyKey.trim();
+        String requestHash = null;
+        if (trimmedIdempotencyKey != null && !trimmedIdempotencyKey.isBlank()) {
+            requestHash = computeRequestHash(fileBytes, effectiveOptions.dryRun(),
+                    staged.getFilename() + "|" + toJson(mapping), staged.getContentType());
+            var existing = idempotencyRecordRepository
+                    .findByOrganisationAndOperationAndIdempotencyKeyAndDeletedAtIsNull(
+                            org, operation, trimmedIdempotencyKey);
+            if (existing.isPresent()) {
+                if (!existing.get().getRequestHash().equals(requestHash)) {
+                    throw new IllegalStateException("Idempotency key already used with a different request payload");
+                }
+                return getAssetImportJob(existing.get().getResponseJobId());
+            }
+        }
+
+        UUID jobId = UUID.randomUUID();
+        String key = importPrefix + "/jobs/" + org.getId() + "/" + jobId + "/" + staged.getFilename();
+        storageService.store(key, fileBytes, staged.getContentType(), staged.getFilename(), Map.of(
+                "organisationId", org.getId().toString(),
+                "jobId", jobId.toString(),
+                "originalFilename", staged.getFilename()
+        ));
+
+        AssetImportJob job = new AssetImportJob();
+        job.setId(jobId);
+        job.setOrganisation(org);
+        job.setEntityType(type.name());
+        job.setDryRun(effectiveOptions.dryRun());
+        job.setStatus(ImportJobStatus.QUEUED);
+        job.setStorageKey(key);
+        job.setFilename(staged.getFilename());
+        job.setContentType(staged.getContentType());
+        job.setMappingJson(toJson(mapping == null ? Map.of() : mapping));
+        job.setOptionsJson(toJson(effectiveOptions));
+        jobRepository.save(job);
+
+        if (trimmedIdempotencyKey != null && requestHash != null) {
+            try {
+                IdempotencyRecord rec = new IdempotencyRecord();
+                rec.setOrganisation(org);
+                rec.setOperation(operation);
+                rec.setIdempotencyKey(trimmedIdempotencyKey);
+                rec.setRequestHash(requestHash);
+                rec.setResponseJobId(jobId);
+                idempotencyRecordRepository.save(rec);
+            } catch (DataIntegrityViolationException e) {
+                return idempotencyRecordRepository
+                        .findByOrganisationAndOperationAndIdempotencyKeyAndDeletedAtIsNull(
+                                org, operation, trimmedIdempotencyKey)
+                        .map(existing -> getAssetImportJob(existing.getResponseJobId()))
+                        .orElseThrow(() -> e);
+            }
+        }
+
+        fireAfterCommit(jobId);
+
+        AssetImportJobDto dto = new AssetImportJobDto();
+        dto.setJobId(jobId);
+        dto.setEntityType(type.slug());
+        dto.setDryRun(effectiveOptions.dryRun());
+        dto.setStatus(job.getStatus().name());
+        dto.setResult(null);
+        return dto;
+    }
+
+    private void fireAfterCommit(UUID jobId) {
+        // Fire-and-forget async processing, but only after the transaction commits,
+        // otherwise the async thread may not be able to see the just-saved job row.
+        if (TransactionSynchronizationManager.isActualTransactionActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    assetImportJobProcessor.processAssetImportJob(jobId);
+                }
+            });
+        } else {
+            assetImportJobProcessor.processAssetImportJob(jobId);
+        }
+    }
+
+    private String toJson(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to serialise import job metadata", e);
+        }
     }
 
     @Override
@@ -165,8 +289,16 @@ public class AssetImportJobServiceImpl extends com.assetiq.services.TenantAwareS
         AssetImportJob job = jobRepository.findByIdAndOrganisationAndDeletedAtIsNull(jobId, org)
                 .orElseThrow(() -> new IllegalArgumentException("Import job not found"));
 
+        // The job row knows what it imported, so the status read is authorised against
+        // that type rather than against whatever the polling endpoint happens to allow.
+        ImportEntityType jobType = ImportEntityType.fromSlug(job.getEntityType())
+                .orElse(ImportEntityType.ASSETS);
+        importPermissions.require(jobType);
+
         AssetImportJobDto dto = new AssetImportJobDto();
         dto.setJobId(job.getId());
+        dto.setEntityType(ImportEntityType.fromSlug(job.getEntityType())
+                .orElse(ImportEntityType.ASSETS).slug());
         dto.setDryRun(job.isDryRun());
         dto.setStatus(job.getStatus().name());
 
@@ -175,6 +307,7 @@ public class AssetImportJobServiceImpl extends com.assetiq.services.TenantAwareS
             result.setDryRun(job.isDryRun());
             result.setTotalRows(job.getTotalRows());
             result.setImported(job.getImported());
+            result.setUpdated(job.getUpdatedRows());
             result.setSkipped(job.getSkipped());
             result.getErrors().clear();
 

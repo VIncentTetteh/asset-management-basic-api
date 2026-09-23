@@ -30,8 +30,13 @@ public class ImportJobsController {
         return ResponseEntity.accepted().body(dto);
     }
 
+    /**
+     * Status for any import job, of any entity type. The authorisation cannot be stated
+     * here because it depends on what the job imports, so the service checks the job
+     * row's own type -- see {@code AssetImportJobServiceImpl#getAssetImportJob}.
+     */
     @GetMapping("/{jobId}")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','CREATE_ASSET','MANAGE_ORGANIZATION_SETTINGS')")
+    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<AssetImportJobDto> getAssetImportJob(@PathVariable UUID jobId) {
         return ResponseEntity.ok(assetImportJobService.getAssetImportJob(jobId));
     }
