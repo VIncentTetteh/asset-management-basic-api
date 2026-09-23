@@ -144,9 +144,15 @@ crash-loop.
 ## Security posture
 
 - Pod and container `securityContext` on both workloads: `runAsNonRoot`,
-  uid/gid/fsGroup `10001`, `seccompProfile: RuntimeDefault`,
-  `allowPrivilegeEscalation: false`, `capabilities: drop [ALL]`,
-  `readOnlyRootFilesystem: true`.
+  `seccompProfile: RuntimeDefault`, `allowPrivilegeEscalation: false`,
+  `capabilities: drop [ALL]`, `readOnlyRootFilesystem: true`.
+- **uid/gid/fsGroup differ per workload, deliberately.** Backend `10001`, which
+  is the user its Dockerfile creates. Web `101`, because that image is built
+  FROM `nginxinc/nginx-unprivileged`, whose nginx user is uid 101 and which owns
+  the cache directory and the exported assets as 101. Forcing 10001 there would
+  work only by accident — the assets happen to be world-readable — and would
+  break the moment the base image tightened its modes. If you rebuild the web
+  image on a different base, change `web.podSecurityContext` to match it.
 - Writable paths are `emptyDir` only:
   backend `/tmp`, `/app/uploads`; web `/var/cache/nginx`, `/var/run`, `/tmp`.
 - `automountServiceAccountToken: false` on both SAs and both pod specs —
