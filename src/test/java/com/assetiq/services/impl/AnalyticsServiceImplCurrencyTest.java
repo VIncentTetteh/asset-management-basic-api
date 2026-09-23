@@ -93,7 +93,7 @@ class AnalyticsServiceImplCurrencyTest {
         disposal.setStatus(com.assetiq.enums.DisposalStatus.APPROVED);
         when(disposalRecordRepository.findByOrganisationAndDisposalDateBetweenAndDeletedAtIsNull(eq(org), any(), any()))
                 .thenReturn(java.util.Set.of(disposal));
-        when(budgetRepository.findByOrganisationAndDeletedAtIsNullOrderByPeriodStartDesc(org))
+        when(budgetRepository.findOverlapping(eq(org), any(), any()))
                 .thenReturn(List.of(
                         budget("GHS", "5000", "1000"),
                         budget("USD", "200", "100"),   // 3000 / 1500 GHS
@@ -112,6 +112,7 @@ class AnalyticsServiceImplCurrencyTest {
         assertThat(money(r, "totalDisposal")).isEqualTo("160.00");
         assertThat(money(r, "totalBudget")).isEqualTo("8000.00");
         assertThat(money(r, "totalActualSpend")).isEqualTo("2500.00");
+        assertThat(money(r, "totalCommittedSpend")).isEqualTo("0.00");
         assertThat(r.get("budgetUtilization")).isEqualTo(31.25);
         assertThat(r.get("currency")).isEqualTo("GHS");
         assertThat(r.get("complete")).isEqualTo(false);
@@ -190,6 +191,8 @@ class AnalyticsServiceImplCurrencyTest {
         b.setCurrency(currency);
         b.setTotalAmount(new BigDecimal(total));
         b.setSpentAmount(new BigDecimal(spent));
+        // Drafts are excluded from financial analytics; these are live budgets.
+        b.setStatus(com.assetiq.enums.BudgetStatus.ACTIVE);
         return b;
     }
 

@@ -2,7 +2,7 @@ package com.assetiq.services.impl;
 
 import com.assetiq.enums.AssetCondition;
 import com.assetiq.enums.AssetStatus;
-import com.assetiq.enums.MaintenanceStatus;
+import com.assetiq.enums.BudgetStatus;
 import com.assetiq.enums.MaintenanceType;
 import com.assetiq.enums.POStatus;
 import com.assetiq.models.Asset;
@@ -185,14 +185,25 @@ public class AnalyticsServiceImpl implements AnalyticsService {
                 DisposalRecord::getSaleValue,
                 DisposalRecord::effectiveCurrency);
 
-        // Budget Consolidation
-        List<Budget> budgets = budgetRepository.findByOrganisationAndDeletedAtIsNullOrderByPeriodStartDesc(org);
+        // Budgets that were live during the reported period, not every budget the
+        // tenant has ever had. Summing all of them put closed budgets from prior
+        // years into a figure printed next to "period", which made utilisation
+        // drift down every year regardless of how the current year was going.
+        // Drafts are excluded as well: a draft approves nothing, so counting it
+        // raises the ceiling and flatters the burn.
+        List<Budget> budgets = budgetRepository.findOverlapping(org, start, end).stream()
+                .filter(b -> b.getStatus() != BudgetStatus.DRAFT)
+                .toList();
         MoneyAccumulator totalBudget = fx.sum(budgets, Budget::getTotalAmount, Budget::getCurrency);
         MoneyAccumulator actualSpend = fx.sum(budgets, Budget::getSpentAmount, Budget::getCurrency);
+        MoneyAccumulator committedSpend = fx.sum(budgets, Budget::getCommittedAmount, Budget::getCurrency);
 
         // Utilisation from converted values, never from a mix of currencies.
+        // Commitments count as used: money on an approved, unfulfilled order is
+        // not available to spend on something else.
+        BigDecimal usedRaw = actualSpend.rawSum().add(committedSpend.rawSum());
         double budgetUtilization = totalBudget.rawSum().signum() > 0
-                ? actualSpend.rawSum().divide(totalBudget.rawSum(), 4, RoundingMode.HALF_UP).doubleValue() * 100
+                ? usedRaw.divide(totalBudget.rawSum(), 4, RoundingMode.HALF_UP).doubleValue() * 100
                 : 0.0;
 
         Map<String, Object> response = new LinkedHashMap<>();
@@ -204,8 +215,10 @@ public class AnalyticsServiceImpl implements AnalyticsService {
         response.put("acquisitionsInPeriod", acquired.size());
         response.put("totalAcquisition", totalAcquisition.amount());
         response.put("totalDisposal", totalDisposal.amount());
+        response.put("budgetsInPeriod", budgets.size());
         response.put("totalBudget", totalBudget.amount());
         response.put("totalActualSpend", actualSpend.amount());
+        response.put("totalCommittedSpend", committedSpend.amount());
         response.put("budgetUtilization", Math.round(budgetUtilization * 100.0) / 100.0);
         response.put("averageAssetAgeMonths", Math.round(averageAgeMonths * 10.0) / 10.0);
         response.put("breakdown", Map.of("byCategory", categoryBreakdown));
@@ -324,16 +337,13 @@ public class AnalyticsServiceImpl implements AnalyticsService {
                         CurrencyConversion.MONEY_SCALE, CurrencyConversion.MONEY_ROUNDING)
                 : CurrencyConversion.round(BigDecimal.ZERO);
 
-        // Assets with overdue or upcoming maintenance (nextDueDate <= today, not yet done)
+        // Assets with maintenance open and due (nextDueDate <= today). Counted
+        // against every open record, not only those inside the reporting period:
+        // a job last performed three years ago is still overdue today, and
+        // filtering it out by period made "assets needing maintenance" shrink as
+        // the user narrowed the window — exactly backwards.
         LocalDate today = LocalDate.now();
-        long assetsNeedingMaintenance = records.stream()
-                .filter(r -> r.getNextDueDate() != null
-                        && !r.getNextDueDate().isAfter(today)
-                        && r.getStatus() != MaintenanceStatus.COMPLETED
-                        && r.getStatus() != MaintenanceStatus.CANCELLED)
-                .filter(r -> r.getAsset() != null)
-                .map(r -> r.getAsset().getId())
-                .distinct().count();
+        long assetsNeedingMaintenance = maintenanceRecordRepository.countAssetsNeedingMaintenance(org, today);
 
         // Count by maintenance type
         Map<String, Long> countByType = records.stream()
