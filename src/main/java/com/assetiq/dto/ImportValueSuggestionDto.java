@@ -13,6 +13,10 @@ package com.assetiq.dto;
  */
 public record ImportValueSuggestionDto(
         String value,
+        // Serialised even when null, overriding the application's global non-null
+        // inclusion: "we have no suggestion" and "this key no longer exists" must not
+        // look the same to the wizard.
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.ALWAYS)
         String suggested,
         boolean exact,
         int rowCount

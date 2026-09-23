@@ -34,7 +34,8 @@ public final class ImportRunReport {
     public static final int MAX_NOTES = 500;
 
     private final List<RowNote> notes = new ArrayList<>();
-    private final Map<String, Set<String>> createdReferences = new LinkedHashMap<>();
+    /** type → normalised name → the name as it was first written. */
+    private final Map<String, Map<String, String>> createdReferences = new LinkedHashMap<>();
     private final Set<String> createdCustomFields = new LinkedHashSet<>();
     private boolean notesTruncated;
     private int currentRow;
@@ -94,9 +95,17 @@ public final class ImportRunReport {
         pending.add(new RowNote(currentRow, message, field, header, value));
     }
 
-    /** Records a referenced record the run created rather than rejecting the row over. */
+    /**
+     * Records a referenced record the run created rather than rejecting the row over.
+     *
+     * <p>Deduplicated the same way the resolver matches: "IT Equipment" and "IT
+     * EQUIPMENT" in the same file are one category, so they must also be one line on the
+     * receipt. The first spelling is the one reported, because that is the one the record
+     * was actually created under.</p>
+     */
     public void referenceCreated(String type, String name) {
-        createdReferences.computeIfAbsent(type, t -> new LinkedHashSet<>()).add(name);
+        createdReferences.computeIfAbsent(type, t -> new LinkedHashMap<>())
+                .putIfAbsent(name.trim().toLowerCase(Locale.ROOT), name);
     }
 
     /** Records a custom field definition the run created from a column header. */
@@ -106,7 +115,7 @@ public final class ImportRunReport {
 
     /** How many records of a type this run has created so far — the bound's counter. */
     public int createdCount(String type) {
-        Set<String> created = createdReferences.get(type);
+        Map<String, String> created = createdReferences.get(type);
         return created == null ? 0 : created.size();
     }
 
@@ -120,7 +129,7 @@ public final class ImportRunReport {
 
     public Map<String, List<String>> createdReferences() {
         Map<String, List<String>> copy = new LinkedHashMap<>();
-        createdReferences.forEach((type, names) -> copy.put(type, List.copyOf(names)));
+        createdReferences.forEach((type, names) -> copy.put(type, List.copyOf(names.values())));
         return copy;
     }
 
@@ -132,7 +141,8 @@ public final class ImportRunReport {
     public List<String> createdSummary() {
         List<String> lines = new ArrayList<>();
         createdReferences.forEach((type, names) -> lines.add(
-                "created " + names.size() + " " + plural(type, names.size()) + ": " + String.join(", ", names)));
+                "created " + names.size() + " " + plural(type, names.size())
+                        + ": " + String.join(", ", names.values())));
         if (!createdCustomFields.isEmpty()) {
             lines.add("created " + createdCustomFields.size() + " custom "
                     + (createdCustomFields.size() == 1 ? "field" : "fields")

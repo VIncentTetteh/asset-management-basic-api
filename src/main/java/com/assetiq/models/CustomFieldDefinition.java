@@ -72,7 +72,11 @@ public class CustomFieldDefinition extends BaseEntity {
     public static String sanitiseName(String header) {
         if (header == null) return "";
         String cleaned = header.replaceAll("[\\p{Cntrl}]", " ")
-                .replaceAll("^[=+\\-@\\t\\r]+", "")
+                .trim()
+                // Strip the characters a spreadsheet treats as the start of a formula,
+                // and only after trimming: " =Total" leads with a space, so stripping
+                // before the trim would leave the '=' in place.
+                .replaceAll("^[=+\\-@]+", "")
                 .replaceAll("\\s+", " ")
                 .trim();
         return cleaned.length() <= MAX_NAME_LENGTH ? cleaned : cleaned.substring(0, MAX_NAME_LENGTH).trim();

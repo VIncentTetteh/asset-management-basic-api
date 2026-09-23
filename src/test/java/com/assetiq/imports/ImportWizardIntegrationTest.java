@@ -58,6 +58,9 @@ class ImportWizardIntegrationTest {
     @Autowired private RoleRepository roleRepository;
     @Autowired private UserRepository userRepository;
     @Autowired private PasswordEncoder passwordEncoder;
+    @Autowired private com.assetiq.repositories.FeatureFlagRepository featureFlagRepository;
+    @Autowired private com.assetiq.repositories.FeatureFlagOrganisationRepository featureFlagOrganisationRepository;
+    @Autowired private com.assetiq.repositories.CustomFieldDefinitionRepository customFieldDefinitionRepository;
 
     private final AtomicInteger clientCounter = new AtomicInteger(1);
 
@@ -312,6 +315,304 @@ class ImportWizardIntegrationTest {
         assertThat(second.get("result").get("skipped").asInt()).isEqualTo(1);
     }
 
+    // ── A customer's own spreadsheet ──────────────────────────────────────────
+
+    @Test
+    @DisplayName("analyse offers a dropdown per unfamiliar enum value instead of refusing the file")
+    void analyseSuggestsWhatEachUnfamiliarValueMeans() throws Exception {
+        // The screenshot this test exists for: "Column 'Asset type' 'Laptop' is not a
+        // valid value. Allowed: HARDWARE, SOFTWARE, ..." with no way to say what Laptop
+        // means. Now the server says it, and the user can correct it.
+        String suffix = UUID.randomUUID().toString().substring(0, 6);
+        String csv = String.join("\n",
+                "Asset Name,Asset type,Status",
+                "Dell " + suffix + ",Laptop,In Service",
+                "HP " + suffix + ",Laptop,In Service",
+                "Toyota " + suffix + ",Van,In Stock",
+                "Thing " + suffix + ",Sundry,In Service") + "\n";
+
+        JsonNode analysis = analyse("assets", orgA, "export.csv", csv);
+
+        JsonNode assetType = enumField(analysis, "assetType");
+        assertThat(assetType.get("column").asInt()).isEqualTo(1);
+        assertThat(assetType.get("header").asText()).isEqualTo("Asset type");
+        assertThat(values(assetType.get("allowedValues"))).contains("HARDWARE", "VEHICLE", "OTHER");
+
+        Map<String, String> suggestions = new java.util.LinkedHashMap<>();
+        assetType.get("values").forEach(v -> suggestions.put(v.get("value").asText(),
+                v.get("suggested").isNull() ? null : v.get("suggested").asText()));
+        assertThat(suggestions).containsEntry("Laptop", "HARDWARE")
+                .containsEntry("Van", "VEHICLE")
+                // Not guessed at. The user decides what "Sundry" means, or ignores it.
+                .containsEntry("Sundry", null);
+
+        // The commonest value first, so the dropdown that costs the most rows is answered first.
+        assertThat(assetType.get("values").get(0).get("value").asText()).isEqualTo("Laptop");
+        assertThat(assetType.get("values").get(0).get("rowCount").asInt()).isEqualTo(2);
+
+        assertThat(enumField(analysis, "status").get("values").toString()).contains("IN_USE");
+    }
+
+    @Test
+    @DisplayName("the value mappings the user chose are applied, and an unmapped value costs the field not the row")
+    void valueMappingsAreAppliedAndUnknownValuesDoNotFailRows() throws Exception {
+        String suffix = UUID.randomUUID().toString().substring(0, 6);
+        String csv = String.join("\n",
+                "Asset Name,Asset type",
+                "Mapped " + suffix + ",Gizmo",
+                "Aliased " + suffix + ",Laptop",
+                "Unknown " + suffix + ",Whatsit",
+                "Dropped " + suffix + ",n/a") + "\n";
+
+        UUID uploadId = UUID.fromString(analyse("assets", orgA, "export.csv", csv).get("uploadId").asText());
+        Map<String, Object> mapping = Map.of("name", 0, "assetType", 1);
+        Map<String, Object> options = Map.of("valueMappings",
+                Map.of("assetType", Map.of("Gizmo", "EQUIPMENT", "n/a", "__IGNORE__")));
+        Map<String, Object> body = Map.of("uploadId", uploadId, "mapping", mapping, "options", options);
+
+        JsonNode preview = postJson("/api/v1/imports/assets/preview", orgA, body);
+        assertThat(preview.get("totals").get("valid").asInt())
+                .as("vocabulary is never a reason to refuse a row")
+                .isEqualTo(4);
+        assertThat(preview.get("errors")).isEmpty();
+        assertThat(preview.get("outcome").asText()).isEqualTo("SUCCESS");
+        // The two the server could not place are called out, not hidden.
+        assertThat(preview.get("notes")).hasSize(2);
+
+        JsonNode result = awaitJob(UUID.fromString(postJson("/api/v1/imports/assets/commit", orgA, body)
+                .get("jobId").asText()), orgA).get("result");
+        assertThat(result.get("imported").asInt()).isEqualTo(4);
+        assertThat(result.get("failed").asInt()).isZero();
+        assertThat(result.get("outcome").asText()).isEqualTo("SUCCESS");
+        assertThat(result.get("notes")).hasSize(2);
+
+        String assets = listBody("/api/v1/assets?limit=200&search=" + suffix, orgA);
+        JsonNode byName = indexByName(assets);
+        assertThat(byName.get("Mapped " + suffix).path("assetType").asText()).isEqualTo("EQUIPMENT");
+        assertThat(byName.get("Aliased " + suffix).path("assetType").asText()).isEqualTo("HARDWARE");
+        // The API omits null fields entirely, so "blank" reads as an absent key here.
+        assertThat(byName.get("Unknown " + suffix).path("assetType").isMissingNode())
+                .as("an unmappable value leaves the field blank rather than the row unimported")
+                .isTrue();
+        assertThat(byName.get("Dropped " + suffix).path("assetType").isMissingNode()).isTrue();
+    }
+
+    @Test
+    @DisplayName("a category the tenant does not have is created, deduplicated, and named in the result")
+    void missingReferencesAreCreatedByDefaultAndReported() throws Exception {
+        // The second screenshot: "'IT Equipment' does not exist in your organisation.
+        // Create it first, or re-run with 'create missing referenced records' turned on"
+        // -- an option the wizard never offered.
+        String suffix = UUID.randomUUID().toString().substring(0, 6);
+        String category = "IT Equipment " + suffix;
+        String csv = String.join("\n",
+                "Asset Name,Category,Department",
+                "One " + suffix + "," + category + ",Finance " + suffix,
+                "Two " + suffix + "," + category.toUpperCase(java.util.Locale.ROOT) + ",finance " + suffix) + "\n";
+
+        UUID uploadId = UUID.fromString(analyse("assets", orgA, "export.csv", csv).get("uploadId").asText());
+        Map<String, Object> body = Map.of("uploadId", uploadId,
+                "mapping", Map.of("name", 0, "category", 1, "department", 2));
+
+        JsonNode preview = postJson("/api/v1/imports/assets/preview", orgA, body);
+        assertThat(preview.get("errors")).isEmpty();
+        assertThat(preview.get("wouldCreate").get("category")).hasSize(1);
+        assertThat(preview.get("wouldCreate").get("department")).hasSize(1);
+
+        JsonNode result = awaitJob(UUID.fromString(postJson("/api/v1/imports/assets/commit", orgA, body)
+                .get("jobId").asText()), orgA).get("result");
+
+        assertThat(result.get("imported").asInt()).isEqualTo(2);
+        assertThat(result.get("outcome").asText()).isEqualTo("SUCCESS");
+        assertThat(result.get("createdReferences").get("category"))
+                .as("two spellings of one name is one category, not two")
+                .hasSize(1);
+        assertThat(result.get("createdReferences").get("category").get(0).asText()).isEqualTo(category);
+        assertThat(result.get("createdReferences").get("department")).hasSize(1);
+
+        assertThat(listBody("/api/v1/categories?limit=200", orgA)).contains(category);
+        // And the tenant next door has neither the category nor the assets.
+        assertThat(listBody("/api/v1/categories?limit=200", orgB)).doesNotContain(suffix);
+        assertThat(listBody("/api/v1/assets?limit=200", orgB)).doesNotContain(suffix);
+    }
+
+    @Test
+    @DisplayName("turning reference creation off restores the strict behaviour")
+    void referenceCreationCanStillBeTurnedOff() throws Exception {
+        String suffix = UUID.randomUUID().toString().substring(0, 6);
+        String csv = "Asset Name,Category\nStrict " + suffix + ",Nowhere " + suffix + "\n";
+        UUID uploadId = UUID.fromString(analyse("assets", orgA, "export.csv", csv).get("uploadId").asText());
+
+        JsonNode preview = postJson("/api/v1/imports/assets/preview", orgA, Map.of(
+                "uploadId", uploadId,
+                "mapping", Map.of("name", 0, "category", 1),
+                "options", Map.of("createMissingReferences", false)));
+
+        assertThat(preview.get("errors")).hasSize(1);
+        assertThat(preview.get("errors").get(0).get("message").asText())
+                .contains("does not exist in your organisation");
+        assertThat(preview.get("outcome").asText()).isEqualTo("FAILED");
+    }
+
+    @Test
+    @DisplayName("a user the tenant does not have costs the field, not the row")
+    void anUnknownAssigneeDoesNotFailTheRow() throws Exception {
+        String suffix = UUID.randomUUID().toString().substring(0, 6);
+        String csv = "Asset Name,Assigned To\nOrphan " + suffix + ",leaver@example.com\n";
+        UUID uploadId = UUID.fromString(analyse("assets", orgA, "export.csv", csv).get("uploadId").asText());
+
+        JsonNode result = awaitJob(UUID.fromString(postJson("/api/v1/imports/assets/commit", orgA, Map.of(
+                "uploadId", uploadId,
+                "mapping", Map.of("name", 0, "assignedUserEmail", 1))).get("jobId").asText()), orgA)
+                .get("result");
+
+        assertThat(result.get("imported").asInt()).isEqualTo(1);
+        assertThat(result.get("errors")).isEmpty();
+        assertThat(result.get("notes").get(0).get("message").asText())
+                .contains("No user named 'leaver@example.com'");
+    }
+
+    @Test
+    @DisplayName("a tenant without the custom-fields feature is told so, and offered only ignore")
+    void customFieldsAreOfferedOnlyWhenTheTenantCanUseThem() throws Exception {
+        String suffix = UUID.randomUUID().toString().substring(0, 6);
+        String csv = "Asset Name,Cost Centre Ref\nFlagged " + suffix + ",CC-1\n";
+
+        JsonNode analysis = analyse("assets", orgA, "export.csv", csv);
+        assertThat(analysis.get("customFieldsAvailable").asBoolean()).isFalse();
+        assertThat(analysis.get("customFieldsUnavailableReason").asText()).contains("not enabled");
+
+        JsonNode plan = columnPlan(analysis, 1);
+        assertThat(plan.get("action").asText()).isEqualTo("IGNORE");
+        assertThat(plan.get("canBeCustomField").asBoolean()).isFalse();
+
+        // And asking for it anyway is refused once, on the request, rather than three
+        // thousand times on three thousand rows.
+        UUID uploadId = UUID.fromString(analysis.get("uploadId").asText());
+        MvcResult refused = mockMvc.perform(auth(post("/api/v1/imports/assets/preview"), orgA)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "uploadId", uploadId,
+                                "mapping", Map.of("name", 0),
+                                "options", Map.of("customFieldColumns", List.of(1))))))
+                .andReturn();
+        assertThat(refused.getResponse().getStatus()).isEqualTo(400);
+        assertThat(refused.getResponse().getContentAsString()).contains("not enabled");
+    }
+
+    @Test
+    @DisplayName("with the feature on, a column the product has no field for becomes a custom field and is populated")
+    void anUnknownColumnBecomesACustomField() throws Exception {
+        enableCustomFields(orgA);
+        try {
+            String suffix = UUID.randomUUID().toString().substring(0, 6);
+            String csv = String.join("\n",
+                    "Asset Name,Cost Centre Ref,Floor",
+                    "Kept " + suffix + ",CC-1,3") + "\n";
+
+            JsonNode analysis = analyse("assets", orgA, "export.csv", csv);
+            assertThat(analysis.get("customFieldsAvailable").asBoolean()).isTrue();
+            JsonNode plan = columnPlan(analysis, 1);
+            assertThat(plan.get("action").asText()).isEqualTo("CUSTOM_FIELD");
+            assertThat(plan.get("customFieldName").asText()).isEqualTo("Cost Centre Ref");
+
+            UUID uploadId = UUID.fromString(analysis.get("uploadId").asText());
+            // Column 1 kept, column 2 left on ignore: both are legitimate answers.
+            Map<String, Object> body = Map.of("uploadId", uploadId,
+                    "mapping", Map.of("name", 0),
+                    "options", Map.of("customFieldColumns", List.of(1)));
+
+            JsonNode preview = postJson("/api/v1/imports/assets/preview", orgA, body);
+            assertThat(preview.get("errors")).isEmpty();
+            assertThat(values(preview.get("wouldCreateCustomFields"))).containsExactly("Cost Centre Ref");
+
+            JsonNode result = awaitJob(UUID.fromString(postJson("/api/v1/imports/assets/commit", orgA, body)
+                    .get("jobId").asText()), orgA).get("result");
+            assertThat(result.get("imported").asInt()).isEqualTo(1);
+            assertThat(values(result.get("createdCustomFields"))).containsExactly("Cost Centre Ref");
+
+            UUID assetId = UUID.fromString(indexByName(
+                    listBody("/api/v1/assets?limit=200&search=" + suffix, orgA))
+                    .get("Kept " + suffix).get("id").asText());
+            String fields = listBody("/api/v1/assets/" + assetId + "/custom-fields", orgA);
+            assertThat(fields).contains("Cost Centre Ref").contains("CC-1")
+                    .as("the column left on ignore must not be read at all")
+                    .doesNotContain("Floor");
+
+            // The definition belongs to org A and nobody else.
+            assertThat(customFieldDefinitionRepository
+                    .findByOrganisationAndEntityTypeAndFieldKeyAndDeletedAtIsNull(
+                            organisationRepository.findByIdAndDeletedAtIsNull(orgB.organisationId()).orElseThrow(),
+                            "ASSETS", "costcentreref"))
+                    .isEmpty();
+        } finally {
+            disableCustomFields(orgA);
+        }
+    }
+
+    @Test
+    @DisplayName("preview and commit reach the same verdict on the same file")
+    void previewAndCommitAgree() throws Exception {
+        // The third screenshot: "Every row passed. Importing will add assets." followed
+        // by a failed import. Preview and commit run the same engine over the same
+        // options; this asserts they say the same thing about the same file.
+        String suffix = UUID.randomUUID().toString().substring(0, 6);
+        String csv = String.join("\n",
+                "Asset Name,Asset type,Category,Purchase Cost",
+                "Good " + suffix + ",Laptop,IT Equipment " + suffix + ",1200",
+                "Odd " + suffix + ",Whatsit,IT Equipment " + suffix + ",1300",
+                ",Laptop,IT Equipment " + suffix + ",1400",
+                "Bad Number " + suffix + ",Laptop,IT Equipment " + suffix + ",not-a-number") + "\n";
+
+        UUID uploadId = UUID.fromString(analyse("assets", orgA, "export.csv", csv).get("uploadId").asText());
+        Map<String, Object> body = Map.of("uploadId", uploadId,
+                "mapping", Map.of("name", 0, "assetType", 1, "category", 2, "purchaseCost", 3));
+
+        JsonNode preview = postJson("/api/v1/imports/assets/preview", orgA, body);
+        JsonNode result = awaitJob(UUID.fromString(postJson("/api/v1/imports/assets/commit", orgA, body)
+                .get("jobId").asText()), orgA).get("result");
+
+        assertThat(result.get("totalRows").asInt()).isEqualTo(preview.get("totals").get("total").asInt());
+        assertThat(result.get("imported").asInt() + result.get("updated").asInt())
+                .isEqualTo(preview.get("totals").get("valid").asInt());
+        assertThat(result.get("skipped").asInt()).isEqualTo(preview.get("totals").get("invalid").asInt());
+        assertThat(result.get("outcome").asText()).isEqualTo(preview.get("outcome").asText());
+        assertThat(rowNumbers(result.get("errors"))).isEqualTo(rowNumbers(preview.get("errors")));
+        assertThat(rowNumbers(result.get("notes"))).isEqualTo(rowNumbers(preview.get("notes")));
+
+        // And the verdict is the honest one: two rows in, two refused.
+        assertThat(result.get("outcome").asText()).isEqualTo("PARTIAL");
+        assertThat(result.get("imported").asInt()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("the result counts never contradict the error list")
+    void theResultCountsAreInternallyConsistent() throws Exception {
+        // "ROWS 1, IMPORTED 0, SKIPPED 1" over a list saying "2 rows were not imported",
+        // under a green tick. Every part of that is checked here.
+        String suffix = UUID.randomUUID().toString().substring(0, 6);
+        String csv = String.join("\n",
+                "Asset Name,Purchase Cost",
+                ",1200") + "\n";
+
+        UUID uploadId = UUID.fromString(analyse("assets", orgA, "one.csv", csv).get("uploadId").asText());
+        JsonNode result = awaitJob(UUID.fromString(postJson("/api/v1/imports/assets/commit", orgA, Map.of(
+                "uploadId", uploadId,
+                "mapping", Map.of("name", 0, "purchaseCost", 1))).get("jobId").asText()), orgA)
+                .get("result");
+
+        int total = result.get("totalRows").asInt();
+        assertThat(total).isEqualTo(1);
+        assertThat(result.get("imported").asInt() + result.get("updated").asInt()
+                + result.get("skipped").asInt()).isEqualTo(total);
+        assertThat(result.get("errors")).hasSize(result.get("failed").asInt());
+        assertThat(rowNumbers(result.get("errors"))).doesNotContain(0);
+        assertThat(result.get("outcome").asText())
+                .as("an import that imported nothing is not a success")
+                .isEqualTo("FAILED");
+        assertThat(suffix).isNotBlank();
+    }
+
     // ── Tenant isolation ──────────────────────────────────────────────────────
 
     @Test
@@ -506,6 +807,84 @@ class ImportWizardIntegrationTest {
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private JsonNode enumField(JsonNode analysis, String field) {
+        for (JsonNode node : analysis.get("enumFields")) {
+            if (field.equals(node.get("field").asText())) return node;
+        }
+        throw new AssertionError("no enumFields entry for '" + field + "'");
+    }
+
+    private JsonNode columnPlan(JsonNode analysis, int index) {
+        for (JsonNode node : analysis.get("columnPlan")) {
+            if (node.get("index").asInt() == index) return node;
+        }
+        throw new AssertionError("no columnPlan entry for column " + index);
+    }
+
+    private List<String> values(JsonNode array) {
+        List<String> out = new java.util.ArrayList<>();
+        if (array != null) array.forEach(node -> out.add(node.asText()));
+        return out;
+    }
+
+    private List<Integer> rowNumbers(JsonNode array) {
+        List<Integer> out = new java.util.ArrayList<>();
+        if (array != null) array.forEach(node -> out.add(node.get("row").asInt()));
+        return out;
+    }
+
+    /** The asset list body keyed by name, so a test can assert on one row it wrote. */
+    private JsonNode indexByName(String listBody) throws Exception {
+        JsonNode root = objectMapper.readTree(listBody);
+        JsonNode items = root.has("items") ? root.get("items") : root;
+        com.fasterxml.jackson.databind.node.ObjectNode byName = objectMapper.createObjectNode();
+        items.forEach(item -> byName.set(item.path("name").asText(), item));
+        return byName;
+    }
+
+    /**
+     * Grants {@code commercial.governed-custom-fields} to one organisation.
+     *
+     * <p>Written as the per-organisation override row the product itself uses, rather
+     * than by stubbing the service, so the test exercises the same gate production does.
+     * Removed again afterwards: the flag is off by default and leaving it on would let a
+     * later test pass for the wrong reason.</p>
+     */
+    private void enableCustomFields(Tenant tenant) {
+        setCustomFieldsFlag(tenant, true);
+    }
+
+    private void disableCustomFields(Tenant tenant) {
+        featureFlagOrganisationRepository
+                .findByFeatureFlagKeyAndOrganisationId(ImportWizardService.CUSTOM_FIELDS_FLAG,
+                        tenant.organisationId())
+                .ifPresent(featureFlagOrganisationRepository::delete);
+    }
+
+    private void setCustomFieldsFlag(Tenant tenant, boolean enabled) {
+        // The suite runs on H2 with ddl-auto and Flyway off, so V38's seed row is not
+        // there; created on demand rather than asserted, so this test pins the gate
+        // rather than the migration.
+        com.assetiq.models.FeatureFlag flag = featureFlagRepository
+                .findByKey(ImportWizardService.CUSTOM_FIELDS_FLAG)
+                .orElseGet(() -> {
+                    com.assetiq.models.FeatureFlag created = new com.assetiq.models.FeatureFlag();
+                    created.setKey(ImportWizardService.CUSTOM_FIELDS_FLAG);
+                    created.setDescription("Typed tenant field definitions.");
+                    created.setEnabledGlobally(false);
+                    return featureFlagRepository.save(created);
+                });
+        com.assetiq.models.FeatureFlagOrganisation override = featureFlagOrganisationRepository
+                .findByFeatureFlagKeyAndOrganisationId(ImportWizardService.CUSTOM_FIELDS_FLAG,
+                        tenant.organisationId())
+                .orElseGet(com.assetiq.models.FeatureFlagOrganisation::new);
+        override.setFeatureFlag(flag);
+        override.setOrganisation(organisationRepository
+                .findByIdAndDeletedAtIsNull(tenant.organisationId()).orElseThrow());
+        override.setEnabled(enabled);
+        featureFlagOrganisationRepository.save(override);
+    }
 
     /** Analyse and commit a one-row supplier file; returns the job id. */
     private UUID commitSupplierImport(Tenant tenant, String supplierName) throws Exception {
