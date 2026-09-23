@@ -65,6 +65,15 @@ public class Organisation extends BaseEntity {
     @Column(length = 3)
     private String billingCurrency;
 
+    /**
+     * When this tenant put the first-run checklist away. Null means still
+     * showing. On the organisation rather than the user because the checklist
+     * describes the company's setup — a second administrator arriving after the
+     * first has finished should not be shown a list of things already done.
+     */
+    @Column(name = "onboarding_dismissed_at")
+    private java.time.Instant onboardingDismissedAt;
+
     @Column(name = "email_domain", unique = true, nullable = true)
     private String emailDomain;
 

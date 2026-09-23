@@ -23,4 +23,7 @@ public interface CategoryRepository extends JpaRepository<Category, UUID> {
     Set<Category> findByOrganisationAndDeletedAtIsNull(Organisation organisation);
 
     Set<Category> findByParentCategoryIdAndDeletedAtIsNull(UUID parentCategoryId);
+
+    /** Live rows for this tenant — the first-run checklist's completion signal. */
+    long countByOrganisationAndDeletedAtIsNull(Organisation organisation);
 }

@@ -23,4 +23,7 @@ public interface LocationRepository extends JpaRepository<Location, UUID> {
     Set<Location> findByOrganisationAndDeletedAtIsNull(Organisation organisation);
 
     Set<Location> findByParentLocationIdAndDeletedAtIsNull(UUID parentLocationId);
+
+    /** Live rows for this tenant — the first-run checklist's completion signal. */
+    long countByOrganisationAndDeletedAtIsNull(Organisation organisation);
 }
