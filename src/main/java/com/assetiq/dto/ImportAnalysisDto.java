@@ -1,5 +1,7 @@
 package com.assetiq.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -10,8 +12,14 @@ import java.util.UUID;
  *
  * @param uploadId              handle for the staged file; preview and commit take it
  * @param detectedColumns       every column in the file, with sample values
- * @param suggestedMapping      field name to column index; a null value means "we are
- *                              not confident, ask the user" — never a silent guess
+ * @param suggestedMapping      field name to column index, listing <em>every</em> field
+ *                              of the type so the wizard can render its whole form from
+ *                              this one payload. A null value means "we are not
+ *                              confident, ask the user" — never a silent guess. The
+ *                              nulls are serialised explicitly, overriding this
+ *                              application's global non-null inclusion, because an
+ *                              absent key and a null one would otherwise be
+ *                              indistinguishable from a field that no longer exists.
  * @param rowCount              data rows found (excluding the header)
  * @param unmappedColumns       header texts no field claimed
  * @param missingRequiredFields required fields with no suggested column; the wizard
@@ -22,6 +30,7 @@ import java.util.UUID;
 public record ImportAnalysisDto(
         UUID uploadId,
         List<ImportDetectedColumnDto> detectedColumns,
+        @JsonInclude(content = JsonInclude.Include.ALWAYS)
         Map<String, Integer> suggestedMapping,
         int rowCount,
         List<String> unmappedColumns,

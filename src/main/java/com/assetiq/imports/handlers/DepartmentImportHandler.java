@@ -38,36 +38,42 @@ public class DepartmentImportHandler implements ImportEntityHandler {
             field("name", "Department name", ImportDataType.STRING).required()
                     .example("Finance")
                     .notes("Must be unique within your organisation.")
-                    .aliases("department", "dept", "dept name", "org unit", "business unit",
-                            "team", "division").build(),
+                    .aliases("department", "department title", "dept", "dept name", "name",
+                            "org unit", "business unit", "team", "division",
+                            "section").build(),
             field("departmentCode", "Department code", ImportDataType.STRING)
                     .example("FIN")
                     .notes("Must be unique within your organisation when given.")
-                    .aliases("dept code", "code", "department id", "unit code").build(),
+                    .aliases("dept code", "dept id", "dept no", "code", "department id",
+                            "unit code", "unit id", "org unit code").build(),
             field("description", "Description", ImportDataType.TEXT)
                     .example("Finance and treasury")
-                    .aliases("notes", "details", "about").build(),
+                    .aliases("notes", "details", "about", "comments").build(),
             field("costCenterCode", "Cost centre code", ImportDataType.STRING)
                     .example("CC-1001")
                     .notes("Must be unique within your organisation when given.")
-                    .aliases("cost center", "cost centre", "cost center code", "gl code",
+                    .aliases("cost center", "cost centre", "cost center code", "cost centre code",
+                            "cost center id", "cc code", "gl code", "gl account",
                             "costcentre").build(),
             field("budgetLimit", "Budget limit", ImportDataType.DECIMAL)
                     .example("250000.00")
                     .notes("A planning cap in your organisation's base currency. Leave blank for none.")
-                    .aliases("budget", "annual budget", "budget cap", "spend limit").build(),
+                    .aliases("budget", "budget amount", "annual budget", "allocated budget",
+                            "budget cap", "spend limit").build(),
             enumField("status", "Status", DepartmentStatus.class)
                     .example("ACTIVE")
                     .notes("Defaults to ACTIVE when blank.")
-                    .aliases("department status", "state").build(),
+                    .aliases("department status", "dept status", "state").build(),
             field("parentDepartment", "Parent department", ImportDataType.REFERENCE)
                     .example("")
                     .notes("Name or code of another department. It may appear in an earlier row of this file.")
-                    .aliases("parent", "parent dept", "reports to", "belongs to").build(),
+                    .aliases("parent", "parent dept", "parent department name", "parent unit",
+                            "reports to", "belongs to").build(),
             field("manager", "Manager", ImportDataType.REFERENCE)
                     .example("")
                     .notes("Email address or employee number of an existing AssetIQ user.")
-                    .aliases("manager email", "head", "department head", "owner", "hod").build()
+                    .aliases("manager email", "head", "head email", "department head",
+                            "owner", "owner email", "hod").build()
     );
 
     private final DepartmentService departmentService;

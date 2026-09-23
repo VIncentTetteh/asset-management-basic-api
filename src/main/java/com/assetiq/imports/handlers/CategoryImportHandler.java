@@ -32,24 +32,28 @@ public class CategoryImportHandler implements ImportEntityHandler {
             field("name", "Category name", ImportDataType.STRING).required()
                     .example("Laptops")
                     .notes("Must be unique within your organisation.")
-                    .aliases("category", "asset category", "class", "asset class", "type",
-                            "asset type", "group", "classification").build(),
+                    .aliases("category", "category title", "asset category", "name",
+                            "class", "asset class", "type", "asset type",
+                            "group", "asset group", "classification", "family").build(),
             field("description", "Description", ImportDataType.TEXT)
                     .example("Portable computers issued to staff")
-                    .aliases("notes", "details", "about").build(),
+                    .aliases("notes", "details", "about", "comments").build(),
             field("assetPrefixCode", "Asset tag prefix", ImportDataType.STRING)
                     .example("LT")
                     .notes("Used to generate asset tags such as LT-000123.")
-                    .aliases("prefix", "tag prefix", "code", "category code", "asset prefix").build(),
+                    .aliases("prefix", "prefix code", "tag prefix", "code", "category code",
+                            "category prefix", "asset prefix").build(),
             field("defaultWarrantyPeriodMonths", "Default warranty (months)", ImportDataType.INTEGER)
                     .example("24")
                     .notes("Whole number of months. Applied to new assets in this category.")
-                    .aliases("warranty months", "default warranty", "warranty period",
-                            "warranty period months").build(),
+                    .aliases("warranty months", "warranty (months)", "default warranty",
+                            "default warranty months", "warranty period",
+                            "warranty period months", "warranty duration months").build(),
             field("parentCategory", "Parent category", ImportDataType.REFERENCE)
                     .example("")
                     .notes("Name of another category. It may appear in an earlier row of this file.")
-                    .aliases("parent", "parent class", "belongs to", "sub category of").build()
+                    .aliases("parent", "parent class", "parent category name", "parent group",
+                            "belongs to", "sub category of").build()
     );
 
     private final CategoryService categoryService;

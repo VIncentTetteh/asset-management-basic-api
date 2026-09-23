@@ -89,7 +89,7 @@ class ImportTemplateGeneratorTest {
         // The registry-wide version of the first test: no entity type may ship a
         // template that disagrees with what its handler validates.
         for (ImportEntityType type : ImportEntityType.values()) {
-            List<ImportFieldDescriptor> fields = fieldsFor(type);
+            List<ImportFieldDescriptor> fields = ImportTestDescriptors.fieldsFor(type);
             if (fields.isEmpty()) continue;
             byte[] bytes = generator.xlsx(type, fields);
             try (Workbook workbook = new XSSFWorkbook(new ByteArrayInputStream(bytes))) {
@@ -125,29 +125,6 @@ class ImportTemplateGeneratorTest {
                 .isEqualTo("assetiq-licenses-import-template.xlsx");
         assertThat(generator.filename(ImportEntityType.SUPPLIERS, "csv"))
                 .isEqualTo("assetiq-suppliers-import-template.csv");
-    }
-
-    // A handler's descriptors without needing its dependencies: every handler declares
-    // them as a constant and takes no part in building them.
-    private List<ImportFieldDescriptor> fieldsFor(ImportEntityType type) {
-        return switch (type) {
-            case ASSETS -> new com.assetiq.imports.handlers.AssetImportHandler(
-                    null, null, null, null, null, null, null, null).fields();
-            case SUPPLIERS -> new com.assetiq.imports.handlers.SupplierImportHandler(
-                    null, null, null).fields();
-            case EMPLOYEES -> new com.assetiq.imports.handlers.EmployeeImportHandler(
-                    null, null, null, null).fields();
-            case LOCATIONS -> new com.assetiq.imports.handlers.LocationImportHandler(
-                    null, null, null).fields();
-            case DEPARTMENTS -> new com.assetiq.imports.handlers.DepartmentImportHandler(
-                    null, null, null, null).fields();
-            case CATEGORIES -> new com.assetiq.imports.handlers.CategoryImportHandler(
-                    null, null, null).fields();
-            case SOFTWARE_LICENCES -> new com.assetiq.imports.handlers.SoftwareLicenceImportHandler(
-                    null, null, null, null).fields();
-            case CONTRACTS -> new com.assetiq.imports.handlers.ContractImportHandler(
-                    null, null, null, null).fields();
-        };
     }
 
     private static List<String> headerTexts(Row row) {

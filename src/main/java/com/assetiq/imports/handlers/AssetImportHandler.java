@@ -45,9 +45,13 @@ import static com.assetiq.imports.ImportFieldDescriptor.field;
  * in the historical header order still imports byte-for-byte as it always did, while
  * the wizard can map any other order onto the same fields.</p>
  *
- * <p>Columns beyond the mapped set become asset custom fields when the tenant has
- * {@code commercial.governed-custom-fields} enabled, and are a row error when it does
- * not — unchanged from before, so the flag cannot be bypassed via a spreadsheet.</p>
+ * <p>Columns beyond the mapped set become asset custom fields <b>only on the legacy
+ * positional path</b>, where they always have, and only when the tenant has
+ * {@code commercial.governed-custom-fields} enabled; without the flag the row is an
+ * error, so the flag cannot be bypassed via a spreadsheet. The mapping-driven wizard
+ * sets {@link ImportOptions#captureUnmappedColumns()} false, so a column the user did
+ * not map is simply not read — a sheet from another platform is expected to carry
+ * columns AssetIQ has no field for, and the answer to them is to ignore them.</p>
  */
 @Component
 public class AssetImportHandler implements ImportEntityHandler {
@@ -58,97 +62,128 @@ public class AssetImportHandler implements ImportEntityHandler {
     private static final List<ImportFieldDescriptor> FIELDS = List.of(
             field("name", "Asset name", ImportDataType.STRING).required()
                     .example("Dell Latitude 5440")
-                    .aliases("asset", "asset name", "item", "item name", "description",
-                            "device name", "title", "equipment name", "hostname").build(),
+                    .notes("A column headed just 'Asset' is left unmapped: it reads as the name "
+                            + "to some tools and as the tag to others.")
+                    .aliases("asset name", "item", "item name", "name",
+                            "device name", "device", "title", "equipment", "equipment name",
+                            "product name", "item description", "hostname").build(),
             field("assetTag", "Asset tag", ImportDataType.STRING)
                     .example("LT-000123")
                     .notes("Your own label or barcode. Generated for you when left blank.")
-                    .aliases("tag", "asset id", "asset number", "barcode", "inventory number",
-                            "tag number", "asset code", "property tag", "finance tag").build(),
+                    .aliases("tag", "asset id", "asset number", "asset no", "asset no.",
+                            "tag no", "tag no.", "tag #", "tag number", "barcode",
+                            "barcode number", "asset barcode", "inventory number",
+                            "inventory no", "inventory id", "asset code", "property tag",
+                            "finance tag", "fixed asset number", "fa number").build(),
             field("serialNumber", "Serial number", ImportDataType.STRING)
                     .example("7QK2X93")
-                    .aliases("serial", "serial no", "sn", "s/n", "service tag",
-                            "manufacturer serial").build(),
+                    .aliases("serial", "serial no", "serial no.", "serial num", "serial #",
+                            "sn", "s/n", "service tag", "device serial",
+                            "manufacturer serial", "imei").build(),
             field("description", "Description", ImportDataType.TEXT)
                     .example("14-inch laptop issued to finance staff")
-                    .aliases("notes", "details", "comments", "remarks").build(),
+                    .aliases("notes", "details", "comments", "remarks",
+                            "long description", "asset description").build(),
             enumField("assetType", "Asset type", AssetType.class)
                     .example("HARDWARE")
-                    .aliases("type", "asset class", "kind", "asset kind").build(),
+                    .aliases("type", "asset class", "kind", "asset kind", "type of asset").build(),
             field("manufacturer", "Manufacturer", ImportDataType.STRING)
                     .example("Dell")
-                    .aliases("make", "brand", "oem", "vendor").build(),
+                    .notes("A 'Vendor' column is deliberately left unmapped: on an asset sheet it may "
+                            + "mean the maker or the reseller, and guessing is worse than asking.")
+                    .aliases("make", "brand", "oem", "manufacturer name", "vendor").build(),
             field("model", "Model", ImportDataType.STRING)
                     .example("Latitude 5440")
-                    .aliases("model number", "model name", "product model", "part number").build(),
+                    .aliases("model number", "model no", "model no.", "model num", "model #",
+                            "model name", "product model", "product model number",
+                            "part number", "part no").build(),
             field("purchaseDate", "Purchase date", ImportDataType.DATE)
                     .example("2024-03-12")
                     .notes("YYYY-MM-DD. DD/MM/YYYY is also accepted.")
-                    .aliases("date purchased", "acquired", "acquisition date", "bought",
-                            "invoice date", "in service date").build(),
+                    .aliases("date purchased", "date of purchase", "purchased on", "acquired",
+                            "date acquired", "acquired date", "acquisition", "acquisition date",
+                            "bought", "received date", "date received", "invoice date",
+                            "po date", "in service date").build(),
             field("purchaseCost", "Purchase cost", ImportDataType.DECIMAL)
                     .example("18500.00")
                     .notes("Numbers only; the currency goes in its own column.")
-                    .aliases("cost", "price", "value", "purchase price", "acquisition cost",
-                            "original cost", "amount").build(),
+                    .aliases("cost", "price", "value", "purchase price", "purchase amount",
+                            "acquisition cost", "acquisition value", "original cost",
+                            "original value", "unit cost", "unit price", "cost price",
+                            "net cost", "amount").build(),
             field("currency", "Currency", ImportDataType.STRING)
                     .example("GHS")
                     .notes("Three-letter ISO 4217 code, e.g. GHS, USD, GBP.")
                     .aliases("ccy", "currency code", "iso currency").build(),
             enumField("depreciationMethod", "Depreciation method", DepreciationMethod.class)
                     .example("STRAIGHT_LINE")
-                    .aliases("depreciation", "method", "dep method", "depreciation type").build(),
+                    .aliases("depreciation", "method", "dep method", "depreciation method",
+                            "depreciation type", "depreciation basis").build(),
             field("usefulLifeMonths", "Useful life (months)", ImportDataType.INTEGER)
                     .example("48")
                     .notes("Whole number of months. A 4-year life is 48, not 4.")
-                    .aliases("useful life", "life months", "depreciation period",
-                            "life", "lifespan months").build(),
+                    .aliases("useful life", "useful life months", "life months", "life in months",
+                            "depreciation period", "depreciation months", "life",
+                            "lifespan months", "economic life months").build(),
             field("residualValue", "Residual value", ImportDataType.DECIMAL)
                     .example("1500.00")
                     .notes("Salvage value at the end of the useful life.")
-                    .aliases("salvage value", "scrap value", "residual", "end value").build(),
+                    .aliases("salvage value", "salvage", "scrap value", "residual",
+                            "residual amount", "end value").build(),
             field("warrantyExpiryDate", "Warranty expiry date", ImportDataType.DATE)
                     .example("2027-03-11")
                     .notes("YYYY-MM-DD.")
-                    .aliases("warranty end", "warranty expiration", "warranty until",
-                            "warranty expiry", "warranty date").build(),
+                    .aliases("warranty end", "warranty end date", "warranty expiration",
+                            "warranty expires", "warranty until", "warranty expiry",
+                            "warranty date", "end of warranty").build(),
             enumField("status", "Status", AssetStatus.class)
                     .example("IN_USE")
-                    .aliases("asset status", "state", "lifecycle status", "disposition").build(),
+                    .aliases("asset status", "state", "asset state", "current status",
+                            "lifecycle status", "disposition").build(),
             enumField("condition", "Condition", AssetCondition.class)
                     .example("GOOD")
-                    .aliases("asset condition", "physical condition", "grade", "state of repair").build(),
+                    .aliases("asset condition", "condition status", "physical condition",
+                            "grade", "state of repair").build(),
             field("category", "Category", ImportDataType.REFERENCE)
                     .example("Laptops")
                     .notes("Name of a category in your organisation.")
-                    .aliases("asset category", "class", "classification", "group", "sub category").build(),
+                    .aliases("asset category", "category name", "class", "classification",
+                            "group", "asset group", "sub category", "sub-category",
+                            "family").build(),
             field("location", "Location", ImportDataType.REFERENCE)
                     .example("Accra Head Office")
                     .notes("Name of a location in your organisation.")
-                    .aliases("site", "office", "branch", "building", "room", "where",
-                            "physical location").build(),
+                    .aliases("site", "site name", "location name", "office", "office location",
+                            "branch", "building", "room", "where",
+                            "physical location", "current location").build(),
             field("supplier", "Supplier", ImportDataType.REFERENCE)
                     .example("Acme Technologies Ltd")
                     .notes("Name of a supplier in your organisation.")
                     .aliases("vendor", "supplier name", "vendor name", "purchased from",
-                            "reseller").build(),
+                            "bought from", "reseller", "dealer", "seller").build(),
             field("department", "Department", ImportDataType.REFERENCE)
                     .example("Finance")
                     .notes("Name or code of a department in your organisation.")
-                    .aliases("dept", "cost centre", "cost center", "org unit", "business unit",
-                            "team", "owning department").build(),
+                    .aliases("dept", "department name", "cost centre", "cost center",
+                            "org unit", "business unit", "division", "team",
+                            "owning department").build(),
             field("assignedUserEmail", "Assigned user", ImportDataType.REFERENCE)
                     .example("ama.mensah@example.com")
                     .notes("Email address or employee number of an existing AssetIQ user.")
-                    .aliases("assigned to", "assignee", "user", "owner", "custodian",
-                            "holder", "assigned user", "employee email").build(),
+                    .aliases("assigned to", "assigned to email", "assigned user",
+                            "assigned user email", "assigned employee", "assignee",
+                            "user", "user email", "end user", "owner", "owner email",
+                            "custodian", "custodian email", "holder",
+                            "employee email").build(),
             field("invoiceId", "Invoice reference", ImportDataType.STRING)
                     .example("INV-2024-0188")
-                    .aliases("invoice", "invoice number", "invoice no", "bill reference",
-                            "receipt number").build(),
+                    .aliases("invoice", "invoice number", "invoice no", "invoice no.",
+                            "invoice ref", "invoice reference", "bill reference",
+                            "bill number", "receipt number").build(),
             field("insurancePolicyId", "Insurance policy", ImportDataType.STRING)
                     .example("POL-99213")
-                    .aliases("policy", "policy number", "insurance", "insurance reference").build()
+                    .aliases("policy", "policy id", "policy number", "policy no", "insurance",
+                            "insurance policy number", "insurance reference").build()
     );
 
     private final AssetService assetService;

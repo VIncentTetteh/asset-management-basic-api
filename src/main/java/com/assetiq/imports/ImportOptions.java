@@ -16,13 +16,22 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
  *                                the rows already written — see {@link ImportEngine}
  *                                for why an import is best-effort rather than
  *                                all-or-nothing.
+ * @param captureUnmappedColumns  read columns the mapping did not claim and hand them to
+ *                                the handler. <b>False everywhere except the legacy
+ *                                positional asset import.</b> On the mapping-driven
+ *                                path an unmapped column is ignored, full stop: the
+ *                                whole premise is that a customer brings a sheet from
+ *                                another platform containing columns AssetIQ has no
+ *                                field for, maps the ones that matter, and is not sent
+ *                                away to edit their spreadsheet.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record ImportOptions(
         DuplicateStrategy duplicateStrategy,
         boolean createMissingReferences,
         boolean dryRun,
-        boolean skipInvalidRows
+        boolean skipInvalidRows,
+        boolean captureUnmappedColumns
 ) {
 
     public enum DuplicateStrategy {
@@ -38,20 +47,33 @@ public record ImportOptions(
         if (duplicateStrategy == null) duplicateStrategy = DuplicateStrategy.SKIP;
     }
 
-    /** Three-argument form for callers that predate {@code skipInvalidRows}. */
+    /** Three-argument form: the wizard's defaults for everything not stated. */
     public ImportOptions(DuplicateStrategy duplicateStrategy, boolean createMissingReferences, boolean dryRun) {
-        this(duplicateStrategy, createMissingReferences, dryRun, true);
+        this(duplicateStrategy, createMissingReferences, dryRun, true, false);
+    }
+
+    /** Four-argument form for callers that predate {@code captureUnmappedColumns}. */
+    public ImportOptions(DuplicateStrategy duplicateStrategy, boolean createMissingReferences,
+                         boolean dryRun, boolean skipInvalidRows) {
+        this(duplicateStrategy, createMissingReferences, dryRun, skipInvalidRows, false);
     }
 
     public static ImportOptions defaults() {
-        return new ImportOptions(DuplicateStrategy.SKIP, false, false, true);
+        return new ImportOptions(DuplicateStrategy.SKIP, false, false, true, false);
     }
 
     public ImportOptions withDryRun(boolean value) {
-        return new ImportOptions(duplicateStrategy, createMissingReferences, value, skipInvalidRows);
+        return new ImportOptions(duplicateStrategy, createMissingReferences, value,
+                skipInvalidRows, captureUnmappedColumns);
     }
 
     public ImportOptions withSkipInvalidRows(boolean value) {
-        return new ImportOptions(duplicateStrategy, createMissingReferences, dryRun, value);
+        return new ImportOptions(duplicateStrategy, createMissingReferences, dryRun,
+                value, captureUnmappedColumns);
+    }
+
+    public ImportOptions withCaptureUnmappedColumns(boolean value) {
+        return new ImportOptions(duplicateStrategy, createMissingReferences, dryRun,
+                skipInvalidRows, value);
     }
 }

@@ -19,9 +19,10 @@ public interface ImportEntityHandler {
     List<ImportFieldDescriptor> fields();
 
     /**
-     * Whether columns the mapping did not claim should be offered to the handler as
-     * custom fields rather than simply ignored. Only the asset path does this today,
-     * and only when the tenant's custom-fields flag is on.
+     * Whether this handler can consume columns the mapping did not claim, as custom
+     * fields. A capability, not a decision: the engine also requires
+     * {@link ImportOptions#captureUnmappedColumns()}, which only the legacy positional
+     * asset import sets. On the mapping-driven path an unmapped column is ignored.
      */
     default boolean unmappedColumnsBecomeCustomFields() {
         return false;

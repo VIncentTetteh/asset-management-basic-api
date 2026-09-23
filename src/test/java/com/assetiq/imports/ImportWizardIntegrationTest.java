@@ -2,6 +2,14 @@ package com.assetiq.imports;
 
 import com.assetiq.dto.TenantRegisterRequest;
 import com.assetiq.dto.TenantRegisterResponse;
+import com.assetiq.enums.UserStatus;
+import com.assetiq.models.Organisation;
+import com.assetiq.models.Role;
+import com.assetiq.models.RolePermission;
+import com.assetiq.models.User;
+import com.assetiq.repositories.OrganisationRepository;
+import com.assetiq.repositories.RoleRepository;
+import com.assetiq.repositories.UserRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -13,6 +21,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -45,6 +54,10 @@ class ImportWizardIntegrationTest {
 
     @Autowired private MockMvc mockMvc;
     @Autowired private ObjectMapper objectMapper;
+    @Autowired private OrganisationRepository organisationRepository;
+    @Autowired private RoleRepository roleRepository;
+    @Autowired private UserRepository userRepository;
+    @Autowired private PasswordEncoder passwordEncoder;
 
     private final AtomicInteger clientCounter = new AtomicInteger(1);
 
@@ -164,6 +177,89 @@ class ImportWizardIntegrationTest {
                 .contains("C001");
     }
 
+    /**
+     * The whole feature, on the file shape it exists for: another tool's headers, its
+     * abbreviations, and columns AssetIQ has no field for.
+     *
+     * <p>The bug this pins: unmapped columns used to be forced through the legacy
+     * positional importer's custom-field rule, so every row of a sheet carrying an
+     * extra column failed with "would become custom fields, which are not enabled for
+     * your organisation" — telling the customer to go and edit the spreadsheet, which
+     * is the exact problem the wizard removes. An unmapped column is now simply not
+     * read.</p>
+     */
+    @Test
+    @DisplayName("a foreign asset export maps itself, ignores what it must, and fails only its bad rows")
+    void foreignAssetExportImportsWithoutEditingTheSpreadsheet() throws Exception {
+        String suffix = UUID.randomUUID().toString().substring(0, 6);
+        String csv = String.join("\n",
+                "Asset Name,Serial No.,Manufacturer,Model No,Purchase Cost,Date Acquired,Status,Room,Cost Centre Ref",
+                "Dell Latitude 5540 " + suffix + ",SN-" + suffix + "-1,Dell,Latitude 5540,1450.00,2025-03-11,In Use,3.12,CC-1",
+                "HP EliteBook 840 " + suffix + ",SN-" + suffix + "-2,HP,EliteBook 840 G10,1720.50,2025-04-02,In Use,3.13,CC-1",
+                ",SN-" + suffix + "-3,Lenovo,ThinkPad X1,1990.00,2025-05-20,In Use,3.14,CC-2",
+                "Canon imageRUNNER " + suffix + ",SN-" + suffix + "-4,Canon,iR-ADV C5535i,not-a-number,2025-06-01,In Use,G.01,CC-2")
+                + "\n";
+
+        JsonNode analysis = analyse("assets", orgA, "export.csv", csv);
+        UUID uploadId = UUID.fromString(analysis.get("uploadId").asText());
+        JsonNode suggested = analysis.get("suggestedMapping");
+
+        // Every column with an obvious counterpart maps itself, abbreviations included.
+        assertThat(suggested.get("name").asInt()).isZero();
+        assertThat(suggested.get("serialNumber").asInt()).isEqualTo(1);
+        assertThat(suggested.get("manufacturer").asInt()).isEqualTo(2);
+        assertThat(suggested.get("model").asInt()).isEqualTo(3);
+        assertThat(suggested.get("purchaseCost").asInt()).isEqualTo(4);
+        assertThat(suggested.get("purchaseDate").asInt()).isEqualTo(5);
+        assertThat(suggested.get("status").asInt()).isEqualTo(6);
+        assertThat(analysis.get("missingRequiredFields")).isEmpty();
+
+        // "Cost Centre Ref" has no asset field. It must simply be ignored -- not turned
+        // into an error, and not into a custom field.
+        assertThat(suggested.get("category").isNull()).isTrue();
+
+        Map<String, Object> mapping = new java.util.LinkedHashMap<>();
+        mapping.put("name", 0);
+        mapping.put("serialNumber", 1);
+        mapping.put("manufacturer", 2);
+        mapping.put("model", 3);
+        mapping.put("purchaseCost", 4);
+        mapping.put("purchaseDate", 5);
+        mapping.put("status", 6);
+        // "Room" and "Cost Centre Ref" are left out of the mapping on purpose.
+
+        JsonNode preview = postJson("/api/v1/imports/assets/preview", orgA,
+                Map.of("uploadId", uploadId, "mapping", mapping));
+
+        assertThat(preview.get("totals").get("total").asInt()).isEqualTo(4);
+        assertThat(preview.get("totals").get("valid").asInt())
+                .as("the two good rows must be valid despite the unmapped columns")
+                .isEqualTo(2);
+        assertThat(preview.get("totals").get("invalid").asInt()).isEqualTo(2);
+
+        JsonNode errors = preview.get("errors");
+        assertThat(errors).hasSize(2);
+        assertThat(errors.get(0).get("row").asInt()).isEqualTo(4);        // blank name
+        assertThat(errors.get(0).get("column").asText()).isEqualTo("Asset Name");
+        assertThat(errors.get(1).get("row").asInt()).isEqualTo(5);        // bad number
+        assertThat(errors.get(1).get("column").asText()).isEqualTo("Purchase Cost");
+        assertThat(preview.toString())
+                .as("the custom-field rule must not appear on the mapping-driven path")
+                .doesNotContain("custom fields");
+
+        JsonNode finished = awaitJob(UUID.fromString(postJson("/api/v1/imports/assets/commit", orgA,
+                Map.of("uploadId", uploadId, "mapping", mapping)).get("jobId").asText()), orgA);
+
+        assertThat(finished.get("status").asText()).isEqualTo("COMPLETED");
+        assertThat(finished.get("result").get("imported").asInt()).isEqualTo(2);
+        assertThat(finished.get("result").get("skipped").asInt()).isEqualTo(2);
+
+        String assets = listBody("/api/v1/assets?limit=200", orgA);
+        assertThat(assets).contains("Dell Latitude 5540 " + suffix)
+                .contains("HP EliteBook 840 " + suffix)
+                .doesNotContain("Canon imageRUNNER " + suffix);
+    }
+
     @Test
     @DisplayName("preview reports bad rows by row number and by the user's own column header")
     void previewCatchesBadRowsWithoutWriting() throws Exception {
@@ -242,6 +338,71 @@ class ImportWizardIntegrationTest {
 
         // And nothing from org A's file reached org B.
         assertThat(listBody("/api/v1/suppliers?limit=200", orgB)).doesNotContain(suffix);
+    }
+
+    /**
+     * {@code GET /api/v1/import-jobs/{jobId}} carries only
+     * {@code @PreAuthorize("isAuthenticated()")}, because what may read a job depends on
+     * what the job imports and an annotation cannot see that. The real guard is in
+     * {@code AssetImportJobServiceImpl#getAssetImportJob}: a tenant-scoped lookup, then
+     * a permission check against the job row's own entity type. These three tests pin
+     * that, so a later refactor that moves or drops the service-side check fails here
+     * rather than in production.
+     */
+    @Test
+    @DisplayName("org B cannot poll the status of org A's import job")
+    void jobStatusIsTenantScoped() throws Exception {
+        String suffix = UUID.randomUUID().toString().substring(0, 6);
+        UUID jobId = commitSupplierImport(orgA, "Alpha Job Secret " + suffix);
+
+        // Sanity: the owner can read it, so the denial below means something.
+        JsonNode owned = awaitJob(jobId, orgA);
+        assertThat(owned.get("status").asText()).isEqualTo("COMPLETED");
+
+        MvcResult foreign = mockMvc.perform(auth(get("/api/v1/import-jobs/" + jobId), orgB)).andReturn();
+
+        // 400, not 404: the tenant-scoped lookup throws IllegalArgumentException, which
+        // GlobalExceptionHandler maps to BAD_REQUEST, and every other tenant-scoped miss
+        // in this service layer surfaces the same way. Pinned rather than endorsed --
+        // the security property is that org B gets nothing, and a later change to 404
+        // should be a deliberate, suite-wide one.
+        assertThat(foreign.getResponse().getStatus()).isEqualTo(400);
+        assertThat(foreign.getResponse().getContentAsString())
+                .as("a cross-tenant miss must not echo the owning tenant's data")
+                .doesNotContain(suffix);
+    }
+
+    @Test
+    @DisplayName("a supplier-only user may poll a supplier import job")
+    void jobStatusAllowsTheTypeTheUserMayImport() throws Exception {
+        Tenant supplierOnly = userWithPermissions(orgA, "SupplierImporter", "MANAGE_SUPPLIERS");
+        UUID supplierJob = commitSupplierImport(orgA, "Scoped Supplier " + UUID.randomUUID().toString().substring(0, 6));
+
+        // The point of this one is to catch an over-correction: the read path must stay
+        // open to the people who are supposed to use it.
+        JsonNode job = awaitJob(supplierJob, supplierOnly);
+        assertThat(job.get("entityType").asText()).isEqualTo("suppliers");
+        assertThat(job.get("status").asText()).isEqualTo("COMPLETED");
+    }
+
+    @Test
+    @DisplayName("a supplier-only user may not poll an asset import job in their own org")
+    void jobStatusChecksThePermissionForTheJobsOwnType() throws Exception {
+        Tenant supplierOnly = userWithPermissions(orgA, "SupplierImporter2", "MANAGE_SUPPLIERS");
+
+        String suffix = UUID.randomUUID().toString().substring(0, 6);
+        UUID assetJob = postLegacyAssetImport(orgA, "Scoped Laptop " + suffix);
+        awaitJob(assetJob, orgA); // let it finish, so a result exists to leak
+
+        // Same organisation, so this is not tenant scoping doing the work — it is the
+        // per-type check running on the read path, not only on commit.
+        MvcResult denied = mockMvc.perform(auth(get("/api/v1/import-jobs/" + assetJob), supplierOnly)).andReturn();
+
+        // 403 exactly: here the specific code is the property under test. A 400 would
+        // mean the job was not found, which would make this test pass for the wrong
+        // reason and prove nothing about the permission check.
+        assertThat(denied.getResponse().getStatus()).isEqualTo(403);
+        assertThat(denied.getResponse().getContentAsString()).doesNotContain(suffix);
     }
 
     @Test
@@ -336,26 +497,95 @@ class ImportWizardIntegrationTest {
     @DisplayName("the historical positional asset import still posts and completes")
     void legacyAssetImportStillWorks() throws Exception {
         String suffix = UUID.randomUUID().toString().substring(0, 6);
-        byte[] workbook = legacyAssetWorkbook("Legacy Laptop " + suffix);
+        UUID jobId = postLegacyAssetImport(orgA, "Legacy Laptop " + suffix);
 
-        MvcResult accepted = mockMvc.perform(multipart("/api/v1/import-jobs/assets")
-                        .file(new MockMultipartFile("file", "assets.xlsx",
-                                ImportUploadPolicy.XLSX_CONTENT_TYPE, workbook))
-                        .header("Authorization", "Bearer " + orgA.token())
-                        .header("X-Forwarded-For", nextClient()))
-                .andExpect(status().isAccepted())
-                .andReturn();
-
-        JsonNode job = objectMapper.readTree(accepted.getResponse().getContentAsString());
-        assertThat(job.get("entityType").asText()).isEqualTo("assets");
-
-        JsonNode finished = awaitJob(UUID.fromString(job.get("jobId").asText()), orgA);
+        JsonNode finished = awaitJob(jobId, orgA);
         assertThat(finished.get("status").asText()).isEqualTo("COMPLETED");
         assertThat(finished.get("result").get("imported").asInt()).isEqualTo(1);
         assertThat(listBody("/api/v1/assets?limit=200", orgA)).contains("Legacy Laptop " + suffix);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /** Analyse and commit a one-row supplier file; returns the job id. */
+    private UUID commitSupplierImport(Tenant tenant, String supplierName) throws Exception {
+        UUID uploadId = UUID.fromString(
+                analyse("suppliers", tenant, "v.csv", "Vendor Name\n" + supplierName + "\n")
+                        .get("uploadId").asText());
+        return UUID.fromString(postJson("/api/v1/imports/suppliers/commit", tenant,
+                Map.of("uploadId", uploadId, "mapping", Map.of("name", 0))).get("jobId").asText());
+    }
+
+    /** Post the historical positional asset workbook; returns the job id. */
+    private UUID postLegacyAssetImport(Tenant tenant, String assetName) throws Exception {
+        MvcResult accepted = mockMvc.perform(multipart("/api/v1/import-jobs/assets")
+                        .file(new MockMultipartFile("file", "assets.xlsx",
+                                ImportUploadPolicy.XLSX_CONTENT_TYPE, legacyAssetWorkbook(assetName)))
+                        .header("Authorization", "Bearer " + tenant.token())
+                        .header("X-Forwarded-For", nextClient()))
+                .andExpect(status().isAccepted())
+                .andReturn();
+
+        JsonNode job = objectMapper.readTree(accepted.getResponse().getContentAsString());
+        assertThat(job.get("entityType").asText()).isEqualTo("assets");
+        return UUID.fromString(job.get("jobId").asText());
+    }
+
+    /**
+     * A signed-in user inside {@code tenant} holding exactly the named permissions and
+     * no admin role.
+     *
+     * <p>Seeded through the repositories rather than through {@code POST /api/v1/roles},
+     * which requires a fresh MFA assertion the suite has no authenticator for. The rows
+     * are the same ones the role API writes, and the token is obtained through the real
+     * login endpoint, so the authorities under test are resolved exactly as they are in
+     * production.</p>
+     */
+    private Tenant userWithPermissions(Tenant tenant, String roleName, String... permissions) {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        Organisation organisation = organisationRepository
+                .findByIdAndDeletedAtIsNull(tenant.organisationId()).orElseThrow();
+
+        Role role = new Role();
+        role.setName(roleName + suffix);
+        role.setOrganisation(organisation);
+        for (String permission : permissions) {
+            RolePermission granted = new RolePermission();
+            granted.setRole(role);
+            granted.setPermission(permission);
+            role.getRolePermissions().add(granted);
+        }
+        Role savedRole = roleRepository.save(role);
+
+        String email = "scoped+" + suffix + "@example.com";
+        User user = new User();
+        user.setFirstName("Scoped");
+        user.setLastName("User");
+        user.setEmail(email);
+        user.setPasswordHash(passwordEncoder.encode("Password123"));
+        user.setOrganisation(organisation);
+        user.setRole(savedRole);
+        user.setStatus(UserStatus.ACTIVE);
+        user.setEmailVerifiedAt(java.time.Instant.now());
+        userRepository.save(user);
+
+        try {
+            MvcResult login = mockMvc.perform(post("/api/v1/auth/login")
+                            .header("X-Forwarded-For", nextClient())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(Map.of(
+                                    "email", email,
+                                    "password", "Password123",
+                                    "organisationId", tenant.organisationId()))))
+                    .andExpect(status().isOk())
+                    .andReturn();
+            String token = objectMapper.readTree(login.getResponse().getContentAsString())
+                    .path("token").asText();
+            return new Tenant(tenant.organisationId(), token, suffix);
+        } catch (Exception e) {
+            throw new IllegalStateException("Could not sign in the scoped test user", e);
+        }
+    }
 
     /** The 23-column positional layout the asset import has always accepted. */
     private static byte[] legacyAssetWorkbook(String name) throws Exception {

@@ -40,46 +40,55 @@ public class ContractImportHandler implements ImportEntityHandler {
             field("title", "Title", ImportDataType.STRING).required()
                     .example("Datacentre maintenance 2025")
                     .aliases("contract title", "name", "contract name", "agreement",
-                            "agreement name", "description").build(),
+                            "agreement name", "agreement title", "subject",
+                            "contract description", "description").build(),
             field("contractNumber", "Contract number", ImportDataType.STRING)
                     .example("CTR-2025-0041")
                     .notes("Used to match rows to existing contracts.")
-                    .aliases("contract no", "reference", "ref", "agreement number",
-                            "contract id", "po number").build(),
+                    .aliases("contract no", "contract no.", "contract #", "contract id",
+                            "reference", "reference number", "ref", "ref no",
+                            "agreement no", "agreement number", "po number").build(),
             enumField("contractType", "Contract type", ContractType.class).required()
                     .example("MAINTENANCE")
-                    .aliases("type", "agreement type", "category", "contract category").build(),
+                    .aliases("type", "type of contract", "contract kind", "agreement type",
+                            "category", "contract category").build(),
             enumField("status", "Status", ContractStatus.class)
                     .example("ACTIVE")
                     .notes("Defaults to DRAFT when blank.")
-                    .aliases("contract status", "state").build(),
+                    .aliases("contract status", "contract state", "state").build(),
             field("supplier", "Supplier", ImportDataType.REFERENCE)
                     .example("Acme Technologies Ltd")
                     .notes("Name of a supplier in your organisation.")
                     .aliases("vendor", "counterparty", "supplier name", "vendor name",
-                            "provider").build(),
+                            "contractor", "service provider", "provider",
+                            "party").build(),
             field("asset", "Linked asset", ImportDataType.REFERENCE)
                     .example("")
                     .notes("Asset tag, serial number or name of an asset this contract covers.")
-                    .aliases("asset tag", "covered asset", "equipment", "device").build(),
+                    .aliases("asset tag", "asset name", "serial number", "covered asset",
+                            "related asset", "equipment", "device").build(),
             field("startDate", "Start date", ImportDataType.DATE).required()
                     .example("2025-01-01")
                     .notes("YYYY-MM-DD. DD/MM/YYYY is also accepted.")
-                    .aliases("commencement", "effective date", "from", "valid from",
-                            "term start").build(),
+                    .aliases("commencement", "commencement date", "effective date",
+                            "effective from", "from", "start", "date start",
+                            "contract start", "valid from", "term start").build(),
             field("endDate", "End date", ImportDataType.DATE).required()
                     .example("2025-12-31")
                     .notes("YYYY-MM-DD. Must not be before the start date.")
-                    .aliases("expiry", "expiry date", "expiration", "to", "valid until",
-                            "term end", "renewal date").build(),
+                    .aliases("expiry", "expiry date", "expires on", "expiration", "to", "end",
+                            "contract end", "valid until", "term end",
+                            "renewal date").build(),
             field("alertDaysBefore", "Alert days before expiry", ImportDataType.INTEGER)
                     .example("30")
                     .notes("Whole number of days. How far ahead of the end date to warn.")
-                    .aliases("notice period", "reminder days", "alert days", "notify days").build(),
+                    .aliases("notice period", "notice days", "reminder days", "reminder before",
+                            "alert days", "alert before days", "notify days").build(),
             field("value", "Contract value", ImportDataType.DECIMAL)
                     .example("120000.00")
                     .notes("Numbers only; the currency goes in its own column.")
-                    .aliases("amount", "cost", "price", "total value", "annual value").build(),
+                    .aliases("amount", "cost", "total cost", "contract amount", "price",
+                            "total value", "annual value", "annual cost", "fee").build(),
             field("currency", "Currency", ImportDataType.STRING)
                     .example("GHS")
                     .notes("Three-letter ISO 4217 code, e.g. GHS, USD, GBP.")
@@ -87,14 +96,16 @@ public class ContractImportHandler implements ImportEntityHandler {
             field("autoRenew", "Auto renew", ImportDataType.BOOLEAN)
                     .example("no")
                     .notes("yes / no, true / false, 1 / 0.")
-                    .aliases("auto renewal", "automatic renewal", "auto-renew", "evergreen").build(),
+                    .aliases("auto renewal", "auto-renewal", "automatic renewal", "auto-renew",
+                            "auto renews", "evergreen").build(),
             field("documentUrl", "Document URL", ImportDataType.STRING)
                     .example("")
                     .notes("An http or https link to the signed agreement.")
-                    .aliases("document link", "contract url", "attachment url", "file url").build(),
+                    .aliases("document link", "contract url", "attachment url", "file url",
+                            "signed document url").build(),
             field("notes", "Notes", ImportDataType.TEXT)
                     .example("")
-                    .aliases("comments", "remarks", "details").build()
+                    .aliases("comments", "comment", "remarks", "details").build()
     );
 
     private final ContractService contractService;

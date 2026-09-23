@@ -43,42 +43,55 @@ public class SoftwareLicenceImportHandler implements ImportEntityHandler {
     private static final List<ImportFieldDescriptor> FIELDS = List.of(
             field("name", "Licence name", ImportDataType.STRING).required()
                     .example("Microsoft 365 E3")
-                    .aliases("license name", "licence", "license", "subscription", "product",
-                            "software", "software name", "title").build(),
+                    .notes("'Product' maps to the product name column, not here: the two exist "
+                            + "separately and guessing between them would be a coin toss.")
+                    .aliases("license name", "licence name", "licence", "license",
+                            "license title", "subscription", "software", "software name",
+                            "agreement name", "title").build(),
             field("vendor", "Vendor", ImportDataType.STRING).required()
                     .example("Microsoft")
-                    .aliases("publisher", "supplier", "manufacturer", "provider", "maker").build(),
+                    .aliases("publisher", "supplier", "vendor name", "software vendor", "licensor",
+                            "manufacturer", "manufacturer name", "provider", "maker").build(),
             field("productName", "Product name", ImportDataType.STRING)
                     .example("Microsoft 365")
-                    .aliases("product", "application", "app name", "sku").build(),
+                    .aliases("product", "product title", "application", "app name", "sku").build(),
             field("version", "Version", ImportDataType.STRING)
                     .example("2024")
-                    .aliases("release", "product version", "edition").build(),
+                    .aliases("release", "version number", "product version", "ver", "edition").build(),
             enumField("licenseType", "Licence type", LicenseType.class).required()
                     .example("SUBSCRIPTION")
-                    .aliases("license type", "type", "licence model", "license model",
+                    .aliases("license type", "licence type", "type", "type of license",
+                            "license category", "licence model", "license model",
                             "licensing").build(),
             enumField("status", "Status", LicenseStatus.class)
                     .example("ACTIVE")
                     .notes("Defaults to ACTIVE when blank.")
-                    .aliases("license status", "state").build(),
+                    .aliases("license status", "licence status", "state").build(),
             field("totalSeats", "Total seats", ImportDataType.INTEGER)
                     .example("250")
                     .notes("Whole number of entitlements purchased.")
-                    .aliases("seats", "licenses", "licences", "quantity", "qty",
+                    .aliases("seats", "seat count", "no of seats", "number of seats",
+                            "licenses", "licences", "total licenses",
+                            "number of licenses", "licensed quantity",
+                            "quantity", "qty", "total qty", "qty purchased",
                             "entitlements", "purchased seats").build(),
             field("usedSeats", "Used seats", ImportDataType.INTEGER)
                     .example("198")
                     .notes("Whole number; must not exceed total seats.")
-                    .aliases("assigned seats", "allocated", "consumed", "in use", "used").build(),
+                    .aliases("assigned seats", "seats assigned", "seats used", "licenses used",
+                            "allocated", "consumed", "installations", "deployed",
+                            "in use", "used", "qty used").build(),
             field("purchaseCost", "Purchase cost", ImportDataType.DECIMAL)
                     .example("45000.00")
                     .notes("Numbers only; the currency goes in its own column.")
-                    .aliases("cost", "price", "amount", "purchase price", "spend").build(),
+                    .aliases("cost", "price", "amount", "total cost", "initial cost",
+                            "license cost", "licence cost", "purchase price",
+                            "purchase amount", "spend").build(),
             field("annualRenewalCost", "Annual renewal cost", ImportDataType.DECIMAL)
                     .example("45000.00")
-                    .aliases("renewal cost", "annual cost", "yearly cost", "subscription cost",
-                            "arr").build(),
+                    .aliases("renewal cost", "renewal amount", "annual cost", "annual fee",
+                            "yearly cost", "yearly fee", "maintenance cost",
+                            "subscription cost", "subscription fee", "arr").build(),
             field("currency", "Currency", ImportDataType.STRING)
                     .example("GHS")
                     .notes("Three-letter ISO 4217 code, e.g. GHS, USD, GBP.")
@@ -86,30 +99,36 @@ public class SoftwareLicenceImportHandler implements ImportEntityHandler {
             field("purchaseDate", "Purchase date", ImportDataType.DATE)
                     .example("2024-01-15")
                     .notes("YYYY-MM-DD. DD/MM/YYYY is also accepted.")
-                    .aliases("bought", "acquired", "order date", "start date").build(),
+                    .aliases("bought", "acquired", "date acquired", "date purchased",
+                            "order date", "start date").build(),
             field("expiryDate", "Expiry date", ImportDataType.DATE)
                     .example("2025-01-14")
                     .notes("YYYY-MM-DD. Must not be before the purchase date.")
-                    .aliases("expires", "expiration date", "end date", "valid until",
-                            "term end").build(),
+                    .aliases("expires", "expiry", "expires on", "expiration", "expiration date",
+                            "end date", "valid until", "term end", "subscription end",
+                            "support end").build(),
             field("renewalDate", "Renewal date", ImportDataType.DATE)
                     .example("2025-01-01")
-                    .aliases("renews", "next renewal", "renewal due").build(),
+                    .aliases("renews", "renew on", "next renewal", "next renewal date",
+                            "renewal due").build(),
             field("autoRenew", "Auto renew", ImportDataType.BOOLEAN)
                     .example("yes")
                     .notes("yes / no, true / false, 1 / 0.")
-                    .aliases("auto renewal", "automatic renewal", "auto-renew", "renews automatically").build(),
+                    .aliases("auto renewal", "auto-renewal", "automatic renewal", "auto-renew",
+                            "auto renews", "renews automatically").build(),
             field("licenseDocumentUrl", "Licence document URL", ImportDataType.STRING)
                     .example("")
                     .notes("An http or https link to the agreement.")
-                    .aliases("document url", "agreement url", "contract link", "document link").build(),
+                    .aliases("document url", "doc url", "license url", "agreement url",
+                            "agreement link", "contract link", "document link").build(),
             field("asset", "Linked asset", ImportDataType.REFERENCE)
                     .example("")
                     .notes("Asset tag, serial number or name of an asset this licence is tied to.")
-                    .aliases("asset tag", "device", "installed on", "host", "machine").build(),
+                    .aliases("asset tag", "asset name", "serial number", "assigned asset",
+                            "device", "installed on", "host", "machine").build(),
             field("notes", "Notes", ImportDataType.TEXT)
                     .example("")
-                    .aliases("comments", "remarks", "details").build()
+                    .aliases("comments", "comment", "remarks", "details").build()
     );
 
     private final SoftwareLicenseService licenseService;

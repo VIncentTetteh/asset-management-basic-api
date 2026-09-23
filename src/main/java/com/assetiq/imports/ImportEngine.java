@@ -81,7 +81,7 @@ public class ImportEngine {
 
         List<UnmappedColumn> unmappedColumns;
         try {
-            unmappedColumns = resolveUnmappedColumns(sheet, resolved, handler);
+            unmappedColumns = resolveUnmappedColumns(sheet, resolved, handler, options);
         } catch (IllegalArgumentException badHeader) {
             result.getErrors().add(new RowError(1, badHeader.getMessage()));
             return result;
@@ -224,10 +224,23 @@ public class ImportEngine {
         return resolved;
     }
 
+    /**
+     * Columns the mapping did not claim, but only when the run asked for them.
+     *
+     * <p>On the mapping-driven path {@link ImportOptions#captureUnmappedColumns()} is
+     * false and this returns nothing, so an unmapped column is simply not read — no
+     * error, no custom field. That is the whole point of the feature: a sheet exported
+     * from another platform carries columns AssetIQ has no field for, and the answer to
+     * them is to ignore them, not to send the customer away to edit their spreadsheet.
+     *
+     * <p>Only the legacy positional asset import turns this on, where extra columns
+     * past the fixed layout have always become custom fields behind a feature flag.</p>
+     */
     private List<UnmappedColumn> resolveUnmappedColumns(ParsedSheet sheet,
                                                         Map<String, Integer> resolved,
-                                                        ImportEntityHandler handler) {
-        if (!handler.unmappedColumnsBecomeCustomFields()) {
+                                                        ImportEntityHandler handler,
+                                                        ImportOptions options) {
+        if (!options.captureUnmappedColumns() || !handler.unmappedColumnsBecomeCustomFields()) {
             return List.of();
         }
         java.util.Set<Integer> mapped = new java.util.HashSet<>(resolved.values());

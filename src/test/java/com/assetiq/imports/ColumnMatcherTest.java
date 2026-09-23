@@ -1,6 +1,5 @@
 package com.assetiq.imports;
 
-import com.assetiq.imports.handlers.AssetImportHandler;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -20,7 +19,39 @@ class ColumnMatcherTest {
     private final ColumnMatcher matcher = new ColumnMatcher();
 
     private List<ImportFieldDescriptor> assetFields() {
-        return new AssetImportHandler(null, null, null, null, null, null, null, null).fields();
+        return ImportTestDescriptors.fieldsFor(ImportEntityType.ASSETS);
+    }
+
+    @Test
+    void mapsTheAbbreviationsOtherToolsActuallyWrite() {
+        // Taken from a real export. "Model No" and "Date Acquired" were previously
+        // missed, which left two ordinary columns for the user to map by hand.
+        List<String> headers = List.of(
+                "Asset Name", "Serial No.", "Manufacturer", "Model No",
+                "Purchase Cost", "Date Acquired", "Status");
+
+        Map<String, Integer> mapping = matcher.suggest(assetFields(), headers);
+
+        assertThat(mapping).containsEntry("name", 0);
+        assertThat(mapping).containsEntry("serialNumber", 1);
+        assertThat(mapping).containsEntry("manufacturer", 2);
+        assertThat(mapping).containsEntry("model", 3);
+        assertThat(mapping).containsEntry("purchaseCost", 4);
+        assertThat(mapping).containsEntry("purchaseDate", 5);
+        assertThat(mapping).containsEntry("status", 6);
+        assertThat(matcher.unmappedColumns(headers, mapping)).isEmpty();
+    }
+
+    @Test
+    void leavesAHeaderTwoFieldsCouldClaimUnmapped() {
+        // "Vendor" on an asset sheet may mean the maker or the reseller. Widening
+        // aliases must not turn that into a confident wrong guess.
+        List<String> headers = List.of("Asset Name", "Vendor");
+        Map<String, Integer> mapping = matcher.suggest(assetFields(), headers);
+
+        assertThat(mapping).containsEntry("name", 0);
+        assertThat(mapping).doesNotContainKeys("manufacturer", "supplier");
+        assertThat(matcher.unmappedColumns(headers, mapping)).containsExactly("Vendor");
     }
 
     @Test
@@ -104,8 +135,8 @@ class ColumnMatcherTest {
 
     @Test
     void anExactHeaderWinsOverAnAliasOnAnotherField() {
-        // "Description" is the asset description's label and also an alias of "name".
-        // The exact pass must settle it, or the asset name column gets the description.
+        // Exact label text is settled in the first pass, before any alias is consulted,
+        // so a field can never lose its own label to another field's alias.
         List<String> headers = List.of("Asset name", "Description");
         Map<String, Integer> mapping = matcher.suggest(assetFields(), headers);
 

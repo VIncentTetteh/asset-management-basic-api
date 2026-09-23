@@ -33,39 +33,43 @@ public class LocationImportHandler implements ImportEntityHandler {
             field("name", "Location name", ImportDataType.STRING).required()
                     .example("Accra Head Office")
                     .notes("Must be unique within your organisation.")
-                    .aliases("site", "site name", "location", "office", "branch", "facility",
-                            "premises", "location name").build(),
+                    .aliases("site", "site name", "location", "location name", "location title",
+                            "name", "office", "branch", "facility", "premises",
+                            "depot", "warehouse").build(),
             field("building", "Building", ImportDataType.STRING)
                     .example("Tower A")
-                    .aliases("block", "building name").build(),
+                    .aliases("block", "building name", "building/block", "tower").build(),
             field("floor", "Floor", ImportDataType.STRING)
                     .example("3rd")
-                    .aliases("level", "storey").build(),
+                    .aliases("level", "floor number", "floor no", "level number", "storey").build(),
             field("room", "Room", ImportDataType.STRING)
                     .example("3.12")
-                    .aliases("office number", "room number", "desk", "suite").build(),
+                    .aliases("office number", "room number", "room name", "room no", "room no.",
+                            "room #", "desk", "space", "suite").build(),
             field("city", "City", ImportDataType.STRING)
                     .example("Accra")
-                    .aliases("town", "locality").build(),
+                    .aliases("town", "city/town", "locality").build(),
             field("country", "Country code", ImportDataType.STRING)
                     .example("GH")
                     .notes("Two-letter ISO 3166-1 code in capitals, e.g. GH, GB, US.")
                     .aliases("country", "iso country", "country code").build(),
             field("address", "Address", ImportDataType.TEXT)
                     .example("12 Independence Ave, Accra")
-                    .aliases("street address", "full address", "postal address").build(),
+                    .aliases("street address", "address line 1", "full address", "postal address",
+                            "street").build(),
             field("latitude", "Latitude", ImportDataType.DECIMAL)
                     .example("5.6037")
                     .notes("Decimal degrees between -90 and 90.")
-                    .aliases("lat", "gps latitude").build(),
+                    .aliases("lat", "gps latitude", "geo lat").build(),
             field("longitude", "Longitude", ImportDataType.DECIMAL)
                     .example("-0.1870")
                     .notes("Decimal degrees between -180 and 180.")
-                    .aliases("lng", "lon", "gps longitude").build(),
+                    .aliases("lng", "lon", "gps longitude", "geo lng").build(),
             field("parentLocation", "Parent location", ImportDataType.REFERENCE)
                     .example("")
                     .notes("Name of another location. It may appear in an earlier row of this file.")
-                    .aliases("parent", "parent site", "belongs to", "within").build()
+                    .aliases("parent", "parent site", "parent site name", "parent location name",
+                            "belongs to", "within").build()
     );
 
     private final LocationService locationService;

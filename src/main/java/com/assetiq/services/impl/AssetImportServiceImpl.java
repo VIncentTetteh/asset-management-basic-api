@@ -143,8 +143,13 @@ public class AssetImportServiceImpl extends com.assetiq.services.TenantAwareServ
             return failed(dryRun, unreadable.getMessage());
         }
 
+        // FAIL on duplicates and read the extra columns: both are what this path has
+        // always done. captureUnmappedColumns is true here and nowhere else — columns
+        // past the fixed 23 become custom fields behind the tenant's feature flag, and
+        // something may depend on that. The mapping-driven wizard ignores unmapped
+        // columns instead.
         ImportOptions options = new ImportOptions(
-                ImportOptions.DuplicateStrategy.FAIL, false, dryRun);
+                ImportOptions.DuplicateStrategy.FAIL, false, dryRun, true, true);
         return importEngine.run(sheet, positionalMapping(sheet), assetImportHandler, options, org, 0);
     }
 

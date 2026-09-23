@@ -203,6 +203,43 @@ class ImportEngineTest {
                         .contains("remain imported"));
     }
 
+    // ── Unmapped columns ──────────────────────────────────────────────────────
+
+    @Test
+    void anUnmappedColumnIsIgnoredOnTheMappingDrivenPath() {
+        // The premise of the wizard: a sheet from another platform carries columns
+        // AssetIQ has no field for, and the answer to them is to ignore them. This used
+        // to force them through the legacy custom-field rule, failing every row of an
+        // otherwise perfect file.
+        ParsedSheet sheet = new ParsedSheet(
+                List.of("Widget name", "Quantity", "Cost Centre Ref"),
+                List.of(List.of("One", "1", "CC-1")),
+                false);
+
+        AssetImportResultDto result = engine.run(sheet, Map.of("name", 0, "count", 1),
+                handler, ImportOptions.defaults(), org, 0);
+
+        assertThat(result.getImported()).isEqualTo(1);
+        assertThat(result.getErrors()).isEmpty();
+        assertThat(handler.unmappedSeen).containsExactly(Map.of());
+    }
+
+    @Test
+    void theLegacyPathStillSeesUnmappedColumns() {
+        // captureUnmappedColumns is true only for the positional asset import, where
+        // extra columns have always become custom fields behind a feature flag.
+        ParsedSheet sheet = new ParsedSheet(
+                List.of("Widget name", "Quantity", "Colour"),
+                List.of(List.of("One", "1", "Blue")),
+                false);
+
+        AssetImportResultDto result = engine.run(sheet, Map.of("name", 0, "count", 1),
+                handler, ImportOptions.defaults().withCaptureUnmappedColumns(true), org, 0);
+
+        assertThat(result.getImported()).isEqualTo(1);
+        assertThat(handler.unmappedSeen).containsExactly(Map.of("Colour", "Blue"));
+    }
+
     // ── Duplicates ────────────────────────────────────────────────────────────
 
     @Test
@@ -266,6 +303,7 @@ class ImportEngineTest {
     private static final class StubHandler implements ImportEntityHandler {
 
         final List<Map<String, String>> created = new ArrayList<>();
+        final List<Map<String, String>> unmappedSeen = new ArrayList<>();
         final List<String> updated = new ArrayList<>();
         final List<String> existing = new ArrayList<>();
 
@@ -283,10 +321,16 @@ class ImportEngineTest {
         }
 
         @Override
+        public boolean unmappedColumnsBecomeCustomFields() {
+            return true;
+        }
+
+        @Override
         public ImportRunner runner(Organisation organisation, ImportOptions options) {
             return new AbstractImportRunner<Map<String, String>>(options) {
                 @Override
                 protected Map<String, String> build(ImportRow row) {
+                    unmappedSeen.add(Map.copyOf(row.unmapped()));
                     Map<String, String> payload = new LinkedHashMap<>();
                     payload.put("name", row.requiredString("name"));
                     Integer count = row.integer("count");

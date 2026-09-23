@@ -33,33 +33,44 @@ public class SupplierImportHandler implements ImportEntityHandler {
             field("name", "Supplier name", ImportDataType.STRING).required()
                     .example("Acme Technologies Ltd")
                     .notes("Must be unique within your organisation.")
-                    .aliases("vendor", "vendor name", "supplier", "company", "company name",
-                            "business name", "payee", "manufacturer name").build(),
+                    .aliases("vendor", "vendor name", "supplier", "name", "company", "company name",
+                            "business name", "trading name", "organisation", "organization",
+                            "payee", "manufacturer name").build(),
             field("registrationNumber", "Registration number", ImportDataType.STRING)
                     .example("CS123456789")
-                    .aliases("company registration", "reg no", "registration no",
+                    .aliases("company registration", "reg no", "reg no.", "reg number",
+                            "registration no", "registration no.", "company number",
+                            "incorporation number", "crn",
                             "business registration number", "duns").build(),
             field("contactPerson", "Contact person", ImportDataType.STRING)
                     .example("Ama Mensah")
-                    .aliases("contact", "contact name", "primary contact", "account manager",
+                    .aliases("contact", "contact name", "contact full name", "primary contact",
+                            "point of contact", "poc", "account manager", "salesperson",
                             "rep", "representative").build(),
             field("email", "Email", ImportDataType.EMAIL)
                     .example("sales@acmetech.example")
-                    .aliases("email address", "contact email", "e-mail").build(),
+                    .aliases("email address", "contact email", "primary email", "sales email",
+                            "e-mail", "e mail").build(),
             field("phone", "Phone", ImportDataType.STRING)
                     .example("+233201234567")
                     .notes("Digits, optionally with a leading +. Spaces and dashes are accepted.")
-                    .aliases("telephone", "phone number", "contact phone", "mobile", "tel").build(),
+                    .aliases("telephone", "telephone number", "phone number", "phone no",
+                            "phone no.", "phone #", "contact phone", "contact number",
+                            "office phone", "mobile", "tel").build(),
             field("address", "Address", ImportDataType.TEXT)
                     .example("12 Independence Ave, Accra")
-                    .aliases("street address", "postal address", "location", "billing address").build(),
+                    .aliases("street address", "address line 1", "physical address",
+                            "postal address", "office address", "location",
+                            "billing address").build(),
             field("taxId", "Tax ID", ImportDataType.STRING)
                     .example("C0012345678")
-                    .aliases("tin", "vat number", "tax number", "vat id", "ein").build(),
+                    .aliases("tin", "vat number", "vat reg no", "vat id", "tax number",
+                            "tax id number", "tax identification number", "gst number",
+                            "ein").build(),
             enumField("status", "Status", SupplierStatus.class)
                     .example("ACTIVE")
                     .notes("Defaults to ACTIVE when blank.")
-                    .aliases("supplier status", "state", "active").build()
+                    .aliases("supplier status", "vendor status", "state").build()
     );
 
     private final SupplierService supplierService;
