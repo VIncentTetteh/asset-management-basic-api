@@ -628,18 +628,14 @@ public class ReportGeneratorService {
         return sb.toString().getBytes(StandardCharsets.UTF_8);
     }
 
+    /**
+     * One CSV record. Quoting <em>and</em> formula-neutralisation go through
+     * {@link com.assetiq.imports.CsvSafe}: an exported cell whose text starts with
+     * {@code =}, {@code +}, {@code -} or {@code @} is executed as a formula when the
+     * file is opened, and the values here come straight out of the database, which is
+     * to say out of whatever a user typed into the app.
+     */
     private static String csvLine(String[] fields) {
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < fields.length; i++) {
-            if (i > 0) sb.append(',');
-            String v = fields[i] == null ? "" : fields[i];
-            if (v.contains(",") || v.contains("\"") || v.contains("\n")) {
-                sb.append('"').append(v.replace("\"", "\"\"")).append('"');
-            } else {
-                sb.append(v);
-            }
-        }
-        sb.append('\n');
-        return sb.toString();
+        return com.assetiq.imports.CsvSafe.line(java.util.Arrays.asList(fields));
     }
 }
