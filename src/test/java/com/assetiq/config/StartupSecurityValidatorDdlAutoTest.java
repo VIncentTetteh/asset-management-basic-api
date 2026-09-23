@@ -24,6 +24,8 @@ class StartupSecurityValidatorDdlAutoTest {
         ReflectionTestUtils.setField(v, "skipValidation", true); // skip secret checks
         ReflectionTestUtils.setField(v, "jwtSecret", "ignored");
         ReflectionTestUtils.setField(v, "paystackSecretKey", "sk_test_ignored");
+        // A durable backend, so only the schema-mutation branch can fail here.
+        ReflectionTestUtils.setField(v, "filesystemStorageEnabled", true);
         return v;
     }
 

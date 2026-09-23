@@ -44,6 +44,16 @@ class StartupSelfHostedExemptionsTest {
                                                String paystackKey,
                                                boolean s3Enabled,
                                                boolean skipSecretValidation) {
+        return validator(appMode, offlineLicence, paystackKey, s3Enabled,
+                         false, skipSecretValidation);
+    }
+
+    private StartupSecurityValidator validator(String appMode,
+                                               boolean offlineLicence,
+                                               String paystackKey,
+                                               boolean s3Enabled,
+                                               boolean filesystemEnabled,
+                                               boolean skipSecretValidation) {
         Environment env = mock(Environment.class);
         when(env.getActiveProfiles()).thenReturn(new String[] {"prod"});
 
@@ -60,6 +70,7 @@ class StartupSelfHostedExemptionsTest {
         ReflectionTestUtils.setField(v, "appMode", appMode);
         ReflectionTestUtils.setField(v, "offlineLicenceEnabled", offlineLicence);
         ReflectionTestUtils.setField(v, "s3Enabled", s3Enabled);
+        ReflectionTestUtils.setField(v, "filesystemStorageEnabled", filesystemEnabled);
         return v;
     }
 
@@ -109,26 +120,37 @@ class StartupSelfHostedExemptionsTest {
 
             assertThatThrownBy(() -> run(v))
                     .isInstanceOf(IllegalStateException.class)
-                    .hasMessageContaining("app.storage.s3.enabled=false");
+                    .hasMessageContaining("No durable file storage is configured");
         }
 
         @Test
-        @DisplayName("is not required once the offline licence is enabled")
-        void notRequiredWithOfflineLicence() {
-            // The consequence is real and documented -- generated files live in
-            // the JVM heap -- but it is the operator's call, not a boot failure.
-            StartupSecurityValidator v = validator("cloud", true, "sk_test_x", false, true);
+        @DisplayName("is mandatory for a self-hosted install too — the filesystem backend satisfies it")
+        void mandatoryWithOfflineLicence() {
+            // This used to be an exemption: a self-hosted install was allowed to boot
+            // onto the heap map because it is single-instance, which only rules out
+            // the cross-replica 404s. The restart data loss applied to it just the
+            // same, and there was no local-disk backend to point it at. There is now,
+            // so the exemption is gone and the answer is a configuration, not a
+            // documented trade-off.
+            StartupSecurityValidator withoutBackend =
+                    validator("cloud", true, "sk_test_x", false, false, true);
+            assertThatThrownBy(() -> run(withoutBackend))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("No durable file storage is configured");
 
-            assertThatCode(() -> run(v)).doesNotThrowAnyException();
+            StartupSecurityValidator withFilesystem =
+                    validator("cloud", true, "sk_test_x", false, true, true);
+            assertThatCode(() -> run(withFilesystem)).doesNotThrowAnyException();
         }
 
         @Test
-        @DisplayName("names the offline-licence flag in its failure message")
-        void failureMessageNamesTheSelfHostedFlag() {
+        @DisplayName("names both the hosted and the self-hosted fix in its failure message")
+        void failureMessageNamesBothFixes() {
             StartupSecurityValidator v = validator("cloud", false, "sk_test_x", false, true);
 
             assertThatThrownBy(() -> run(v))
-                    .hasMessageContaining("APP_LICENSE_OFFLINE_ENABLED=true");
+                    .hasMessageContaining("APP_STORAGE_S3_ENABLED=true")
+                    .hasMessageContaining("APP_STORAGE_FILESYSTEM_ENABLED=true");
         }
     }
 

@@ -59,6 +59,13 @@ public class StartupSecurityValidator implements ApplicationRunner {
     @Value("${app.storage.s3.enabled:false}")
     private boolean s3Enabled;
 
+    @Value("${app.storage.filesystem.enabled:false}")
+    private boolean filesystemStorageEnabled;
+
+    /** Explicit, deliberate opt-in to the heap-backed storage. Tests and dev only. */
+    @Value("${app.storage.in-memory.enabled:false}")
+    private boolean inMemoryStorageEnabled;
+
     private final Environment environment;
 
     public StartupSecurityValidator(Environment environment) {
@@ -74,6 +81,7 @@ public class StartupSecurityValidator implements ApplicationRunner {
         // Durability check also runs always: losing generated files is a data-loss
         // class of failure, not a security-configuration one.
         validateDurableStorage();
+        validateInMemoryStorageOptIn();
 
         if (skipValidation) {
             log.warn("[SECURITY] Startup secret validation is DISABLED. This must NOT be used in production.");
@@ -121,24 +129,50 @@ public class StartupSecurityValidator implements ApplicationRunner {
     }
 
     /**
-     * Refuses to boot a cloud deployment that has no durable object storage.
+     * Refuses to boot any deployment whose uploaded files would not survive a restart.
      *
-     * <p>{@code app.storage.s3.enabled} defaults to {@code false}, and
-     * {@code OrgAwareStorageService} silently falls back to
-     * {@code InMemoryFileStorageService} — a {@code ConcurrentHashMap} holding whole file
-     * bodies in the JVM heap. In a hosted deployment that is three separate faults at once:
-     * every generated report and import is lost on restart or redeploy; a second replica
-     * returns 404 for a file the first one produced, because the map is per-process; and
-     * the map is never evicted, so it is an unbounded heap-growth path to OOM.
+     * <p>There are two durable backends. {@code app.storage.s3.enabled} is the
+     * default for the hosted deployment: it is the only one that is correct
+     * behind more than one replica, because a local directory is per-pod.
+     * {@code app.storage.filesystem.enabled} is the default for a self-hosted
+     * installation, where the base directory is a mounted volume.</p>
      *
-     * <p>None of that surfaces in testing — a single instance that is never restarted
-     * behaves correctly — which is exactly why this is a startup check rather than a note
-     * in a runbook. Dev, test and local profiles are exempt, matching
-     * {@link #validateDdlAuto()}; standalone deployments are exempt because they run a
-     * single instance against a mounted volume by design.
+     * <p>{@code InMemoryFileStorageService} is neither. It is a
+     * {@code ConcurrentHashMap} holding whole file bodies in the JVM heap, and
+     * using it in a deployment that stores real data is three faults at once:
+     * every uploaded document, generated report and import is lost on restart or
+     * redeploy; a second replica returns 404 for a file the first one produced,
+     * because the map is per-process; and the map is never evicted, so it is an
+     * unbounded heap-growth path to OOM.</p>
+     *
+     * <p>None of that surfaces in testing — a single instance that is never
+     * restarted behaves correctly — which is exactly why this is a startup check
+     * rather than a note in a runbook. Dev, test and local profiles are exempt,
+     * matching {@link #validateDdlAuto()}.</p>
      */
     private void validateDurableStorage() {
-        if (!isHostedDeployment() || s3Enabled) {
+        if (s3Enabled) {
+            if (filesystemStorageEnabled) {
+                log.info("[STORAGE] S3 and filesystem storage are both enabled. "
+                         + "S3 takes precedence; the filesystem backend serves organisations "
+                         + "whose storage config opts out of S3.");
+            } else {
+                log.info("[STORAGE] ✓ Durable storage: S3 (app.storage.s3.enabled=true)");
+            }
+            return;
+        }
+
+        if (filesystemStorageEnabled) {
+            if (isHostedDeployment()) {
+                log.warn("[STORAGE] Hosted deployment is using filesystem storage rather than S3. "
+                         + "app.storage.filesystem.base-dir MUST be a volume shared by every "
+                         + "replica and included in backups, or files will 404 depending on "
+                         + "which replica answers. S3 is the supported hosted configuration: "
+                         + "set APP_STORAGE_S3_ENABLED=true with APP_STORAGE_S3_BUCKET.");
+            } else {
+                log.info("[STORAGE] ✓ Durable storage: filesystem "
+                         + "(app.storage.filesystem.enabled=true)");
+            }
             return;
         }
 
@@ -146,17 +180,52 @@ public class StartupSecurityValidator implements ApplicationRunner {
                 .map(p -> p.toLowerCase(Locale.ROOT))
                 .anyMatch(DDL_MUTATION_ALLOWED_PROFILES::contains);
 
-        if (!devProfileActive) {
-            throw new IllegalStateException(
-                "[STARTUP FAILURE] app.storage.s3.enabled=false in cloud mode.\n" +
-                "Generated reports and imports would be held in this JVM's heap: lost on every " +
-                "restart, invisible to other replicas, and never evicted.\n" +
-                "Fix: set APP_STORAGE_S3_ENABLED=true with APP_STORAGE_S3_BUCKET and " +
-                "APP_STORAGE_S3_REGION, or run self-hosted (APP_LICENSE_OFFLINE_ENABLED=true).\n" +
-                "Current active profiles: " + Arrays.toString(environment.getActiveProfiles()));
+        if (devProfileActive) {
+            log.warn("[STORAGE] No durable file storage is configured. Permitted because the "
+                     + "active profile is dev/test/local. Uploaded files will not survive a "
+                     + "restart. Never ship this.");
+            return;
         }
-        log.warn("[STARTUP] In-memory file storage permitted because active profile is dev. " +
-                 "Generated files will not survive a restart. Never ship this.");
+
+        throw new IllegalStateException(
+            "[STARTUP FAILURE] No durable file storage is configured.\n"
+            + "Both app.storage.s3.enabled and app.storage.filesystem.enabled are false, so "
+            + "uploaded documents, generated reports and import files would be held in this "
+            + "JVM's heap: lost on every restart, invisible to other replicas, and never evicted.\n"
+            + "Fix (hosted): set APP_STORAGE_S3_ENABLED=true with APP_STORAGE_S3_BUCKET and "
+            + "APP_STORAGE_S3_REGION.\n"
+            + "Fix (self-hosted): set APP_STORAGE_FILESYSTEM_ENABLED=true with "
+            + "APP_STORAGE_FILESYSTEM_BASE_DIR pointing at a persistent volume.\n"
+            + "Current active profiles: " + Arrays.toString(environment.getActiveProfiles()));
+    }
+
+    /**
+     * Refuses to boot a real deployment that has opted into the heap-backed
+     * storage. The opt-in exists for the test suite and for a throwaway local
+     * run; anywhere else it is a data-loss switch, so it is only honoured under
+     * a dev, test or local profile.
+     */
+    private void validateInMemoryStorageOptIn() {
+        if (!inMemoryStorageEnabled) {
+            return;
+        }
+        boolean devProfileActive = Arrays.stream(environment.getActiveProfiles())
+                .map(p -> p.toLowerCase(Locale.ROOT))
+                .anyMatch(DDL_MUTATION_ALLOWED_PROFILES::contains);
+        if (devProfileActive) {
+            log.warn("[STORAGE] In-memory file storage is enabled under a dev/test profile. "
+                     + "Uploaded files live in this JVM's heap and are lost on restart.");
+            return;
+        }
+        throw new IllegalStateException(
+            "[STARTUP FAILURE] app.storage.in-memory.enabled=true outside a dev/test/local profile.\n"
+            + "In-memory storage holds whole file bodies in the JVM heap: every uploaded document "
+            + "is lost on restart, invisible to other replicas, and never evicted. It exists for "
+            + "the test suite only.\n"
+            + "Fix: set APP_STORAGE_IN_MEMORY_ENABLED=false and configure a durable backend — "
+            + "APP_STORAGE_S3_ENABLED=true (hosted) or APP_STORAGE_FILESYSTEM_ENABLED=true "
+            + "(self-hosted).\n"
+            + "Current active profiles: " + Arrays.toString(environment.getActiveProfiles()));
     }
 
     /**

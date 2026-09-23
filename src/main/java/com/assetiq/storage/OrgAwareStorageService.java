@@ -36,13 +36,22 @@ import java.util.UUID;
  *
  * <p><b>Resolution order:</b>
  * <ol>
- *   <li>If no tenant context is present → in-memory fallback.
- *   <li>If the org has no storage config, or {@code s3Enabled=false} → in-memory fallback.
- *   <li>If {@code s3Enabled=true} and the global S3 client is available → use S3
- *       (optionally routing to the org's own bucket override).
- *   <li>If {@code s3Enabled=true} but the global S3 client is absent
- *       ({@code app.storage.s3.enabled=false}) → log a warning and fall back to in-memory.
+ *   <li>The org has {@code s3Enabled=true} and the global S3 client exists → S3,
+ *       routing to the org's own bucket override when it has one.
+ *   <li>The global S3 client and platform bucket exist → S3 on the platform bucket.
+ *       This is the hosted default: an organisation that has never been given a
+ *       storage config still gets durable, prefix-isolated object storage.
+ *   <li>Otherwise → the local durable backend
+ *       ({@link FilesystemFileStorageService}, the self-hosted default).
  * </ol>
+ *
+ * <p>There is deliberately no in-memory step in that list. The heap map used to
+ * be the silent last resort, which meant a misconfigured deployment lost every
+ * uploaded file on restart and told nobody. {@link InMemoryFileStorageService}
+ * now only exists when it is explicitly opted into, and
+ * {@code StartupSecurityValidator} refuses to boot a deployment that would end
+ * up on it outside a dev/test profile — so by the time a request reaches here,
+ * a durable backend is guaranteed to be present.</p>
  */
 @Service
 @Primary
@@ -59,7 +68,11 @@ public class OrgAwareStorageService implements FileStorageService {
     @Autowired(required = false)
     private S3Presigner globalPresigner;
 
-    private final InMemoryFileStorageService inMemoryFallback;
+    /**
+     * Durable local backend used when S3 is not in play. Filesystem when it is
+     * enabled; the heap map only when that has been explicitly opted into.
+     */
+    private final FileStorageService localBackend;
     private final OrganisationStorageConfigRepository configRepository;
 
     @Value("${app.storage.s3.bucket:}")
@@ -70,10 +83,39 @@ public class OrgAwareStorageService implements FileStorageService {
 
     // ── Constructor ───────────────────────────────────────────────────────────
 
-    public OrgAwareStorageService(InMemoryFileStorageService inMemoryFallback,
+    public OrgAwareStorageService(Optional<FilesystemFileStorageService> filesystemBackend,
+                                  Optional<InMemoryFileStorageService> inMemoryBackend,
                                   OrganisationStorageConfigRepository configRepository) {
-        this.inMemoryFallback  = inMemoryFallback;
-        this.configRepository  = configRepository;
+        this.localBackend = filesystemBackend
+                .map(FileStorageService.class::cast)
+                .or(() -> inMemoryBackend.map(FileStorageService.class::cast))
+                .orElse(null);
+        this.configRepository = configRepository;
+        if (localBackend == null) {
+            log.info("[OrgAwareStorage] No local storage backend configured — every request "
+                     + "must resolve to S3.");
+        } else {
+            log.info("[OrgAwareStorage] Local storage backend: {}",
+                     localBackend.getClass().getSimpleName());
+        }
+    }
+
+    /**
+     * The durable non-S3 backend, or a hard failure.
+     *
+     * <p>Reaching this with nothing configured means S3 was expected and is not
+     * usable for this request. Failing loudly beats the previous behaviour of
+     * quietly writing the file into a heap map that the next restart discards.</p>
+     */
+    private FileStorageService local() {
+        if (localBackend == null) {
+            throw new IllegalStateException(
+                    "No durable file storage is available for this request. "
+                    + "Enable object storage (APP_STORAGE_S3_ENABLED=true with "
+                    + "APP_STORAGE_S3_BUCKET) or filesystem storage "
+                    + "(APP_STORAGE_FILESYSTEM_ENABLED=true with APP_STORAGE_FILESYSTEM_BASE_DIR).");
+        }
+        return localBackend;
     }
 
     // ── FileStorageService ────────────────────────────────────────────────────
@@ -82,7 +124,7 @@ public class OrgAwareStorageService implements FileStorageService {
     public StoredObject store(String key, byte[] bytes, String contentType,
                               String filename, Map<String, String> metadata) {
         Resolution r = resolve();
-        if (!r.useS3()) return inMemoryFallback.store(key, bytes, contentType, filename, metadata);
+        if (!r.useS3()) return local().store(key, bytes, contentType, filename, metadata);
 
         PutObjectRequest.Builder req = PutObjectRequest.builder()
                 .bucket(r.bucket())
@@ -107,7 +149,7 @@ public class OrgAwareStorageService implements FileStorageService {
     @Override
     public Optional<StoredObject> get(String key) {
         Resolution r = resolve();
-        if (!r.useS3()) return inMemoryFallback.get(key);
+        if (!r.useS3()) return local().get(key);
 
         try {
             var resp = globalS3Client.getObject(b -> b.bucket(r.bucket()).key(key));
@@ -123,7 +165,7 @@ public class OrgAwareStorageService implements FileStorageService {
     public Optional<String> createPresignedGetUrl(String key, String filename,
                                                    String contentType, Duration ttl) {
         Resolution r = resolve();
-        if (!r.useS3()) return inMemoryFallback.createPresignedGetUrl(key, filename, contentType, ttl);
+        if (!r.useS3()) return local().createPresignedGetUrl(key, filename, contentType, ttl);
 
         try {
             var getReq = GetObjectRequest.builder().bucket(r.bucket()).key(key);
@@ -145,7 +187,7 @@ public class OrgAwareStorageService implements FileStorageService {
     @Override
     public void delete(String key) {
         Resolution r = resolve();
-        if (!r.useS3()) { inMemoryFallback.delete(key); return; }
+        if (!r.useS3()) { local().delete(key); return; }
         globalS3Client.deleteObject(b -> b.bucket(r.bucket()).key(key));
     }
 
@@ -155,35 +197,41 @@ public class OrgAwareStorageService implements FileStorageService {
 
     private Resolution resolve() {
         UUID orgId = TenantContext.getOrganisationId();
-        if (orgId == null) {
-            return noS3("No tenant context");
-        }
 
-        Optional<OrganisationStorageConfig> configOpt =
-                configRepository.findByOrganisationIdAndDeletedAtIsNull(orgId);
+        Optional<OrganisationStorageConfig> configOpt = orgId == null
+                ? Optional.empty()
+                : configRepository.findByOrganisationIdAndDeletedAtIsNull(orgId);
 
-        if (configOpt.isEmpty() || !configOpt.get().isS3Enabled()) {
-            return noS3("S3 disabled or no config for org=" + orgId);
-        }
+        boolean orgOptedIntoS3 = configOpt.isPresent() && configOpt.get().isS3Enabled();
 
         if (globalS3Client == null) {
-            log.warn("[OrgAwareStorage] org={} has s3Enabled=true but app.storage.s3.enabled=false " +
-                     "— falling back to in-memory. Set APP_STORAGE_S3_ENABLED=true to enable S3.", orgId);
+            if (orgOptedIntoS3) {
+                log.warn("[OrgAwareStorage] org={} has s3Enabled=true but app.storage.s3.enabled=false "
+                         + "— using the local durable backend instead. "
+                         + "Set APP_STORAGE_S3_ENABLED=true to enable S3.", orgId);
+            }
             return noS3("Global S3 client not initialised");
         }
 
-        OrganisationStorageConfig cfg = configOpt.get();
-        // Org-specific bucket override, or fall back to the global bucket
-        String bucket = (cfg.getBucketName() != null && !cfg.getBucketName().isBlank())
-                ? cfg.getBucketName()
+        // Org-specific bucket override, or the platform bucket.
+        String bucket = orgOptedIntoS3
+                        && configOpt.get().getBucketName() != null
+                        && !configOpt.get().getBucketName().isBlank()
+                ? configOpt.get().getBucketName()
                 : globalBucket;
+
+        if (bucket == null || bucket.isBlank()) {
+            log.warn("[OrgAwareStorage] S3 is enabled but no bucket is configured "
+                     + "(app.storage.s3.bucket is empty) — using the local durable backend.");
+            return noS3("No S3 bucket configured");
+        }
 
         log.debug("[OrgAwareStorage] org={} → s3://{}", orgId, bucket);
         return new Resolution(true, bucket, globalKmsKeyId);
     }
 
     private Resolution noS3(String reason) {
-        log.debug("[OrgAwareStorage] Using in-memory storage — {}", reason);
+        log.debug("[OrgAwareStorage] Using the local durable backend — {}", reason);
         return new Resolution(false, null, null);
     }
 }
