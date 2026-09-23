@@ -45,8 +45,14 @@ migration Job or Helm hook.
 {{- if and .Values.backend.enabled (not (eq .Values.backend.database.ddlAuto "validate")) }}
 {{- $warn = append $warn (printf "SPRING_JPA_HIBERNATE_DDL_AUTO is '%s', not 'validate' - Hibernate can mutate the schema behind Flyway." .Values.backend.database.ddlAuto) }}
 {{- end }}
+{{- if and .Values.backend.enabled (not .Values.backend.storage.s3.enabled) (not .Values.backend.storage.filesystem.enabled) }}
+{{- $warn = append $warn "No durable file storage is configured - the backend will refuse to start. Set backend.storage.s3.enabled=true with a bucket." }}
+{{- end }}
 {{- if and .Values.backend.enabled (not .Values.backend.storage.s3.enabled) (gt (int .Values.backend.replicaCount) 1) }}
-{{- $warn = append $warn "S3 storage is off with >1 backend replica - uploads land in a per-pod emptyDir and are lost on restart." }}
+{{- $warn = append $warn "S3 storage is off with >1 backend replica - the filesystem backend writes to a per-pod volume, so uploads 404 depending on which pod answers." }}
+{{- end }}
+{{- if and .Values.backend.enabled .Values.backend.storage.s3.enabled (not .Values.backend.storage.s3.bucket) }}
+{{- $warn = append $warn "backend.storage.s3.enabled is true but backend.storage.s3.bucket is empty - every upload will fail." }}
 {{- end }}
 {{- if $warn }}
 

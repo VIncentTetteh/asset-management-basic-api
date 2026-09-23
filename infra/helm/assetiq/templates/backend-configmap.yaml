@@ -34,6 +34,11 @@ data:
   APP_STORAGE_S3_ENABLED: {{ .Values.backend.storage.s3.enabled | quote }}
   APP_STORAGE_S3_BUCKET: {{ .Values.backend.storage.s3.bucket | quote }}
   APP_STORAGE_S3_REGION: {{ .Values.backend.storage.s3.region | quote }}
+  APP_STORAGE_FILESYSTEM_ENABLED: {{ .Values.backend.storage.filesystem.enabled | quote }}
+  APP_STORAGE_FILESYSTEM_BASE_DIR: {{ .Values.backend.storage.filesystem.baseDir | quote }}
+  # The heap-backed backend is a data-loss switch; the backend refuses to start
+  # with it on outside a dev profile. Pinned false so no overlay can set it.
+  APP_STORAGE_IN_MEMORY_ENABLED: "false"
   {{- with .Values.backend.javaOpts }}
 
   JAVA_OPTS: {{ . | quote }}

@@ -44,9 +44,14 @@ backend:
   storage:
     s3:
       # Mandatory at >1 replica: the local uploads mount is a per-pod emptyDir.
+      # Startup fails outright if neither this nor storage.filesystem is enabled.
       enabled: true
       bucket: ""
       region: "eu-central-1"
+    filesystem:
+      # Never in the hosted deployment — see values.yaml.
+      enabled: false
+      baseDir: "/app/uploads"
 
   # Tighter than dev: the JVM gets a real heap, and the CPU limit is set high
   # enough that a GC pause is not turned into a throttling stall.

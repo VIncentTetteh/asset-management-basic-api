@@ -114,11 +114,22 @@ backend:
     # Self-hosted offline licence mode (added in parallel to this chart).
     offlineEnabled: false
 
+  # ── File storage ───────────────────────────────────────────────────────────
+  # Exactly one durable backend must be on, or the backend refuses to start.
+  # S3 is the supported choice on Kubernetes: the filesystem backend writes to
+  # the `uploads` volume, which is a per-pod emptyDir by default, so at more
+  # than one replica a file uploaded to pod A 404s from pod B and is lost on
+  # every restart. Use the filesystem backend only for a single-replica install
+  # whose uploads volume you have replaced with a real PVC (backend.extraVolumes).
   storage:
     s3:
-      enabled: false
+      enabled: true
       bucket: ""
       region: "eu-central-1"
+    filesystem:
+      enabled: false
+      # Matches the `uploads` volume mount below.
+      baseDir: "/app/uploads"
 
   # Free-form extra non-secret env vars, rendered into the ConfigMap.
   extraEnv: {}

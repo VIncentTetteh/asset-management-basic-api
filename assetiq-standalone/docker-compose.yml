@@ -137,16 +137,23 @@ services:
       # bootstrap.sh sets this to true only when APP_PUBLIC_URL is localhost.
       APP_CORS_ALLOW_LOCALHOST: ${APP_CORS_ALLOW_LOCALHOST:-false}
 
-      # Object storage for generated reports and imports.
+      # ── File storage ────────────────────────────────────────────────────
+      # The default for this stack: uploaded documents, generated reports and
+      # imports are written to the assetiq_storage volume below. Durable across
+      # restarts and upgrades, and captured by scripts/backup.sh alongside the
+      # database.
       #
-      # READ THIS BEFORE LEAVING IT false. There is no local-disk storage
-      # backend in the application: with S3 disabled, generated files are held
-      # in the backend's JVM heap. They are lost on every restart, they are
-      # invisible to a second replica, and the map is never evicted. That is
-      # tolerable for evaluation and wrong for production.
-      #
+      # Single-node by design. If you scale the backend past one container,
+      # every replica needs the same directory — switch to S3 (or the bundled
+      # MinIO, `--profile minio`) instead.
+      APP_STORAGE_FILESYSTEM_ENABLED: ${APP_STORAGE_FILESYSTEM_ENABLED:-true}
+      APP_STORAGE_FILESYSTEM_BASE_DIR: ${APP_STORAGE_FILESYSTEM_BASE_DIR:-/app/uploads}
+
+      # Object storage, as an alternative to the volume above. Set
+      # APP_STORAGE_FILESYSTEM_ENABLED=false when you enable this, or S3 simply
+      # takes precedence and the volume goes unused.
       # `docker compose --profile minio up -d` starts a bundled MinIO and this
-      # stack points at it. See docs/self-hosting.md.
+      # stack can point at it. See docs/self-hosting.md.
       APP_STORAGE_S3_ENABLED: ${APP_STORAGE_S3_ENABLED:-false}
       APP_STORAGE_S3_BUCKET: ${APP_STORAGE_S3_BUCKET:-}
       APP_STORAGE_S3_REGION: ${APP_STORAGE_S3_REGION:-us-east-1}
@@ -160,6 +167,12 @@ services:
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USERNAME: ${SMTP_USERNAME:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+    volumes:
+      # Durable file storage. The image creates /app/uploads owned by uid 10001,
+      # which is the user the backend runs as, so the volume inherits that owner
+      # on first creation. read_only below applies to the image layers, not to
+      # a mounted volume.
+      - assetiq_storage:/app/uploads
     read_only: true
     tmpfs:
       # JVM hsperfdata, Tomcat's multipart spool and Flyway scratch all land in
@@ -295,6 +308,10 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  # Uploaded documents, generated reports and imports. Back this up: it holds
+  # contracts, receipts and compliance evidence that exist nowhere else.
+  # scripts/backup.sh captures it together with the database.
+  assetiq_storage:
   minio_data:
 
 # assetiq-data     — backend <-> postgres/redis only. internal: no route out.

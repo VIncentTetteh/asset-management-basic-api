@@ -1,8 +1,13 @@
 spring:
   servlet:
     multipart:
-      max-file-size: 10MB
-      max-request-size: 11MB
+      # Kept in step with DocumentAttachmentServiceImpl.MAX_FILE_SIZE (25 MB).
+      # Spring rejects the request before the controller runs, so a lower value
+      # here would turn a clear 400 from the validator into an opaque
+      # MaxUploadSizeExceededException. Request cap leaves room for the multipart
+      # envelope and one set of form fields alongside the file.
+      max-file-size: ${APP_UPLOAD_MAX_FILE_SIZE:25MB}
+      max-request-size: ${APP_UPLOAD_MAX_REQUEST_SIZE:30MB}
   application:
     name: ${SPRING_APPLICATION_NAME:AssetIQ}
 
@@ -224,6 +229,15 @@ app:
   license:
     key: ${ASSETIQ_LICENSE_KEY:}
     server-url: ${LICENSE_SERVER_URL:https://license.assetiq.io}
+    # Whether a read-only licence state hard-stops writes with HTTP 402.
+    # OFF by default and intended to stay off. The legacy standalone path calls a
+    # vendor licence server every 24h; when that call failed it used to mark the
+    # licence read-only, so a network blip at a customer site became an outage of
+    # their asset register. LicenseService no longer derives read-only from an
+    # unreachable server, and this switch makes sure no future change to that
+    # derivation can turn a licensing condition into downtime either.
+    enforcement:
+      block-writes: ${APP_LICENSE_BLOCK_WRITES:false}
     # Self-hosted SKU: a signed, self-contained licence key verified locally
     # against a public key baked into the image. No licence server, no call-home.
     # OFF by default — the hosted deployment resolves entitlements from the
@@ -356,7 +370,27 @@ app:
   account:
     purge-retention-days: ${APP_ACCOUNT_PURGE_RETENTION_DAYS:30}
 
+  # ── File storage ──────────────────────────────────────────────────────────
+  # Exactly one durable backend must be active. S3 is the supported
+  # configuration for the hosted deployment (it is the only one that is correct
+  # behind more than one replica) and is switched on there by the Helm values /
+  # task definition. The filesystem backend is the default for a self-hosted
+  # installation, where the base directory is a mounted volume.
+  #
+  # StartupSecurityValidator refuses to boot when neither is enabled: the old
+  # behaviour was a silent fall-through to a heap map that lost every file on
+  # restart.
   storage:
+    filesystem:
+      enabled: ${APP_STORAGE_FILESYSTEM_ENABLED:true}
+      # Must be on a persistent volume. Created at startup if absent; the
+      # application refuses to start if it is not writable.
+      base-dir: ${APP_STORAGE_FILESYSTEM_BASE_DIR:./data/assetiq-storage}
+    # Heap-backed storage for the test suite and throwaway local runs. Never a
+    # fallback: it is only created when explicitly enabled, and startup fails if
+    # it is enabled outside a dev/test/local profile.
+    in-memory:
+      enabled: ${APP_STORAGE_IN_MEMORY_ENABLED:false}
     s3:
       enabled: ${APP_STORAGE_S3_ENABLED:false}
       bucket: ${APP_STORAGE_S3_BUCKET:}

@@ -67,8 +67,11 @@ spec:
         # Tomcat's work dir and multipart staging.
         - name: tmp
           emptyDir: {}
-        # Local upload staging used when APP_STORAGE_S3_ENABLED=false. emptyDir
-        # is per-pod and ephemeral — enable S3 for any multi-replica deployment.
+        # Base directory for the filesystem storage backend
+        # (APP_STORAGE_FILESYSTEM_BASE_DIR), and multipart staging otherwise.
+        # emptyDir is per-pod and ephemeral: it is only adequate when S3 is the
+        # active backend. To run the filesystem backend on Kubernetes, replace
+        # this with a ReadWriteMany PVC via backend.extraVolumes/extraVolumeMounts.
         - name: uploads
           emptyDir: {}
         {{- with .Values.backend.extraVolumes }}
