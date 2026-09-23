@@ -190,6 +190,19 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                 status);
     }
 
+    // The caller or their organisation has used its share of the AI assistant.
+    // 429 with Retry-After, because a client needs to know to back off — unlike a
+    // provider outage, which degrades inside a 200 so the answer box can explain.
+    @ExceptionHandler(com.assetiq.services.ai.AiQuotaExceededException.class)
+    public ResponseEntity<Object> handleAiQuota(com.assetiq.services.ai.AiQuotaExceededException ex) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.add(HttpHeaders.RETRY_AFTER, String.valueOf(ex.getRetryAfterSeconds()));
+        return new ResponseEntity<>(
+                errorBody(429, ex.getMessage(), "AI_QUOTA_EXCEEDED"),
+                headers,
+                HttpStatus.TOO_MANY_REQUESTS);
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Object> handleUnexpected(Exception ex) {
         log.error("Unexpected error", ex);

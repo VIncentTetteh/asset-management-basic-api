@@ -438,6 +438,13 @@ app:
 ai:
   # Provider: groq (free) | anthropic (paid) | ollama (local)
   provider: ${AI_PROVIDER:groq}
+  # Assistant quotas. The provider key is a shared, exhaustible resource, so one
+  # tenant (or one runaway script) must not be able to spend it all. Enforced in
+  # Redis where available and in-process always — see AiRateLimiter.
+  rate-limit:
+    user-per-minute:       ${AI_RATE_LIMIT_USER_PER_MINUTE:6}
+    user-per-hour:         ${AI_RATE_LIMIT_USER_PER_HOUR:30}
+    organisation-per-hour: ${AI_RATE_LIMIT_ORG_PER_HOUR:120}
 
 groq:
   api:
@@ -452,6 +459,7 @@ anthropic:
 ollama:
   base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
   model: ${OLLAMA_MODEL:llama3.1:8b}
+
 
 # ── Paystack Billing ─────────────────────────────────────────────────────────
 paystack:
