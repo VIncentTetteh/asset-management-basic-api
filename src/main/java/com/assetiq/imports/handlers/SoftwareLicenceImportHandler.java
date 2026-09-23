@@ -13,6 +13,7 @@ import com.assetiq.imports.ImportFieldDescriptor;
 import com.assetiq.imports.ImportOptions;
 import com.assetiq.imports.ImportReferenceResolver;
 import com.assetiq.imports.ImportRow;
+import com.assetiq.imports.ImportRunReport;
 import com.assetiq.models.Organisation;
 import com.assetiq.models.SoftwareLicense;
 import com.assetiq.repositories.SoftwareLicenseRepository;
@@ -157,8 +158,8 @@ public class SoftwareLicenceImportHandler implements ImportEntityHandler {
     }
 
     @Override
-    public ImportRunner runner(Organisation organisation, ImportOptions options) {
-        return new Runner(organisation, options);
+    public ImportRunner runner(Organisation organisation, ImportOptions options, ImportRunReport report) {
+        return new Runner(organisation, options, report);
     }
 
     private final class Runner extends AbstractImportRunner<SoftwareLicenseDto> {
@@ -166,9 +167,9 @@ public class SoftwareLicenceImportHandler implements ImportEntityHandler {
         private final ImportReferenceResolver.Refs refs;
         private final Map<String, UUID> byVendorAndName = new LinkedHashMap<>();
 
-        private Runner(Organisation organisation, ImportOptions options) {
+        private Runner(Organisation organisation, ImportOptions options, ImportRunReport report) {
             super(options);
-            this.refs = referenceResolver.open(organisation, options);
+            this.refs = referenceResolver.open(organisation, options, report);
             for (SoftwareLicense licence : licenseRepository.findByOrganisationAndDeletedAtIsNull(organisation)) {
                 byVendorAndName.putIfAbsent(key(licence.getVendor(), licence.getName()), licence.getId());
             }

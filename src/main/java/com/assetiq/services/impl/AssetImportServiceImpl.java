@@ -166,10 +166,18 @@ public class AssetImportServiceImpl extends com.assetiq.services.TenantAwareServ
         return mapping;
     }
 
+    /**
+     * A whole-file refusal: unreadable, empty, or not this tenant's to import.
+     *
+     * <p>It goes in {@code fatalError}, not into the error list as a row 0. Nothing was
+     * read, so no row failed, and an error list longer than the failure count is how a
+     * result screen ends up contradicting itself.</p>
+     */
     private AssetImportResultDto failed(boolean dryRun, String message) {
         AssetImportResultDto result = new AssetImportResultDto();
         result.setDryRun(dryRun);
-        result.getErrors().add(new RowError(0, message));
+        result.setFatalError(message);
+        result.settleOutcome();
         return result;
     }
 }

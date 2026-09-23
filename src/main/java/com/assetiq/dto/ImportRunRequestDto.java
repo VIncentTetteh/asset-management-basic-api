@@ -20,5 +20,10 @@ public class ImportRunRequestDto {
      */
     private Map<String, Integer> mapping;
 
+    /**
+     * Duplicate handling, reference creation, the columns to keep as custom fields and
+     * the value translations the user chose. Preview and commit take the identical
+     * structure and run it identically — that is the whole reason they cannot disagree.
+     */
     private ImportOptionsDto options;
 }

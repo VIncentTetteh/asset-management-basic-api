@@ -14,10 +14,13 @@ import com.assetiq.imports.ImportFieldDescriptor;
 import com.assetiq.imports.ImportOptions;
 import com.assetiq.imports.ImportReferenceResolver;
 import com.assetiq.imports.ImportRow;
+import com.assetiq.imports.ImportRunReport;
+import com.assetiq.imports.ImportWizardService;
 import com.assetiq.models.Asset;
 import com.assetiq.models.AssetCustomField;
 import com.assetiq.models.Organisation;
 import com.assetiq.models.SubscriptionPlan;
+import com.assetiq.imports.CustomFieldDefinitions;
 import com.assetiq.repositories.AssetCustomFieldRepository;
 import com.assetiq.repositories.AssetRepository;
 import com.assetiq.services.AssetService;
@@ -45,19 +48,22 @@ import static com.assetiq.imports.ImportFieldDescriptor.field;
  * in the historical header order still imports byte-for-byte as it always did, while
  * the wizard can map any other order onto the same fields.</p>
  *
- * <p>Columns beyond the mapped set become asset custom fields <b>only on the legacy
- * positional path</b>, where they always have, and only when the tenant has
- * {@code commercial.governed-custom-fields} enabled; without the flag the row is an
- * error, so the flag cannot be bypassed via a spreadsheet. The mapping-driven wizard
- * sets {@link ImportOptions#captureUnmappedColumns()} false, so a column the user did
- * not map is simply not read — a sheet from another platform is expected to carry
- * columns AssetIQ has no field for, and the answer to them is to ignore them.</p>
+ * <p>Assets are the only type with anywhere to put a column the product has no field
+ * for, so they are the only type that turns one into a custom field. Two ways in: the
+ * wizard, where the user marked specific columns "create as a custom field"
+ * ({@link ImportOptions#customFieldColumns()}), and the legacy positional path, where
+ * everything past the fixed layout has always been taken
+ * ({@link ImportOptions#captureUnmappedColumns()}). Both require the tenant to have
+ * {@code commercial.governed-custom-fields} enabled; without the flag the columns are
+ * left out with a note rather than failing the row, and the wizard is told up front so
+ * it never offers the option at all. A column that is neither mapped nor chosen is not
+ * read: that is what "ignore" means.</p>
  */
 @Component
 public class AssetImportHandler implements ImportEntityHandler {
 
     /** Flag that governs whether extra import columns may create asset custom fields. */
-    public static final String CUSTOM_FIELDS_FLAG = "commercial.governed-custom-fields";
+    public static final String CUSTOM_FIELDS_FLAG = ImportWizardService.CUSTOM_FIELDS_FLAG;
 
     private static final List<ImportFieldDescriptor> FIELDS = List.of(
             field("name", "Asset name", ImportDataType.STRING).required()
@@ -189,6 +195,7 @@ public class AssetImportHandler implements ImportEntityHandler {
     private final AssetService assetService;
     private final AssetRepository assetRepository;
     private final AssetCustomFieldRepository assetCustomFieldRepository;
+    private final CustomFieldDefinitions customFieldDefinitions;
     private final ImportReferenceResolver referenceResolver;
     private final UsageLimitService usageLimitService;
     private final FeatureFlagService featureFlagService;
@@ -198,6 +205,7 @@ public class AssetImportHandler implements ImportEntityHandler {
     public AssetImportHandler(AssetService assetService,
                               AssetRepository assetRepository,
                               AssetCustomFieldRepository assetCustomFieldRepository,
+                              CustomFieldDefinitions customFieldDefinitions,
                               ImportReferenceResolver referenceResolver,
                               UsageLimitService usageLimitService,
                               FeatureFlagService featureFlagService,
@@ -206,6 +214,7 @@ public class AssetImportHandler implements ImportEntityHandler {
         this.assetService = assetService;
         this.assetRepository = assetRepository;
         this.assetCustomFieldRepository = assetCustomFieldRepository;
+        this.customFieldDefinitions = customFieldDefinitions;
         this.referenceResolver = referenceResolver;
         this.usageLimitService = usageLimitService;
         this.featureFlagService = featureFlagService;
@@ -229,8 +238,8 @@ public class AssetImportHandler implements ImportEntityHandler {
     }
 
     @Override
-    public ImportRunner runner(Organisation organisation, ImportOptions options) {
-        return new Runner(organisation, options);
+    public ImportRunner runner(Organisation organisation, ImportOptions options, ImportRunReport report) {
+        return new Runner(organisation, options, report);
     }
 
     /** An asset row: the DTO plus whatever extra columns the sheet carried. */
@@ -239,16 +248,21 @@ public class AssetImportHandler implements ImportEntityHandler {
     private final class Runner extends AbstractImportRunner<AssetPayload> {
 
         private final Organisation organisation;
+        private final ImportRunReport report;
         private final ImportReferenceResolver.Refs refs;
+        private final CustomFieldDefinitions.Session customFields;
         private final Map<String, UUID> byAssetTag = new LinkedHashMap<>();
         private final Map<String, UUID> byName = new LinkedHashMap<>();
         private Boolean customFieldsEnabled;
         private int created;
 
-        private Runner(Organisation organisation, ImportOptions options) {
+        private Runner(Organisation organisation, ImportOptions options, ImportRunReport report) {
             super(options);
             this.organisation = organisation;
-            this.refs = referenceResolver.open(organisation, options);
+            this.report = report;
+            this.refs = referenceResolver.open(organisation, options, report);
+            this.customFields = customFieldDefinitions.open(
+                    organisation, ImportEntityType.ASSETS.name(), options, report);
             for (Asset asset : assetRepository.findAllByOrganisationAndDeletedAtIsNull(organisation)) {
                 if (asset.getAssetTag() != null && !asset.getAssetTag().isBlank()) {
                     byAssetTag.putIfAbsent(key(asset.getAssetTag()), asset.getId());
@@ -290,14 +304,36 @@ public class AssetImportHandler implements ImportEntityHandler {
             dto.setDepartmentId(refs.department(row.string("department"), "department"));
             dto.setAssignedUserId(refs.user(row.string("assignedUserEmail"), "assignedUserEmail"));
 
-            Map<String, String> customFields = new LinkedHashMap<>(row.unmapped());
-            if (!customFields.isEmpty() && !customFieldsEnabled()) {
-                throw new IllegalArgumentException("Extra column(s) " + customFields.keySet()
-                        + " would become custom fields, which are not enabled for your organisation."
-                        + " Remove them or leave them blank.");
-            }
             beanValidator.validateForCreate(dto);
-            return new AssetPayload(dto, customFields);
+            return new AssetPayload(dto, resolveCustomFields(row));
+        }
+
+        /**
+         * The extra columns this row carries, under the field names the tenant's own
+         * definitions use.
+         *
+         * <p>A tenant without {@code commercial.governed-custom-fields} does not get a
+         * failed row over this. The flag still cannot be bypassed — nothing is written —
+         * but the columns are dropped with a note saying why, because losing a column is
+         * a smaller harm than losing the row, and the wizard already knows not to offer
+         * the option to a tenant who cannot use it.</p>
+         */
+        private Map<String, String> resolveCustomFields(ImportRow row) {
+            Map<String, String> raw = row.unmapped();
+            if (raw.isEmpty()) return Map.of();
+            if (!customFieldsEnabled()) {
+                report.note(null, String.join(", ", raw.keySet()), null,
+                        "Custom fields are not enabled for your organisation, so "
+                                + raw.size() + " extra column(s) were not imported: "
+                                + String.join(", ", raw.keySet()) + ".");
+                return Map.of();
+            }
+            Map<String, String> resolved = new LinkedHashMap<>();
+            for (Map.Entry<String, String> entry : raw.entrySet()) {
+                String fieldName = customFields.ensure(entry.getKey(), entry.getValue());
+                if (fieldName != null) resolved.put(fieldName, entry.getValue());
+            }
+            return resolved;
         }
 
         private boolean customFieldsEnabled() {

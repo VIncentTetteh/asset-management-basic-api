@@ -24,7 +24,7 @@ final class ImportTestDescriptors {
 
     static List<ImportFieldDescriptor> fieldsFor(ImportEntityType type) {
         return switch (type) {
-            case ASSETS -> new AssetImportHandler(null, null, null, null, null, null, null, null).fields();
+            case ASSETS -> new AssetImportHandler(null, null, null, null, null, null, null, null, null).fields();
             case SUPPLIERS -> new SupplierImportHandler(null, null, null).fields();
             case EMPLOYEES -> new EmployeeImportHandler(null, null, null, null).fields();
             case LOCATIONS -> new LocationImportHandler(null, null, null).fields();

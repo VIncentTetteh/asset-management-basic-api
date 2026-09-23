@@ -10,6 +10,7 @@ import com.assetiq.imports.ImportEntityType;
 import com.assetiq.imports.ImportFieldDescriptor;
 import com.assetiq.imports.ImportOptions;
 import com.assetiq.imports.ImportRow;
+import com.assetiq.imports.ImportRunReport;
 import com.assetiq.models.Category;
 import com.assetiq.models.Organisation;
 import com.assetiq.repositories.CategoryRepository;
@@ -79,8 +80,8 @@ public class CategoryImportHandler implements ImportEntityHandler {
     }
 
     @Override
-    public ImportRunner runner(Organisation organisation, ImportOptions options) {
-        return new Runner(organisation, options);
+    public ImportRunner runner(Organisation organisation, ImportOptions options, ImportRunReport report) {
+        return new Runner(organisation, options, report);
     }
 
     private final class Runner extends AbstractImportRunner<CategoryDto> {
@@ -88,7 +89,7 @@ public class CategoryImportHandler implements ImportEntityHandler {
         private final Organisation organisation;
         private final Map<String, UUID> byName = new LinkedHashMap<>();
 
-        private Runner(Organisation organisation, ImportOptions options) {
+        private Runner(Organisation organisation, ImportOptions options, ImportRunReport report) {
             super(options);
             this.organisation = organisation;
             for (Category category : categoryRepository.findByOrganisationAndDeletedAtIsNull(organisation)) {

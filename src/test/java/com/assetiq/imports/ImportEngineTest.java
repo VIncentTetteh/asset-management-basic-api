@@ -79,8 +79,11 @@ class ImportEngineTest {
                 Map.of("count", 0), handler, ImportOptions.defaults(), org, 0);
 
         assertThat(handler.created).isEmpty();
-        assertThat(result.getErrors()).singleElement()
-                .satisfies(e -> assertThat(e.getMessage()).contains("required fields are not mapped").contains("name"));
+        // A mapping problem is a problem with the request, not with a row: it must not
+        // appear in the error list, where its length has to match the failure count.
+        assertThat(result.getErrors()).isEmpty();
+        assertThat(result.getFatalError()).contains("required fields are not mapped").contains("name");
+        assertThat(result.getOutcome()).isEqualTo(AssetImportResultDto.Outcome.FAILED);
     }
 
     @Test
@@ -93,8 +96,9 @@ class ImportEngineTest {
         AssetImportResultDto result = engine.run(sheet, mapping, handler, ImportOptions.defaults(), org, 0);
 
         assertThat(handler.created).isEmpty();
-        assertThat(result.getErrors()).singleElement()
-                .satisfies(e -> assertThat(e.getMessage()).contains("mapped to both"));
+        assertThat(result.getErrors()).isEmpty();
+        assertThat(result.getFatalError()).contains("mapped to both");
+        assertThat(result.getOutcome()).isEqualTo(AssetImportResultDto.Outcome.FAILED);
     }
 
     // ── Preview ───────────────────────────────────────────────────────────────
@@ -197,10 +201,16 @@ class ImportEngineTest {
 
         assertThat(handler.created).hasSize(1);
         assertThat(result.getImported()).isEqualTo(1);
-        assertThat(result.getErrors()).last()
-                .satisfies(e -> assertThat(e.getMessage())
-                        .contains("Stopped at row 3")
-                        .contains("remain imported"));
+        // Stopping early is a state of the run, not an extra failed row. The one error
+        // is the row that actually failed, and the stop is explained beside it.
+        assertThat(result.getErrors()).singleElement()
+                .satisfies(e -> assertThat(e.getRow()).isEqualTo(3));
+        assertThat(result.getFailed()).isEqualTo(1);
+        assertThat(result.isStoppedEarly()).isTrue();
+        assertThat(result.getStoppedReason())
+                .contains("Stopped at row 3")
+                .contains("remain imported");
+        assertThat(result.getOutcome()).isEqualTo(AssetImportResultDto.Outcome.PARTIAL);
     }
 
     // ── Unmapped columns ──────────────────────────────────────────────────────
@@ -326,7 +336,7 @@ class ImportEngineTest {
         }
 
         @Override
-        public ImportRunner runner(Organisation organisation, ImportOptions options) {
+        public ImportRunner runner(Organisation organisation, ImportOptions options, ImportRunReport report) {
             return new AbstractImportRunner<Map<String, String>>(options) {
                 @Override
                 protected Map<String, String> build(ImportRow row) {

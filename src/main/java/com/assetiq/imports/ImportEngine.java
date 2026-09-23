@@ -11,10 +11,14 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Runs a parsed sheet through an {@link ImportEntityHandler}, one row at a time.
@@ -32,6 +36,13 @@ import java.util.Map;
  * exists so nobody is surprised by which rows those are, and the UI shows the real
  * counts rather than a green tick.</p>
  *
+ * <h2>Counting</h2>
+ * <p>{@code totalRows == imported + updated + skipped} and
+ * {@code errors.size() == failed} both hold on every result — see
+ * {@link AssetImportResultDto}. That is why nothing in here ever appends a row-0 entry
+ * to the error list: a mapping problem is a {@code fatalError}, an early stop is a
+ * {@code stoppedReason}, and neither is a row that failed.</p>
+ *
  * <h2>Row errors</h2>
  * <p>Every error names the spreadsheet row number, the column header <em>as the user
  * wrote it</em>, and what was wrong. "Validation failed" helps nobody.</p>
@@ -45,7 +56,7 @@ public class ImportEngine {
     public static final int MAX_REPORTED_ERRORS = 500;
 
     /** Longest custom-field header the asset path will accept; matches the column limit. */
-    private static final int MAX_CUSTOM_FIELD_HEADER_LENGTH = 100;
+    public static final int MAX_CUSTOM_FIELD_HEADER_LENGTH = 100;
 
     private final TransactionTemplate rowTransactionTemplate;
 
@@ -58,7 +69,7 @@ public class ImportEngine {
      * @param sheet    the uploaded file, already parsed
      * @param mapping  field name → column index; a null or absent value means unmapped
      * @param handler  the entity handler for this type
-     * @param options  duplicate handling, reference creation, dry run
+     * @param options  duplicate handling, reference creation, value mappings, dry run
      * @param org      the tenant; every row is written against this organisation only
      * @param rowLimit stop after this many data rows (preview caps it; commit does not)
      */
@@ -70,24 +81,35 @@ public class ImportEngine {
                                     int rowLimit) {
         AssetImportResultDto result = new AssetImportResultDto();
         result.setDryRun(options.dryRun());
+        result.setWouldCreateReferences(options.dryRun() && options.createMissingReferences());
 
         Map<String, Integer> resolved = validateMapping(sheet, mapping, handler, result);
         if (resolved == null) {
+            result.settleOutcome();
             return result;
         }
 
         Map<String, String> headerByField = new LinkedHashMap<>();
         resolved.forEach((field, column) -> headerByField.put(field, headerText(sheet, column, field)));
 
-        List<UnmappedColumn> unmappedColumns;
+        List<UnmappedColumn> customFieldColumns;
         try {
-            unmappedColumns = resolveUnmappedColumns(sheet, resolved, handler, options);
+            customFieldColumns = resolveCustomFieldColumns(sheet, resolved, handler, options);
         } catch (IllegalArgumentException badHeader) {
-            result.getErrors().add(new RowError(1, badHeader.getMessage()));
+            result.setFatalError(badHeader.getMessage());
+            result.settleOutcome();
             return result;
         }
 
-        ImportEntityHandler.ImportRunner runner = handler.runner(org, options);
+        ImportRunReport report = new ImportRunReport();
+        report.useHeaders(headerByField);
+        ImportValueMappings valueMappings = options.valueMappingIndex();
+        Set<String> requiredFields = handler.fields().stream()
+                .filter(ImportFieldDescriptor::required)
+                .map(ImportFieldDescriptor::name)
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+
+        ImportEntityHandler.ImportRunner runner = handler.runner(org, options, report);
 
         int limit = rowLimit <= 0 ? sheet.rowCount() : Math.min(rowLimit, sheet.rowCount());
         for (int i = 0; i < limit; i++) {
@@ -97,42 +119,74 @@ public class ImportEngine {
             Map<String, String> fieldValues = new LinkedHashMap<>();
             resolved.forEach((field, column) -> fieldValues.put(field, valueAt(values, column)));
             Map<String, String> unmapped = new LinkedHashMap<>();
-            for (UnmappedColumn column : unmappedColumns) {
+            for (UnmappedColumn column : customFieldColumns) {
                 String value = valueAt(values, column.index());
                 if (value != null && !value.isBlank()) unmapped.put(column.header(), value);
             }
 
-            ImportRow row = new ImportRow(humanRow, fieldValues, headerByField, unmapped);
+            report.beginRow(humanRow);
+            ImportRow row = new ImportRow(humanRow, fieldValues, headerByField, unmapped,
+                    valueMappings, requiredFields, report);
             if (row.isBlank()) {
+                report.discardRow();
                 continue; // a blank line in the middle of a sheet is not a failed row
             }
             result.setTotalRows(result.getTotalRows() + 1);
-            int failuresBefore = result.getSkipped();
-            applyRow(runner, row, result);
+            boolean rowFailed = applyRow(runner, row, result, report);
 
-            boolean rowFailed = result.getSkipped() > failuresBefore
-                    && !result.getErrors().isEmpty()
-                    && result.getErrors().get(result.getErrors().size() - 1).getRow() == humanRow;
             if (rowFailed && !options.skipInvalidRows()) {
                 // The caller asked to stop at the first bad row. Rows already written
                 // stay written -- see the class comment on why an import is best-effort
-                // rather than all-or-nothing -- so say so plainly.
-                result.getErrors().add(new RowError(0,
-                        "Stopped at row " + humanRow + " because 'skip invalid rows' is off."
-                                + (options.dryRun() ? "" : " Rows before it were imported and remain imported.")));
-                return result;
+                // rather than all-or-nothing -- so say so plainly, as a state of the run
+                // and not as one more failed row.
+                stop(result, "Stopped at row " + humanRow + " because 'skip invalid rows' is off."
+                        + (options.dryRun() ? "" : " Rows before it were imported and remain imported."));
+                return finish(result, report);
             }
         }
 
         if (sheet.truncated()) {
-            result.getErrors().add(new RowError(0,
-                    "Only the first " + SpreadsheetReader.MAX_ROWS
-                            + " rows were read. Split the file and import the rest separately."));
+            stop(result, "Only the first " + SpreadsheetReader.MAX_ROWS
+                    + " rows were read. Split the file and import the rest separately.");
         }
+        return finish(result, report);
+    }
+
+    /**
+     * Folds the run's notes and creations into the result and settles the verdict.
+     * Every exit from {@link #run} goes through here, so no path can return a result
+     * whose outcome was never computed.
+     */
+    private AssetImportResultDto finish(AssetImportResultDto result, ImportRunReport report) {
+        result.getNotes().addAll(report.notes());
+        result.setNotesTruncated(report.notesTruncated());
+        result.setCreatedReferences(report.createdReferences());
+        result.setCreatedCustomFields(report.createdCustomFields());
+        result.setSkipped(result.getTotalRows() - result.getImported() - result.getUpdated());
+        result.setDuplicatesSkipped(Math.max(0, result.getSkipped() - result.getFailed()));
+        result.settleOutcome();
         return result;
     }
 
-    private void applyRow(ImportEntityHandler.ImportRunner runner, ImportRow row, AssetImportResultDto result) {
+    private void stop(AssetImportResultDto result, String reason) {
+        result.setStoppedEarly(true);
+        result.setStoppedReason(reason);
+    }
+
+    /**
+     * Applies one row and keeps or drops the notes it raised.
+     *
+     * <p>Notes survive only on a row that landed. A row that failed already carries an
+     * error explaining itself, and pairing that with "by the way, we ignored your status
+     * column" describes work on a record that was never written.</p>
+     *
+     * @return true when the row failed, so the caller can honour 'stop at first bad row'
+     */
+    private boolean applyRow(ImportEntityHandler.ImportRunner runner,
+                             ImportRow row,
+                             AssetImportResultDto result,
+                             ImportRunReport report) {
+        boolean failed = true;
         try {
             ImportEntityHandler.RowOutcome outcome =
                     rowTransactionTemplate.execute(status -> runner.apply(row));
@@ -140,39 +194,43 @@ public class ImportEngine {
                 case CREATED -> result.setImported(result.getImported() + 1);
                 case UPDATED -> result.setUpdated(result.getUpdated() + 1);
                 case SKIPPED -> {
-                    result.setSkipped(result.getSkipped() + 1);
                     if (outcome != null && outcome.message() != null) {
-                        addError(result, new RowError(row.rowNumber(), outcome.message()));
+                        return failed = fail(result, new RowError(row.rowNumber(), outcome.message()));
                     }
+                    // A deliberate duplicate skip. Not a failure, so no error, and the
+                    // counts keep the error list the same length as the failure count.
                 }
             }
+            return failed = false;
         } catch (FieldValidationException e) {
-            result.setSkipped(result.getSkipped() + 1);
             String column = row.headerFor(e.getFieldName());
-            addError(result, new RowError(row.rowNumber(),
+            return failed = fail(result, new RowError(row.rowNumber(),
                     "Column '" + column + "' " + e.getMessage(), e.getFieldName(), column));
         } catch (IllegalArgumentException | IllegalStateException | AccessDeniedException e) {
-            result.setSkipped(result.getSkipped() + 1);
-            addError(result, new RowError(row.rowNumber(), e.getMessage()));
+            return failed = fail(result, new RowError(row.rowNumber(), e.getMessage()));
         } catch (Exception e) {
             log.warn("Import: unexpected error at row {}", row.rowNumber(), e);
-            result.setSkipped(result.getSkipped() + 1);
-            addError(result, new RowError(row.rowNumber(), "Unexpected error: " + e.getMessage()));
+            return failed = fail(result, new RowError(row.rowNumber(), "Unexpected error: " + e.getMessage()));
+        } finally {
+            if (failed) report.discardRow(); else report.commitRow();
         }
     }
 
-    private void addError(AssetImportResultDto result, RowError error) {
+    private boolean fail(AssetImportResultDto result, RowError error) {
+        result.setFailed(result.getFailed() + 1);
         if (result.getErrors().size() < MAX_REPORTED_ERRORS) {
             result.getErrors().add(error);
-        } else if (result.getErrors().size() == MAX_REPORTED_ERRORS) {
-            result.getErrors().add(new RowError(0,
-                    "More than " + MAX_REPORTED_ERRORS + " rows failed; further errors are not listed."));
+        } else {
+            result.setErrorsTruncated(true);
         }
+        return true;
     }
 
     /**
      * Rejects a mapping before any row is touched: unknown fields, out-of-range column
-     * indices, two fields pointed at one column, and missing required fields.
+     * indices, two fields pointed at one column, and missing required fields. These are
+     * problems with the request, not with a row, so they land in
+     * {@link AssetImportResultDto#getFatalError()} rather than in the error list.
      */
     private Map<String, Integer> validateMapping(ParsedSheet sheet,
                                                  Map<String, Integer> mapping,
@@ -190,21 +248,19 @@ public class ImportEngine {
                 Integer column = entry.getValue();
                 if (column == null) continue;
                 if (!byName.containsKey(field)) {
-                    result.getErrors().add(new RowError(0,
-                            "'" + field + "' is not a field of " + handler.entityType().label().toLowerCase(Locale.ROOT)));
+                    result.setFatalError("'" + field + "' is not a field of "
+                            + handler.entityType().label().toLowerCase(Locale.ROOT));
                     return null;
                 }
                 if (column < 0 || column >= sheet.columnCount()) {
-                    result.getErrors().add(new RowError(0,
-                            "Field '" + field + "' is mapped to column " + column
-                                    + ", but the file has " + sheet.columnCount() + " columns"));
+                    result.setFatalError("Field '" + field + "' is mapped to column " + column
+                            + ", but the file has " + sheet.columnCount() + " columns");
                     return null;
                 }
                 String previous = claimedBy.putIfAbsent(column, field);
                 if (previous != null) {
-                    result.getErrors().add(new RowError(0,
-                            "Column '" + headerText(sheet, column, "#" + column)
-                                    + "' is mapped to both '" + previous + "' and '" + field + "'"));
+                    result.setFatalError("Column '" + headerText(sheet, column, "#" + column)
+                            + "' is mapped to both '" + previous + "' and '" + field + "'");
                     return null;
                 }
                 resolved.put(field, column);
@@ -217,37 +273,47 @@ public class ImportEngine {
                 .filter(name -> !resolved.containsKey(name))
                 .toList();
         if (!missing.isEmpty()) {
-            result.getErrors().add(new RowError(0,
-                    "These required fields are not mapped to a column: " + String.join(", ", missing)));
+            result.setFatalError(
+                    "These required fields are not mapped to a column: " + String.join(", ", missing));
             return null;
         }
         return resolved;
     }
 
     /**
-     * Columns the mapping did not claim, but only when the run asked for them.
+     * The columns whose values become custom fields on each record.
      *
-     * <p>On the mapping-driven path {@link ImportOptions#captureUnmappedColumns()} is
-     * false and this returns nothing, so an unmapped column is simply not read — no
-     * error, no custom field. That is the whole point of the feature: a sheet exported
-     * from another platform carries columns AssetIQ has no field for, and the answer to
-     * them is to ignore them, not to send the customer away to edit their spreadsheet.
-     *
-     * <p>Only the legacy positional asset import turns this on, where extra columns
-     * past the fixed layout have always become custom fields behind a feature flag.</p>
+     * <p>Two ways in, and they answer different questions. The wizard names the columns
+     * the user chose to keep, in {@link ImportOptions#customFieldColumns()}: a column
+     * that is neither mapped nor named there was set to "ignore" and is not read at all,
+     * which is the whole premise — a sheet from another platform carries columns AssetIQ
+     * has no field for, and the user decides per column whether that is worth keeping.
+     * The legacy positional asset import instead sets
+     * {@link ImportOptions#captureUnmappedColumns()} and takes everything past the fixed
+     * layout, as it always has.</p>
      */
-    private List<UnmappedColumn> resolveUnmappedColumns(ParsedSheet sheet,
-                                                        Map<String, Integer> resolved,
-                                                        ImportEntityHandler handler,
-                                                        ImportOptions options) {
-        if (!options.captureUnmappedColumns() || !handler.unmappedColumnsBecomeCustomFields()) {
+    private List<UnmappedColumn> resolveCustomFieldColumns(ParsedSheet sheet,
+                                                           Map<String, Integer> resolved,
+                                                           ImportEntityHandler handler,
+                                                           ImportOptions options) {
+        boolean takeEverything = options.captureUnmappedColumns();
+        Set<Integer> chosen = options.customFieldColumns();
+        if (!handler.unmappedColumnsBecomeCustomFields() || (!takeEverything && chosen.isEmpty())) {
             return List.of();
         }
-        java.util.Set<Integer> mapped = new java.util.HashSet<>(resolved.values());
-        List<UnmappedColumn> columns = new java.util.ArrayList<>();
-        java.util.Set<String> seen = new java.util.HashSet<>();
+        if (chosen.size() > ImportOptions.MAX_CUSTOM_FIELD_COLUMNS) {
+            throw new IllegalArgumentException(
+                    "This import would create " + chosen.size() + " custom fields, past the limit of "
+                            + ImportOptions.MAX_CUSTOM_FIELD_COLUMNS
+                            + ". Keep the columns that matter and set the rest to ignore.");
+        }
+
+        Set<Integer> mapped = new HashSet<>(resolved.values());
+        List<UnmappedColumn> columns = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
         for (int i = 0; i < sheet.columnCount(); i++) {
             if (mapped.contains(i)) continue;
+            if (!takeEverything && !chosen.contains(i)) continue;
             String header = sheet.headers().get(i);
             if (header == null || header.isBlank()) continue;
             if (header.length() > MAX_CUSTOM_FIELD_HEADER_LENGTH) {

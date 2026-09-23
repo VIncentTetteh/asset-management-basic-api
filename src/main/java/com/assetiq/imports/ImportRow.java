@@ -8,6 +8,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -17,6 +19,19 @@ import java.util.stream.Collectors;
  * reason a customer's arbitrary column order can be imported at all. Every accessor
  * that can fail throws {@link FieldValidationException} naming the field, which the
  * engine turns into an error naming the user's own header text.</p>
+ *
+ * <h2>Which cells can fail a row, and which cannot</h2>
+ * <p>A required field left blank, a number that is not a number and a date nobody can
+ * parse are still row errors: those are the user telling us something is missing or
+ * malformed, and silently writing a null would be worse than a clear refusal.</p>
+ *
+ * <p><b>Unrecognised enum vocabulary is not.</b> A sheet that says {@code Laptop} where
+ * AssetIQ says {@code HARDWARE} is not malformed, it is a different vocabulary, and the
+ * answer is a translation the user can make in the wizard — not a rejected file. So an
+ * enum cell is resolved through, in order: the value mappings the user chose, the
+ * constant itself, {@link ImportEnumAliases}. If none of those land, the field is left
+ * blank and a note says so. The row still imports. The only exception is a required enum
+ * field, where blank is not a legal answer and the row does fail.</p>
  */
 public final class ImportRow {
 
@@ -42,15 +57,32 @@ public final class ImportRow {
     private final Map<String, String> values;
     private final Map<String, String> headers;
     private final Map<String, String> unmapped;
+    private final ImportValueMappings valueMappings;
+    private final Set<String> requiredFields;
+    private final ImportRunReport report;
 
     public ImportRow(int rowNumber,
                      Map<String, String> values,
                      Map<String, String> headers,
                      Map<String, String> unmapped) {
+        this(rowNumber, values, headers, unmapped,
+                ImportValueMappings.empty(), Set.of(), new ImportRunReport());
+    }
+
+    public ImportRow(int rowNumber,
+                     Map<String, String> values,
+                     Map<String, String> headers,
+                     Map<String, String> unmapped,
+                     ImportValueMappings valueMappings,
+                     Set<String> requiredFields,
+                     ImportRunReport report) {
         this.rowNumber = rowNumber;
         this.values = values;
         this.headers = headers;
         this.unmapped = unmapped == null ? Map.of() : new LinkedHashMap<>(unmapped);
+        this.valueMappings = valueMappings == null ? ImportValueMappings.empty() : valueMappings;
+        this.requiredFields = requiredFields == null ? Set.of() : Set.copyOf(requiredFields);
+        this.report = report == null ? new ImportRunReport() : report;
     }
 
     /** 1-based row number as the spreadsheet shows it (the header row is row 1). */
@@ -137,17 +169,70 @@ public final class ImportRow {
                 "expected yes or no but found '" + raw + "'");
     }
 
+    /**
+     * An enum cell, read leniently. See the class comment for why.
+     *
+     * @return the constant, or null when the cell is blank, was mapped to
+     *         {@link ImportValueMappings#IGNORE}, or means nothing we recognise
+     * @throws FieldValidationException only when the field is required and the answer
+     *                                  came out blank
+     */
     public <E extends Enum<E>> E enumValue(Class<E> type, String field) {
         String raw = string(field);
-        if (raw == null) return null;
-        String candidate = raw.trim().toUpperCase(Locale.ROOT).replaceAll("[\\s-]+", "_");
-        try {
-            return Enum.valueOf(type, candidate);
-        } catch (IllegalArgumentException e) {
-            throw new FieldValidationException(field,
-                    "'" + raw + "' is not a valid value. Allowed: "
-                            + Arrays.stream(type.getEnumConstants()).map(Enum::name)
-                            .collect(Collectors.joining(", ")));
+        if (raw == null) {
+            return requireNonBlankEnum(type, field, null, null);
         }
+
+        Optional<String> chosen = valueMappings.target(field, raw);
+        if (chosen.isPresent()) {
+            String target = chosen.get();
+            if (ImportValueMappings.IGNORE.equalsIgnoreCase(target)) {
+                note(field, raw, "'" + raw + "' was set to be ignored, so this field was left blank.");
+                return requireNonBlankEnum(type, field, raw, "you chose to ignore it");
+            }
+            try {
+                return Enum.valueOf(type, target.trim().toUpperCase(Locale.ROOT).replaceAll("[\\s-]+", "_"));
+            } catch (IllegalArgumentException badTarget) {
+                // The client sent a target this enum does not have. That is a client bug,
+                // not the user's spreadsheet, and it must not cost them the row.
+                note(field, raw, "'" + raw + "' was mapped to '" + target
+                        + "', which is not a value this field accepts, so it was left blank.");
+                return requireNonBlankEnum(type, field, raw, "'" + target + "' is not an accepted value");
+            }
+        }
+
+        Optional<E> resolved = ImportEnumAliases.resolve(type, raw);
+        if (resolved.isPresent()) {
+            return resolved.get();
+        }
+
+        note(field, raw, "'" + raw + "' is not a value this field recognises, so it was left blank."
+                + " Map it to one of " + allowed(type) + " to keep it.");
+        return requireNonBlankEnum(type, field, raw, "'" + raw + "' is not one of " + allowed(type));
+    }
+
+    /**
+     * Blank is fine for an optional enum and fatal for a required one. Splitting it out
+     * keeps the four exits above from each repeating the rule.
+     */
+    private <E extends Enum<E>> E requireNonBlankEnum(Class<E> type, String field, String raw, String why) {
+        if (!requiredFields.contains(field)) {
+            return null;
+        }
+        if (raw == null) {
+            throw new FieldValidationException(field,
+                    "is required but was blank. Allowed: " + allowed(type));
+        }
+        throw new FieldValidationException(field,
+                "is required, and " + why + ". Allowed: " + allowed(type));
+    }
+
+    /** Records a leniency against this row, for the result's notes list. */
+    private void note(String field, String value, String message) {
+        report.note(field, headerFor(field), value, message);
+    }
+
+    private static <E extends Enum<E>> String allowed(Class<E> type) {
+        return Arrays.stream(type.getEnumConstants()).map(Enum::name).collect(Collectors.joining(", "));
     }
 }

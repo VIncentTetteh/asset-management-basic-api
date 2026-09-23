@@ -23,6 +23,10 @@ import java.util.Locale;
  * @param example    a realistic value for the template's example row
  * @param notes      format notes: date format, units, resolution rules
  * @param aliases    header names other platforms use for this field, for auto-matching
+ * @param enumType   the enum's simple name when {@code dataType == ENUM}, null otherwise.
+ *                   The wizard needs it to look up {@link ImportEnumAliases}, which is
+ *                   keyed per enum because {@code ACTIVE} means one thing on a supplier
+ *                   and another on a licence
  */
 public record ImportFieldDescriptor(
         String name,
@@ -32,7 +36,8 @@ public record ImportFieldDescriptor(
         List<String> enumValues,
         String example,
         String notes,
-        List<String> aliases
+        List<String> aliases,
+        String enumType
 ) {
 
     public ImportFieldDescriptor {
@@ -50,7 +55,8 @@ public record ImportFieldDescriptor(
 
     public static <E extends Enum<E>> Builder enumField(String name, String label, Class<E> type) {
         return new Builder(name, label, ImportDataType.ENUM)
-                .values(java.util.Arrays.stream(type.getEnumConstants()).map(Enum::name).toList());
+                .values(java.util.Arrays.stream(type.getEnumConstants()).map(Enum::name).toList())
+                .enumType(type.getSimpleName());
     }
 
     /**
@@ -82,6 +88,7 @@ public record ImportFieldDescriptor(
         private String example = "";
         private String notes = "";
         private List<String> aliases = List.of();
+        private String enumType;
 
         private Builder(String name, String label, ImportDataType dataType) {
             this.name = name;
@@ -94,9 +101,11 @@ public record ImportFieldDescriptor(
         public Builder example(String value) { this.example = value; return this; }
         public Builder notes(String value) { this.notes = value; return this; }
         public Builder aliases(String... values) { this.aliases = List.of(values); return this; }
+        public Builder enumType(String value) { this.enumType = value; return this; }
 
         public ImportFieldDescriptor build() {
-            return new ImportFieldDescriptor(name, label, required, dataType, enumValues, example, notes, aliases);
+            return new ImportFieldDescriptor(name, label, required, dataType, enumValues,
+                    example, notes, aliases, enumType);
         }
     }
 }

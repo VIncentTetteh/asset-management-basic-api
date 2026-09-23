@@ -2,18 +2,23 @@ package com.assetiq.imports;
 
 import com.assetiq.dto.AssetImportResultDto;
 import com.assetiq.dto.ImportAnalysisDto;
+import com.assetiq.dto.ImportColumnPlanDto;
 import com.assetiq.dto.ImportDetectedColumnDto;
+import com.assetiq.dto.ImportEnumFieldDto;
 import com.assetiq.dto.ImportMappingPresetDto;
 import com.assetiq.dto.ImportOptionsDto;
 import com.assetiq.dto.ImportPreviewDto;
 import com.assetiq.dto.ImportRunRequestDto;
+import com.assetiq.dto.ImportValueSuggestionDto;
 import com.assetiq.dto.ImportTypeDto;
 import com.assetiq.models.ImportMappingPreset;
 import com.assetiq.models.ImportStagedUpload;
 import com.assetiq.models.Organisation;
 import com.assetiq.repositories.ImportMappingPresetRepository;
 import com.assetiq.repositories.ImportStagedUploadRepository;
+import com.assetiq.models.CustomFieldDefinition;
 import com.assetiq.repositories.OrganisationRepository;
+import com.assetiq.services.FeatureFlagService;
 import com.assetiq.security.SpreadsheetUploadPolicy;
 import com.assetiq.services.TenantAwareService;
 import com.assetiq.storage.FileStorageService;
@@ -54,8 +59,25 @@ public class ImportWizardService extends TenantAwareService {
      *  being a second full import run on the request thread. */
     public static final int PREVIEW_ROW_LIMIT = 200;
 
+    /** Flag that governs whether a spreadsheet column may become a custom field. */
+    public static final String CUSTOM_FIELDS_FLAG = "commercial.governed-custom-fields";
+
     /** Sample values shown per detected column in the wizard. */
     private static final int SAMPLE_VALUES = 3;
+
+    /**
+     * Rows scanned for the distinct values of an enum column.
+     *
+     * <p>A dropdown per distinct value is only useful while a human can work through it.
+     * Scanning the whole file would also make analysing a 50000-row upload a second full
+     * pass on the request thread for no extra benefit: a vocabulary that does not appear
+     * in the first two thousand rows is rare enough that the importer's own fallback —
+     * leave it blank, write a note — is the right answer for it.</p>
+     */
+    private static final int VALUE_SCAN_ROWS = 2000;
+
+    /** Distinct values offered per enum field. Past this the column is free text. */
+    private static final int MAX_DISTINCT_VALUES = 50;
 
     private final ImportDescriptorRegistry registry;
     private final ImportTemplateGenerator templateGenerator;
@@ -65,6 +87,7 @@ public class ImportWizardService extends TenantAwareService {
     private final ImportStagedUploadRepository stagedUploadRepository;
     private final ImportMappingPresetRepository presetRepository;
     private final FileStorageService storageService;
+    private final FeatureFlagService featureFlagService;
     private final ObjectMapper objectMapper;
 
     @Value("${app.storage.s3.import-prefix:imports}")
@@ -83,6 +106,7 @@ public class ImportWizardService extends TenantAwareService {
                                ImportStagedUploadRepository stagedUploadRepository,
                                ImportMappingPresetRepository presetRepository,
                                FileStorageService storageService,
+                               FeatureFlagService featureFlagService,
                                ObjectMapper objectMapper) {
         super(organisationRepository);
         this.registry = registry;
@@ -93,6 +117,7 @@ public class ImportWizardService extends TenantAwareService {
         this.stagedUploadRepository = stagedUploadRepository;
         this.presetRepository = presetRepository;
         this.storageService = storageService;
+        this.featureFlagService = featureFlagService;
         this.objectMapper = objectMapper;
     }
 
@@ -185,6 +210,7 @@ public class ImportWizardService extends TenantAwareService {
         log.info("Import analyse: org={} type={} upload={} rows={} columns={} suggested={}",
                 org.getId(), type.name(), uploadId, sheet.rowCount(), sheet.columnCount(), suggested.size());
 
+        boolean customFieldsAvailable = customFieldsAvailable(type, org);
         return new ImportAnalysisDto(
                 uploadId,
                 detected,
@@ -193,7 +219,140 @@ public class ImportWizardService extends TenantAwareService {
                 columnMatcher.unmappedColumns(sheet.headers(), suggested),
                 columnMatcher.missingRequiredFields(fields, suggested),
                 sheet.truncated(),
-                expiresAt.toString());
+                expiresAt.toString(),
+                enumFields(fields, suggested, sheet),
+                columnPlan(fields, suggested, sheet, customFieldsAvailable),
+                customFieldsAvailable,
+                customFieldsAvailable ? null : customFieldsUnavailableReason(type),
+                true);
+    }
+
+    // ── Value mappings, column plan, custom field availability ────────────────
+
+    /**
+     * Per enum-typed mapped field: the allowed constants, every distinct raw value the
+     * file carries in that column, and the server's suggestion for each.
+     *
+     * <p>This is the whole answer to "Asset type 'Laptop' is not a valid value". The
+     * wizard renders a dropdown per value with the suggestion pre-selected; the user
+     * confirms, corrects, or marks a value to be ignored; and what they settle on comes
+     * back as {@code valueMappings}. Nothing here can fail an import — a value the user
+     * never answered for simply leaves the field blank and earns a note.</p>
+     */
+    private List<ImportEnumFieldDto> enumFields(List<ImportFieldDescriptor> fields,
+                                                Map<String, Integer> suggested,
+                                                ParsedSheet sheet) {
+        List<ImportEnumFieldDto> result = new ArrayList<>();
+        for (ImportFieldDescriptor field : fields) {
+            if (field.dataType() != ImportDataType.ENUM) continue;
+            Integer column = suggested.get(field.name());
+            if (column == null) {
+                // Not mapped, so there are no values to translate yet. The allowed list
+                // still goes out: the user may map a column in the wizard and the UI
+                // needs the constants without another round trip.
+                result.add(new ImportEnumFieldDto(field.name(), field.label(), null, null,
+                        field.enumValues(), List.of()));
+                continue;
+            }
+            result.add(new ImportEnumFieldDto(field.name(), field.label(), column,
+                    headerAt(sheet, column), field.enumValues(),
+                    suggestionsFor(field, sheet, column)));
+        }
+        return result;
+    }
+
+    private List<ImportValueSuggestionDto> suggestionsFor(ImportFieldDescriptor field,
+                                                          ParsedSheet sheet,
+                                                          int column) {
+        Map<String, int[]> counts = new LinkedHashMap<>();
+        Map<String, String> firstSpelling = new LinkedHashMap<>();
+        int scanned = Math.min(sheet.rowCount(), VALUE_SCAN_ROWS);
+        for (int i = 0; i < scanned; i++) {
+            List<String> row = sheet.rows().get(i);
+            if (column >= row.size()) continue;
+            String raw = row.get(column);
+            if (raw == null || raw.isBlank()) continue;
+            String key = ImportEnumAliases.normalise(raw);
+            if (key.isEmpty()) continue;
+            firstSpelling.putIfAbsent(key, raw.trim());
+            counts.computeIfAbsent(key, k -> new int[1])[0]++;
+        }
+
+        List<ImportValueSuggestionDto> suggestions = new ArrayList<>();
+        for (Map.Entry<String, int[]> entry : counts.entrySet()) {
+            if (suggestions.size() >= MAX_DISTINCT_VALUES) break;
+            String raw = firstSpelling.get(entry.getKey());
+            String suggestion = ImportEnumAliases
+                    .suggest(field.enumType(), field.enumValues(), raw).orElse(null);
+            boolean exact = suggestion != null
+                    && ImportEnumAliases.normalise(suggestion).equals(entry.getKey());
+            suggestions.add(new ImportValueSuggestionDto(raw, suggestion, exact, entry.getValue()[0]));
+        }
+        // The values a human most needs to answer first are the ones that cost the most
+        // rows if they go unanswered.
+        suggestions.sort(java.util.Comparator.comparingInt(ImportValueSuggestionDto::rowCount).reversed());
+        return List.copyOf(suggestions);
+    }
+
+    /** What the wizard proposes for each column, including the ones no field claimed. */
+    private List<ImportColumnPlanDto> columnPlan(List<ImportFieldDescriptor> fields,
+                                                 Map<String, Integer> suggested,
+                                                 ParsedSheet sheet,
+                                                 boolean customFieldsAvailable) {
+        Map<Integer, String> fieldByColumn = new LinkedHashMap<>();
+        suggested.forEach((field, column) -> { if (column != null) fieldByColumn.put(column, field); });
+
+        List<ImportColumnPlanDto> plan = new ArrayList<>();
+        for (int i = 0; i < sheet.columnCount(); i++) {
+            String header = sheet.headers().get(i);
+            String field = fieldByColumn.get(i);
+            if (field != null) {
+                plan.add(new ImportColumnPlanDto(i, header, ImportColumnPlanDto.FIELD, field,
+                        null, null, false));
+                continue;
+            }
+            if (header == null || header.isBlank()) {
+                plan.add(new ImportColumnPlanDto(i, header, ImportColumnPlanDto.IGNORE, null,
+                        null, null, false));
+                continue;
+            }
+            String name = CustomFieldDefinition.sanitiseName(header);
+            List<String> samples = sheet.sampleValues(i, SAMPLE_VALUES);
+            String inferred = CustomFieldDefinitions.infer(samples.isEmpty() ? null : samples.get(0));
+            boolean canBeCustom = customFieldsAvailable && !name.isEmpty();
+            // Proposed, not decided: a column nothing claimed is likelier to be worth
+            // keeping than not, and the user can still set it to ignore.
+            plan.add(new ImportColumnPlanDto(i, header,
+                    canBeCustom ? ImportColumnPlanDto.CUSTOM_FIELD : ImportColumnPlanDto.IGNORE,
+                    null, canBeCustom ? name : null, inferred, canBeCustom));
+        }
+        return plan;
+    }
+
+    /**
+     * Whether "create as a custom field" may be offered for this type and tenant.
+     *
+     * <p>Two gates, and the UI needs to know about both before it draws the dropdown.
+     * Only assets have storage for a custom field at all, and custom fields are behind
+     * {@code commercial.governed-custom-fields} — a flag that is off by default and
+     * granted per organisation. Offering an option that will be refused is worse than
+     * not offering it.</p>
+     */
+    private boolean customFieldsAvailable(ImportEntityType type, Organisation org) {
+        if (!registry.handler(type).unmappedColumnsBecomeCustomFields()) return false;
+        return featureFlagService.isEnabledFor(CUSTOM_FIELDS_FLAG, org.getId());
+    }
+
+    private String customFieldsUnavailableReason(ImportEntityType type) {
+        if (!registry.handler(type).unmappedColumnsBecomeCustomFields()) {
+            return type.label() + " do not support custom fields, so extra columns can only be ignored.";
+        }
+        return "Custom fields are not enabled for your organisation, so extra columns can only be"
+                + " ignored. Ask your administrator to enable custom fields.";
+    }
+
+    private static String headerAt(ParsedSheet sheet, int column) {
+        return column >= 0 && column < sheet.headers().size() ? sheet.headers().get(column) : null;
     }
 
     // ── Preview ───────────────────────────────────────────────────────────────
@@ -206,8 +365,11 @@ public class ImportWizardService extends TenantAwareService {
 
         // A preview never writes, whatever the caller asked for, and always reports
         // every bad row in the window: stopping at the first one would defeat the point
-        // of previewing.
-        ImportOptions options = toOptions(request.getOptions())
+        // of previewing. Everything else -- the mapping, the value translations, the
+        // columns kept as custom fields, whether references may be created -- is taken
+        // verbatim from the request, because a preview that ran different rules from the
+        // commit is the bug this whole path exists to remove.
+        ImportOptions options = toOptions(type, org, request.getOptions())
                 .withDryRun(true)
                 .withSkipInvalidRows(true);
 
@@ -220,8 +382,13 @@ public class ImportWizardService extends TenantAwareService {
         return new ImportPreviewDto(
                 new ImportPreviewDto.Totals(valid, invalid, total),
                 result.getErrors(),
+                result.getNotes(),
                 total,
-                staged.getRowCount());
+                staged.getRowCount(),
+                result.getOutcome(),
+                result.getFatalError(),
+                result.getCreatedReferences(),
+                result.getCreatedCustomFields());
     }
 
     // ── Staged upload access, for the commit path ─────────────────────────────
@@ -331,8 +498,30 @@ public class ImportWizardService extends TenantAwareService {
 
     // ── Options ───────────────────────────────────────────────────────────────
 
-    public ImportOptions toOptions(ImportOptionsDto dto) {
-        if (dto == null) return ImportOptions.defaults();
+    /**
+     * Translates the wire options into the run's options, applying the wizard's
+     * defaults.
+     *
+     * <p>Two defaults differ from the strictest reading, deliberately.
+     * {@code createMissingReferences} defaults <b>on</b>: the wizard has already shown
+     * the user, in the preview, exactly which records would be created, so defaulting it
+     * off only produced the failure this work exists to remove — a row refused for
+     * naming a category the tenant does not have, with the fix hidden behind an option
+     * the wizard never offered. Sending {@code false} explicitly still gets the strict
+     * behaviour. {@code skipInvalidRows} defaults on for the same reason it always has:
+     * a handful of bad rows out of 3000 must not stop the other 2990.</p>
+     *
+     * <p>Custom field columns are validated here rather than at the row: a tenant who
+     * cannot use custom fields is told so once, on the request, instead of three thousand
+     * times on three thousand rows — and preview and commit refuse it identically.</p>
+     */
+    @Transactional(readOnly = true)
+    public ImportOptions toOptions(ImportEntityType type, ImportOptionsDto dto) {
+        return toOptions(type, requireTenantOrg(), dto);
+    }
+
+    public ImportOptions toOptions(ImportEntityType type, Organisation org, ImportOptionsDto dto) {
+        if (dto == null) return ImportOptions.wizardDefaults();
         ImportOptions.DuplicateStrategy strategy = ImportOptions.DuplicateStrategy.SKIP;
         if (dto.getDuplicateStrategy() != null && !dto.getDuplicateStrategy().isBlank()) {
             try {
@@ -344,9 +533,34 @@ public class ImportWizardService extends TenantAwareService {
             }
         }
         return new ImportOptions(strategy,
-                Boolean.TRUE.equals(dto.getCreateMissingReferences()),
+                dto.getCreateMissingReferences() == null || dto.getCreateMissingReferences(),
                 Boolean.TRUE.equals(dto.getDryRun()),
-                dto.getSkipInvalidRows() == null || dto.getSkipInvalidRows());
+                dto.getSkipInvalidRows() == null || dto.getSkipInvalidRows(),
+                false,
+                customFieldColumns(type, org, dto),
+                dto.getValueMappings());
+    }
+
+    private java.util.Set<Integer> customFieldColumns(ImportEntityType type, Organisation org,
+                                                      ImportOptionsDto dto) {
+        List<Integer> requested = dto.getCustomFieldColumns();
+        if (requested == null || requested.isEmpty()) return java.util.Set.of();
+        if (!customFieldsAvailable(type, org)) {
+            throw new IllegalArgumentException(customFieldsUnavailableReason(type));
+        }
+        if (requested.size() > ImportOptions.MAX_CUSTOM_FIELD_COLUMNS) {
+            throw new IllegalArgumentException("At most " + ImportOptions.MAX_CUSTOM_FIELD_COLUMNS
+                    + " columns may be kept as custom fields in one import; "
+                    + requested.size() + " were selected.");
+        }
+        java.util.Set<Integer> columns = new java.util.LinkedHashSet<>();
+        for (Integer column : requested) {
+            if (column == null || column < 0) {
+                throw new IllegalArgumentException("customFieldColumns must be 0-based column indices");
+            }
+            columns.add(column);
+        }
+        return columns;
     }
 
     private String writeJson(Object value) {

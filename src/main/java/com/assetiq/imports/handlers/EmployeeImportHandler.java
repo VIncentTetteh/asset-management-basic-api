@@ -12,6 +12,7 @@ import com.assetiq.imports.ImportFieldDescriptor;
 import com.assetiq.imports.ImportOptions;
 import com.assetiq.imports.ImportReferenceResolver;
 import com.assetiq.imports.ImportRow;
+import com.assetiq.imports.ImportRunReport;
 import com.assetiq.models.Employee;
 import com.assetiq.models.Organisation;
 import com.assetiq.repositories.EmployeeRepository;
@@ -126,8 +127,8 @@ public class EmployeeImportHandler implements ImportEntityHandler {
     }
 
     @Override
-    public ImportRunner runner(Organisation organisation, ImportOptions options) {
-        return new Runner(organisation, options);
+    public ImportRunner runner(Organisation organisation, ImportOptions options, ImportRunReport report) {
+        return new Runner(organisation, options, report);
     }
 
     private final class Runner extends AbstractImportRunner<EmployeeDto> {
@@ -136,9 +137,9 @@ public class EmployeeImportHandler implements ImportEntityHandler {
         private final Map<String, UUID> byNumber = new LinkedHashMap<>();
         private final Map<String, UUID> byEmail = new LinkedHashMap<>();
 
-        private Runner(Organisation organisation, ImportOptions options) {
+        private Runner(Organisation organisation, ImportOptions options, ImportRunReport report) {
             super(options);
-            this.refs = referenceResolver.open(organisation, options);
+            this.refs = referenceResolver.open(organisation, options, report);
             for (Employee employee : employeeRepository.findByOrganisationAndDeletedAtIsNull(organisation)) {
                 if (employee.getEmployeeNumber() != null && !employee.getEmployeeNumber().isBlank()) {
                     byNumber.putIfAbsent(key(employee.getEmployeeNumber()), employee.getId());

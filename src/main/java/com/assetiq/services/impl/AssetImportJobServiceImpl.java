@@ -309,6 +309,11 @@ public class AssetImportJobServiceImpl extends com.assetiq.services.TenantAwareS
             result.setImported(job.getImported());
             result.setUpdated(job.getUpdatedRows());
             result.setSkipped(job.getSkipped());
+            result.setFailed(job.getFailedRows());
+            result.setDuplicatesSkipped(Math.max(0, job.getSkipped() - job.getFailedRows()));
+            result.setStoppedReason(job.getStoppedReason());
+            result.setStoppedEarly(job.getStoppedReason() != null && !job.getStoppedReason().isBlank());
+            result.setFatalError(job.getErrorSummary());
             result.getErrors().clear();
 
             if (job.getErrorsJson() != null && !job.getErrorsJson().isBlank()) {
@@ -319,9 +324,36 @@ public class AssetImportJobServiceImpl extends com.assetiq.services.TenantAwareS
                     );
                     result.getErrors().addAll(errors);
                 } catch (Exception e) {
-                    result.getErrors().add(new AssetImportResultDto.RowError(0, "Failed to parse job errors"));
+                    // A result that cannot be read back is a whole-result problem, not a
+                    // row that failed; putting it in the error list would make the list
+                    // longer than the failure count.
+                    result.setFatalError("Failed to parse job errors");
                 }
             }
+            if (job.getNotesJson() != null && !job.getNotesJson().isBlank()) {
+                try {
+                    result.getNotes().addAll(objectMapper.readValue(job.getNotesJson(),
+                            new TypeReference<List<AssetImportResultDto.RowNote>>() {}));
+                } catch (Exception ignored) {
+                    // Notes are informational; losing them must not cost the caller the
+                    // counts, which are the part they act on.
+                }
+            }
+            if (job.getCreatedJson() != null && !job.getCreatedJson().isBlank()) {
+                try {
+                    AssetImportJobProcessor.CreatedSnapshot created = objectMapper.readValue(
+                            job.getCreatedJson(), AssetImportJobProcessor.CreatedSnapshot.class);
+                    result.setCreatedReferences(created.references());
+                    result.setCreatedCustomFields(created.customFields());
+                    result.setWouldCreateReferences(created.wouldCreate());
+                } catch (Exception ignored) {
+                    // Same reasoning as the notes.
+                }
+            }
+            // Recomputed rather than trusted: a row written by an older build has no
+            // stored outcome, and a stored one must never disagree with the counts
+            // beside it.
+            result.settleOutcome();
             dto.setResult(result);
         } else {
             dto.setResult(null);

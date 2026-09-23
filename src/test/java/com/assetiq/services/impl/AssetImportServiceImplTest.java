@@ -4,6 +4,7 @@ import com.assetiq.dto.AssetDto;
 import com.assetiq.dto.AssetImportResultDto;
 import com.assetiq.imports.ImportBeanValidator;
 import com.assetiq.imports.ImportEngine;
+import com.assetiq.imports.CustomFieldDefinitions;
 import com.assetiq.imports.ImportReferenceResolver;
 import com.assetiq.imports.SpreadsheetReader;
 import com.assetiq.imports.handlers.AssetImportHandler;
@@ -65,6 +66,7 @@ class AssetImportServiceImplTest {
     @Mock AssetService assetService;
     @Mock AssetRepository assetRepository;
     @Mock AssetCustomFieldRepository customFieldRepository;
+    @Mock CustomFieldDefinitionRepository customFieldDefinitionRepository;
     @Mock CategoryRepository categoryRepository;
     @Mock LocationRepository locationRepository;
     @Mock SupplierRepository supplierRepository;
@@ -95,7 +97,8 @@ class AssetImportServiceImplTest {
                 categoryService, locationService, supplierService, departmentService);
         ImportBeanValidator beanValidator = new ImportBeanValidator(VALIDATOR_FACTORY.getValidator());
         AssetImportHandler handler = new AssetImportHandler(assetService, assetRepository,
-                customFieldRepository, referenceResolver, usageLimitService, featureFlagService,
+                customFieldRepository, new CustomFieldDefinitions(customFieldDefinitionRepository),
+                referenceResolver, usageLimitService, featureFlagService,
                 transactionTemplate, beanValidator);
 
         service = new AssetImportServiceImpl(organisationRepository, handler,
@@ -158,16 +161,24 @@ class AssetImportServiceImplTest {
         verify(assetService, never()).create(any());
     }
 
+    /**
+     * The flag still cannot be bypassed by a spreadsheet — nothing is written — but a
+     * tenant without it no longer loses the row over an extra column. The column is
+     * dropped and the result says which one and why.
+     */
     @Test
-    void extraColumnsAreRejectedWhenCustomFieldsAreDisabled() throws Exception {
+    void extraColumnsAreDroppedWithANoteWhenCustomFieldsAreDisabled() throws Exception {
         when(featureFlagService.isEnabledFor(eq(AssetImportHandler.CUSTOM_FIELDS_FLAG), any())).thenReturn(false);
 
         AssetImportResultDto result = service.importFromExcelBytes("a.xlsx", null,
                 workbook("Colour", row -> row.createCell(STANDARD_COLUMNS).setCellValue("Blue")), false);
 
-        assertThat(result.getImported()).isZero();
-        assertThat(result.getErrors()).singleElement()
-                .satisfies(e -> assertThat(e.getMessage()).contains("not enabled"));
+        assertThat(result.getErrors()).isEmpty();
+        assertThat(result.getImported()).isEqualTo(1);
+        assertThat(result.getNotes()).singleElement().satisfies(note -> {
+            assertThat(note.getMessage()).contains("not enabled").contains("Colour");
+            assertThat(note.getColumn()).isEqualTo("Colour");
+        });
         verify(customFieldRepository, never()).save(any());
     }
 

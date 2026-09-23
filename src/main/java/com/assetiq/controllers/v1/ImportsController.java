@@ -116,7 +116,7 @@ public class ImportsController {
                 entityType,
                 request.getUploadId(),
                 request.getMapping(),
-                wizardService.toOptions(request.getOptions()),
+                wizardService.toOptions(entityType, request.getOptions()),
                 idempotencyKey);
         return ResponseEntity.accepted().body(job);
     }

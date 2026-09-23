@@ -17,6 +17,7 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -73,16 +74,39 @@ public class AssetImportJobProcessor {
             job.setImported(result.getImported());
             job.setUpdatedRows(result.getUpdated());
             job.setSkipped(result.getSkipped());
+            job.setFailedRows(result.getFailed());
+            job.setOutcome(result.getOutcome() == null ? null : result.getOutcome().name());
+            job.setStoppedReason(result.getStoppedReason());
             job.setErrorsJson(objectMapper.writeValueAsString(result.getErrors()));
+            job.setNotesJson(objectMapper.writeValueAsString(result.getNotes()));
+            job.setCreatedJson(objectMapper.writeValueAsString(new CreatedSnapshot(
+                    result.getCreatedReferences(), result.getCreatedCustomFields(),
+                    result.isWouldCreateReferences())));
             job.setStatus(ImportJobStatus.COMPLETED);
             job.setErrorSummary(null);
             jobRepository.save(job);
         } catch (Exception e) {
             job.setStatus(ImportJobStatus.FAILED);
+            job.setOutcome(AssetImportResultDto.Outcome.FAILED.name());
             job.setErrorSummary(e.getMessage());
             jobRepository.save(job);
         } finally {
             TenantContext.clear();
+        }
+    }
+
+    /**
+     * What the run created, stored as one blob so polling the job returns the same
+     * receipt the run produced. A tenant whose import quietly added four departments is
+     * entitled to see which four, a week later, not only in the response they may have
+     * closed.
+     */
+    record CreatedSnapshot(Map<String, List<String>> references,
+                           List<String> customFields,
+                           boolean wouldCreate) {
+        CreatedSnapshot {
+            references = references == null ? Map.of() : references;
+            customFields = customFields == null ? List.of() : customFields;
         }
     }
 

@@ -24,13 +24,17 @@ import com.assetiq.services.CategoryService;
 import com.assetiq.services.DepartmentService;
 import com.assetiq.services.LocationService;
 import com.assetiq.services.SupplierService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 
@@ -45,10 +49,31 @@ import java.util.function.Function;
  *
  * <p>The handle is created per run and never shared: every table is built from a
  * repository call scoped to the tenant's {@link Organisation}, so a name that exists in
- * another organisation simply is not there.</p>
+ * another organisation simply is not there, and anything created is created against that
+ * same organisation.</p>
+ *
+ * <h2>When a name is not found</h2>
+ * <p>Three different answers, and the difference matters:</p>
+ * <ul>
+ *   <li><b>A category, location, supplier or department</b>, with reference creation on
+ *       (the wizard's default): create it, remember it by name for the rest of the file,
+ *       and report it. Bounded by
+ *       {@link ImportOptions#MAX_CREATED_PER_REFERENCE_TYPE} per type per run — a file
+ *       that would exceed it is not a migration, it is a mistake, and it stops and says
+ *       so rather than manufacturing hundreds of records unnoticed.</li>
+ *   <li><b>The same, with reference creation off</b>: the row fails. The caller asked for
+ *       strictness explicitly and gets it.</li>
+ *   <li><b>A user, employee or asset</b>: never created — an account is an identity and
+ *       inventing one from a spreadsheet cell is not acceptable — but the row is not
+ *       lost over it either. The field is left blank and a note names the cell, so a
+ *       3000-row migration is not held hostage by a leaver still listed as a custodian
+ *       in the old system.</li>
+ * </ul>
  */
 @Component
 public class ImportReferenceResolver {
+
+    private static final Logger log = LoggerFactory.getLogger(ImportReferenceResolver.class);
 
     private final CategoryRepository categoryRepository;
     private final LocationRepository locationRepository;
@@ -87,7 +112,11 @@ public class ImportReferenceResolver {
     }
 
     public Refs open(Organisation organisation, ImportOptions options) {
-        return new Refs(organisation, options);
+        return open(organisation, options, new ImportRunReport());
+    }
+
+    public Refs open(Organisation organisation, ImportOptions options, ImportRunReport report) {
+        return new Refs(organisation, options, report);
     }
 
     /** Per-run, per-tenant lookup tables. Lazily loaded: a sheet with no supplier
@@ -96,11 +125,15 @@ public class ImportReferenceResolver {
 
         private final Organisation organisation;
         private final ImportOptions options;
+        private final ImportRunReport report;
         private final Map<String, Map<String, UUID>> tables = new HashMap<>();
+        /** Names a dry run decided it would create, so the same name is only counted once. */
+        private final Map<String, Set<String>> simulated = new HashMap<>();
 
-        private Refs(Organisation organisation, ImportOptions options) {
+        private Refs(Organisation organisation, ImportOptions options, ImportRunReport report) {
             this.organisation = organisation;
             this.options = options;
+            this.report = report;
         }
 
         public UUID category(String name, String field) {
@@ -198,20 +231,59 @@ public class ImportReferenceResolver {
             UUID id = index.get(key(rawValue));
             if (id != null) return id;
 
-            if (creator != null && options.createMissingReferences() && !options.dryRun()) {
-                UUID created = creator.apply(rawValue.trim());
-                index.put(key(rawValue), created);
-                return created;
-            }
-            if (creator != null && options.createMissingReferences() && options.dryRun()) {
-                // A dry run must not write; the row is still reported as valid because a
-                // real run would create the record.
+            String name = rawValue.trim();
+
+            if (creator == null) {
+                // A user, employee or asset we do not have. Never invented, never fatal:
+                // see the class comment.
+                report.note(field, null, name,
+                        "No " + table + " named '" + name + "' exists in your organisation,"
+                                + " so this row was imported without it. Add the " + table
+                                + " and re-import to fill it in.");
                 return null;
             }
-            throw new FieldValidationException(field,
-                    "names '" + rawValue.trim() + "', which does not exist in your organisation."
-                            + " Create it first, or re-run the import with"
-                            + " 'create missing referenced records' turned on.");
+
+            if (!options.createMissingReferences()) {
+                throw new FieldValidationException(field,
+                        "names '" + name + "', which does not exist in your organisation."
+                                + " Create it first, or re-run the import with"
+                                + " 'create missing referenced records' turned on.");
+            }
+
+            if (alreadyCreated(table) >= ImportOptions.MAX_CREATED_PER_REFERENCE_TYPE) {
+                throw new FieldValidationException(field,
+                        "would be the " + (ImportOptions.MAX_CREATED_PER_REFERENCE_TYPE + 1) + "th new "
+                                + table + " this file creates, past the limit of "
+                                + ImportOptions.MAX_CREATED_PER_REFERENCE_TYPE + "."
+                                + " Check the column is the right one, tidy the values, or create the"
+                                + " remaining " + table + " records first and re-import.");
+            }
+
+            if (options.dryRun()) {
+                // A dry run must not write. The name is still counted and reported so the
+                // preview can say exactly what a real run would create, and so the bound
+                // is enforced identically in both.
+                simulated.computeIfAbsent(table, t -> new HashSet<>()).add(key(name));
+                report.referenceCreated(table, name);
+                return null;
+            }
+
+            UUID created = creator.apply(name);
+            index.put(key(name), created);
+            report.referenceCreated(table, name);
+            log.info("Import: created {} '{}' for org={}", table, name, organisation.getId());
+            return created;
+        }
+
+        /**
+         * How many of this type the run has committed to creating — really created, or
+         * decided it would on a dry run. Counted the same way in both so the preview
+         * cannot promise an import the bound would later refuse.
+         */
+        private int alreadyCreated(String table) {
+            return options.dryRun()
+                    ? simulated.getOrDefault(table, Set.of()).size()
+                    : report.createdCount(table);
         }
 
         private UUID createCategory(String name) {

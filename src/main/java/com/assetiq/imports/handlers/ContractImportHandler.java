@@ -13,6 +13,7 @@ import com.assetiq.imports.ImportFieldDescriptor;
 import com.assetiq.imports.ImportOptions;
 import com.assetiq.imports.ImportReferenceResolver;
 import com.assetiq.imports.ImportRow;
+import com.assetiq.imports.ImportRunReport;
 import com.assetiq.models.Contract;
 import com.assetiq.models.Organisation;
 import com.assetiq.repositories.ContractRepository;
@@ -134,8 +135,8 @@ public class ContractImportHandler implements ImportEntityHandler {
     }
 
     @Override
-    public ImportRunner runner(Organisation organisation, ImportOptions options) {
-        return new Runner(organisation, options);
+    public ImportRunner runner(Organisation organisation, ImportOptions options, ImportRunReport report) {
+        return new Runner(organisation, options, report);
     }
 
     private final class Runner extends AbstractImportRunner<ContractDto> {
@@ -144,9 +145,9 @@ public class ContractImportHandler implements ImportEntityHandler {
         private final Map<String, UUID> byNumber = new LinkedHashMap<>();
         private final Map<String, UUID> byTitle = new LinkedHashMap<>();
 
-        private Runner(Organisation organisation, ImportOptions options) {
+        private Runner(Organisation organisation, ImportOptions options, ImportRunReport report) {
             super(options);
-            this.refs = referenceResolver.open(organisation, options);
+            this.refs = referenceResolver.open(organisation, options, report);
             for (Contract contract : contractRepository.findByOrganisationAndDeletedAtIsNullOrderByEndDateAsc(organisation)) {
                 if (contract.getContractNumber() != null && !contract.getContractNumber().isBlank()) {
                     byNumber.putIfAbsent(key(contract.getContractNumber()), contract.getId());

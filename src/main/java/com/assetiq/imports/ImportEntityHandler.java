@@ -19,10 +19,11 @@ public interface ImportEntityHandler {
     List<ImportFieldDescriptor> fields();
 
     /**
-     * Whether this handler can consume columns the mapping did not claim, as custom
-     * fields. A capability, not a decision: the engine also requires
-     * {@link ImportOptions#captureUnmappedColumns()}, which only the legacy positional
-     * asset import sets. On the mapping-driven path an unmapped column is ignored.
+     * Whether this handler can turn a column into a custom field on the record it
+     * writes. A capability, not a decision: the engine also requires either
+     * {@link ImportOptions#customFieldColumns()} (the wizard, where the user picked the
+     * columns) or {@link ImportOptions#captureUnmappedColumns()} (the legacy positional
+     * asset import). Only assets have anywhere to put one, so only assets say true.
      */
     default boolean unmappedColumnsBecomeCustomFields() {
         return false;
@@ -31,8 +32,11 @@ public interface ImportEntityHandler {
     /**
      * Open a run. The returned {@link ImportRunner} may hold per-run lookup caches;
      * it is used for one file and discarded, never shared between tenants.
+     *
+     * @param report where the run records what it did beyond writing rows — values it
+     *               could not translate, records it created on the caller's behalf
      */
-    ImportRunner runner(Organisation organisation, ImportOptions options);
+    ImportRunner runner(Organisation organisation, ImportOptions options, ImportRunReport report);
 
     /** Applies rows for one import run against one tenant. */
     interface ImportRunner {
