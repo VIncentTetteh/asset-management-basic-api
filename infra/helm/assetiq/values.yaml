@@ -336,6 +336,10 @@ ingress:
   annotations: {}
   # Ordered most-specific first. pathType Prefix throughout.
   extraPaths: []
+  # Route /actuator through the Ingress. Off by default: the health endpoints
+  # are unauthenticated, so this publishes liveness/readiness to the internet.
+  # Prometheus should scrape in-cluster via the ServiceMonitor instead.
+  exposeActuator: false
   tls:
     enabled: false
     secretName: ""

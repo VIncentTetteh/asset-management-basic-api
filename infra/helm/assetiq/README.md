@@ -21,7 +21,7 @@ host.
 | `Service` backend:8080 / web:3000 (`ClusterIP`, port name `http`) | as above |
 | `ConfigMap` backend (non-secret env only) | `backend.enabled` |
 | `ServiceAccount` backend / web | `*.serviceAccount.create` |
-| `Ingress` (one host, `/api` + `/actuator` → backend, `/` → web) | `ingress.enabled` |
+| `Ingress` (one host, `/api` → backend, `/` → web; `/actuator` only with `ingress.exposeActuator`) | `ingress.enabled` |
 | `PodDisruptionBudget` backend / web | `*.pdb.enabled` |
 | `HorizontalPodAutoscaler` backend / web (`autoscaling/v2`) | `*.autoscaling.enabled` |
 | `NetworkPolicy` × 5 (default-deny + explicit allows) | `networkPolicy.enabled` |
@@ -190,23 +190,26 @@ API **must** be same-origin. The chart enforces one host with three ordered
 
 ```
 /api      -> backend Service
-/actuator -> backend Service
-/          -> web Service
+/         -> web Service
 ```
 
-`/actuator` is exposed through the Ingress so Prometheus can scrape it without
-a second route — **restrict it at the edge**. Spring's `prod` profile exposes
-only the health and prometheus endpoints, but an ingress-level allow-list or
-auth annotation on `/actuator` is the safer belt-and-braces. Consider:
+`/actuator` is **not** routed through the Ingress by default. The health
+endpoints are unauthenticated, so publishing `/actuator` puts liveness and
+readiness on the open internet and leaves `/actuator/prometheus` one auth
+misconfiguration away from it. Prometheus should scrape in-cluster via the
+`ServiceMonitor`, which reaches the Service directly and needs no public route.
+
+Set `ingress.exposeActuator: true` only if something outside the cluster
+genuinely needs to probe the application, and restrict it at the edge when you
+do:
 
 ```yaml
 ingress:
+  exposeActuator: true
   annotations:
     nginx.ingress.kubernetes.io/server-snippet: |
-      location /actuator { deny all; }
+      location /actuator { deny all; allow 10.0.0.0/8; }
 ```
-
-…and scrape via the `ServiceMonitor` (in-cluster) instead.
 
 `ingress.enabled` with an empty `ingress.host`, or `ingress.tls.enabled` with
 an empty `ingress.tls.secretName`, fails the render.

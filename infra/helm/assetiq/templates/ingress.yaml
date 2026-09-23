@@ -62,6 +62,15 @@ spec:
                 name: {{ $backendSvc }}
                 port:
                   number: {{ $backendPort }}
+          {{- if $.Values.ingress.exposeActuator }}
+          {{/*
+            Off by default. /actuator/health and its sub-paths are permitAll, so
+            routing /actuator publicly puts liveness and readiness on the open
+            internet, and puts /actuator/prometheus one auth misconfiguration
+            away from it. Scrape metrics in-cluster with the ServiceMonitor
+            instead; turn this on only if something outside the cluster genuinely
+            needs to probe the app directly.
+          */}}
           - path: /actuator
             pathType: Prefix
             backend:
@@ -69,6 +78,7 @@ spec:
                 name: {{ $backendSvc }}
                 port:
                   number: {{ $backendPort }}
+          {{- end }}
           {{- end }}
           {{- if $webEnabled }}
           - path: /
