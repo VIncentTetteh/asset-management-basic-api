@@ -53,11 +53,48 @@ public class PredictiveMaintenanceServiceImpl extends TenantAwareService impleme
     @Override
     public List<PredictiveInsightDto> generateInsights() {
         Organisation org = requireTenantOrg();
-        List<Asset> assets = assetRepo.findAllByOrganisationAndDeletedAtIsNull(org);
-        List<PredictiveInsight> generated = new ArrayList<>();
+        List<PredictiveInsight> generated = analyse(org, Integer.MAX_VALUE);
+        log.info("[AI] Generated {} insights for org {}", generated.size(), org.getId());
+        return generated.stream().map(this::toDto).collect(Collectors.toList());
+    }
 
+    @Override
+    public int refreshInsights(int maxAssets) {
+        Organisation org = requireTenantOrg();
+        return analyse(org, maxAssets).size();
+    }
+
+    /**
+     * Runs every rule over up to {@code maxAssets} of the tenant's assets.
+     *
+     * <p>Maintenance is fetched once for the whole organisation and grouped by
+     * asset rather than queried per asset. The per-asset query was an N+1 that
+     * cost one round trip per asset on every run — tolerable behind a button
+     * pressed by hand, not on a nightly job over every tenant.
+     *
+     * <p>When a tenant holds more assets than the bound, the least recently
+     * updated are analysed first, so a large tenant still makes progress each
+     * night instead of always re-analysing the same head of the list.
+     */
+    private List<PredictiveInsight> analyse(Organisation org, int maxAssets) {
+        List<Asset> assets = assetRepo.findAllByOrganisationAndDeletedAtIsNull(org);
+        if (assets.size() > maxAssets) {
+            assets = assets.stream()
+                    .sorted(Comparator.comparing(Asset::getUpdatedAt,
+                            Comparator.nullsFirst(Comparator.naturalOrder())))
+                    .limit(maxAssets)
+                    .collect(Collectors.toList());
+        }
+
+        Map<UUID, Set<MaintenanceRecord>> maintenanceByAsset =
+                maintenanceRepo.findByOrganisationAndDeletedAtIsNull(org).stream()
+                        .filter(r -> r.getAsset() != null)
+                        .collect(Collectors.groupingBy(r -> r.getAsset().getId(), Collectors.toSet()));
+
+        List<PredictiveInsight> generated = new ArrayList<>();
         for (Asset asset : assets) {
-            Set<MaintenanceRecord> records = maintenanceRepo.findByAssetIdAndDeletedAtIsNull(asset.getId());
+            Set<MaintenanceRecord> records =
+                    maintenanceByAsset.getOrDefault(asset.getId(), Collections.emptySet());
             generated.addAll(checkMaintenanceDue(asset, records, org));
             generated.addAll(checkFailureRisk(asset, records, org));
             generated.addAll(checkWarrantyExpiry(asset, org));
@@ -65,9 +102,7 @@ public class PredictiveMaintenanceServiceImpl extends TenantAwareService impleme
             generated.addAll(checkDepreciationComplete(asset, org));
             generated.addAll(checkUnderutilized(asset, org));
         }
-
-        log.info("[AI] Generated {} insights for org {}", generated.size(), org.getId());
-        return generated.stream().map(this::toDto).collect(Collectors.toList());
+        return generated;
     }
 
     // ── Rule 1: Maintenance Due ───────────────────────────────────────────────

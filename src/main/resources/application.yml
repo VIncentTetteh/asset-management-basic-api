@@ -328,6 +328,19 @@ app:
       # PROCESSING jobs older than this are considered crashed (seconds).
       processing-timeout-seconds: ${APP_IMPORT_RECOVERY_PROCESSING_TIMEOUT:1800}
 
+  # ── Predictive insight refresh ────────────────────────────────────────────
+  # Without this the six maintenance heuristics only run when somebody presses
+  # Regenerate, so the dashboard and the assistant have nothing to show.
+  insights:
+    refresh:
+      # Daily at 02:15 UTC — off-peak, and off the hour so it does not pile onto
+      # the hourly jobs. Set to "-" to disable the job entirely.
+      cron: ${APP_INSIGHTS_REFRESH_CRON:0 15 2 * * *}
+      # Assets analysed per tenant per run; one large tenant must not starve the rest.
+      max-assets-per-organisation: ${APP_INSIGHTS_REFRESH_MAX_ASSETS:2000}
+      # Tenants processed per run, bounding the job's worst case as we grow.
+      max-organisations: ${APP_INSIGHTS_REFRESH_MAX_ORGS:500}
+
   # ── Network discovery (ping sweep / port scan) ───────────────────────────
   discovery:
     # A scan is made by THIS server, from wherever it runs: on the hosted service

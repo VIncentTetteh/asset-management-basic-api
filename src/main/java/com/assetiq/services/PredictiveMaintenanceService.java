@@ -15,6 +15,20 @@ public interface PredictiveMaintenanceService {
      */
     List<PredictiveInsightDto> generateInsights();
 
+    /**
+     * Regenerate insights for the current tenant, examining at most
+     * {@code maxAssets} assets, and return how many insights were written.
+     *
+     * <p>Used by the nightly refresh, which needs a bound (one large tenant must
+     * not starve the rest of the run) and a count rather than a page of DTOs.
+     * Identical analysis to {@link #generateInsights()}.
+     *
+     * @param maxAssets upper bound on assets examined; the oldest-updated assets
+     *                  are examined first so a tenant over the bound still gets
+     *                  its least-recently-analysed assets refreshed
+     */
+    int refreshInsights(int maxAssets);
+
     /** List insights, optionally filtered by type and/or severity */
     List<PredictiveInsightDto> getInsights(String type, String severity, boolean unresolvedOnly);
 
