@@ -59,13 +59,27 @@ info "building and starting postgres, redis, backend (project ${PROJECT})"
 info "waiting for the backend to report healthy (up to 5 minutes)"
 deadline=$(( $(date +%s) + 300 ))
 while :; do
-  state="$("${COMPOSE[@]}" ps --format json backend 2>/dev/null \
-            | python3 -c 'import sys,json
-raw=sys.stdin.read().strip()
-if not raw: print("unknown"); raise SystemExit
-for line in raw.splitlines():
-    d=json.loads(line)
-    print(d.get("Health") or d.get("State") or "unknown"); break' 2>/dev/null || echo unknown)"
+  # `docker compose ps --format json` emits NDJSON on some versions and a JSON
+  # array on others, and omits stopped containers without --all — which is
+  # exactly the case this loop has to detect.
+  state="$("${COMPOSE[@]}" ps --all --format json backend 2>/dev/null \
+            | python3 -c '
+import sys, json
+raw = sys.stdin.read().strip()
+if not raw:
+    print("unknown"); raise SystemExit
+records = []
+try:
+    parsed = json.loads(raw)
+    records = parsed if isinstance(parsed, list) else [parsed]
+except json.JSONDecodeError:
+    for line in raw.splitlines():
+        line = line.strip()
+        if line:
+            records.append(json.loads(line))
+print((records[0].get("Health") or records[0].get("State") or "unknown")
+      if records else "unknown")
+' 2>/dev/null || echo unknown)"
 
   case "$state" in
     healthy) info "backend is healthy"; break ;;
@@ -92,7 +106,7 @@ applied="$("${COMPOSE[@]}" exec -T postgres \
 case "$applied" in
   ''|*[!0-9]*) fail "could not read flyway_schema_history (got: '${applied:-<empty>}')" ;;
 esac
-[ "$applied" -gt 0 ] || fail "flyway_schema_history is empty — no migration ran"
+if [ "$applied" -eq 0 ]; then fail "flyway_schema_history is empty — no migration ran"; fi
 info "flyway applied ${applied} migrations successfully"
 
 latest="$("${COMPOSE[@]}" exec -T postgres \
@@ -103,23 +117,28 @@ info "latest migration: V${latest}"
 
 # ── Assert the app is really serving ─────────────────────────────────────────
 info "checking the liveness endpoint through the container"
-"${COMPOSE[@]}" exec -T backend \
-  wget -qO- http://127.0.0.1:8080/actuator/health/liveness | grep -q '"status":"UP"' \
-  || fail "liveness endpoint did not report UP"
+if ! "${COMPOSE[@]}" exec -T backend \
+      wget -qO- http://127.0.0.1:8080/actuator/health/liveness | grep -q '"status":"UP"'; then
+  fail "liveness endpoint did not report UP"
+fi
 info "liveness reports UP"
 
 # ── Assert the hardening actually held ───────────────────────────────────────
 info "checking the container is non-root with a read-only root filesystem"
 uid="$("${COMPOSE[@]}" exec -T backend id -u | tr -d '[:space:]')"
-[ "$uid" != "0" ] || fail "backend is running as root"
+if [ "$uid" = "0" ]; then fail "backend is running as root"; fi
 info "backend runs as uid ${uid}"
 
-"${COMPOSE[@]}" exec -T backend sh -c 'touch /readonly-probe 2>/dev/null' \
-  && fail "root filesystem is writable — read_only did not take effect"
+# Explicit if, not `cmd && fail`: the expected outcome here is a NON-zero exit,
+# and an AND-list whose left side fails takes the whole script down under set -e.
+if "${COMPOSE[@]}" exec -T backend sh -c 'touch /readonly-probe' 2>/dev/null; then
+  fail "root filesystem is writable — read_only did not take effect"
+fi
 info "root filesystem is read-only"
 
-"${COMPOSE[@]}" exec -T backend sh -c 'touch /tmp/probe && rm /tmp/probe' \
-  || fail "/tmp is not writable — the JVM needs it"
+if ! "${COMPOSE[@]}" exec -T backend sh -c 'touch /tmp/probe && rm /tmp/probe'; then
+  fail "/tmp is not writable — the JVM needs it"
+fi
 info "/tmp is writable"
 
 echo ""
