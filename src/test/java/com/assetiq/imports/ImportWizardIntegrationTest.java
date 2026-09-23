@@ -472,9 +472,17 @@ class ImportWizardIntegrationTest {
                 .contains("No user named 'leaver@example.com'");
     }
 
+    /**
+     * V66 turns the flag on globally, so the tenant this test is about is one that was
+     * explicitly switched off rather than one that was never switched on. Written as
+     * that explicit opt-out, so the test keeps exercising a state that exists in
+     * production instead of passing because H2 has no flag row at all.
+     */
     @Test
-    @DisplayName("a tenant without the custom-fields feature is told so, and offered only ignore")
+    @DisplayName("a tenant switched off the custom-fields feature is told so, and offered only ignore")
     void customFieldsAreOfferedOnlyWhenTheTenantCanUseThem() throws Exception {
+        setCustomFieldsFlag(orgA, false);
+        try {
         String suffix = UUID.randomUUID().toString().substring(0, 6);
         String csv = "Asset Name,Cost Centre Ref\nFlagged " + suffix + ",CC-1\n";
 
@@ -498,6 +506,9 @@ class ImportWizardIntegrationTest {
                 .andReturn();
         assertThat(refused.getResponse().getStatus()).isEqualTo(400);
         assertThat(refused.getResponse().getContentAsString()).contains("not enabled");
+        } finally {
+            disableCustomFields(orgA);
+        }
     }
 
     @Test
