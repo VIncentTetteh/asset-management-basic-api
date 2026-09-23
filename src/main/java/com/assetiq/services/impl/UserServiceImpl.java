@@ -347,6 +347,8 @@ public class UserServiceImpl extends TenantAwareService implements UserService {
         if (isCurrentUser(user)) {
             throw new IllegalStateException("You cannot deactivate your own account");
         }
+        assertNotLastAdministrator(user, org,
+                "Deactivating them would leave the organisation with nobody who can administer it.");
         user.setStatus(UserStatus.INACTIVE);
         sessionRevocationService.revokeAll(user);
         return toDto(user);
@@ -366,6 +368,40 @@ public class UserServiceImpl extends TenantAwareService implements UserService {
             userRepository.save(user);
         }
         return toDto(user);
+    }
+
+    /**
+     * Refuses a change that would leave the organisation with no administrator.
+     *
+     * <p>A tenant nobody can administer is an outage: no one can invite, no one
+     * can reassign roles, no one can fix it, and support has to intervene. The
+     * three ways to get there — deactivating the last admin, moving them to a
+     * non-admin role, and taking their role away entirely — all come through
+     * here. Self-deletion already had this guard; the administrative paths did
+     * not, so the same organisation could be locked by an admin acting on
+     * another admin.
+     */
+    private void assertNotLastAdministrator(User user, Organisation org, String consequence) {
+        if (isSoleAdministrator(user, org)) {
+            throw new IllegalStateException(
+                    displayName(user) + " is the only active administrator of this organisation. "
+                            + consequence
+                            + " Make someone else an administrator first.");
+        }
+    }
+
+    /** True when the role would still count its holder as an administrator. */
+    private static boolean isAdministratorRole(Role role) {
+        return role != null
+                && (role.isGrantAllPermissions()
+                    || (role.getName() != null && role.getName().toUpperCase(java.util.Locale.ROOT).contains("ADMIN")));
+    }
+
+    private static String displayName(User user) {
+        String first = user.getFirstName() != null ? user.getFirstName() : "";
+        String last = user.getLastName() != null ? user.getLastName() : "";
+        String joined = (first + " " + last).trim();
+        return joined.isEmpty() ? "That user" : joined;
     }
 
     private boolean isCurrentUser(User user) {
@@ -398,6 +434,11 @@ public class UserServiceImpl extends TenantAwareService implements UserService {
             throw new IllegalStateException("You cannot change your own role; ask another administrator");
         }
         assertCanGrant(role);
+        if (!isAdministratorRole(role)) {
+            assertNotLastAdministrator(user, org,
+                    "Moving them to '" + role.getName()
+                            + "' would leave the organisation with nobody who can administer it.");
+        }
         String oldRoleName = user.getRole() == null ? null : user.getRole().getName();
         if (user.getRole() == null || !user.getRole().getId().equals(role.getId())) {
             user.setRole(role);
@@ -418,6 +459,8 @@ public class UserServiceImpl extends TenantAwareService implements UserService {
         if (isCurrentUser(user)) {
             throw new IllegalStateException("You cannot change your own role; ask another administrator");
         }
+        assertNotLastAdministrator(user, org,
+                "Removing their role would leave the organisation with nobody who can administer it.");
         if (user.getRole() != null) {
             String oldRoleName = user.getRole().getName();
             user.setRole(null);
