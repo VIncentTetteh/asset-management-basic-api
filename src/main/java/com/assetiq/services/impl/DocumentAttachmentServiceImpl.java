@@ -12,6 +12,7 @@ import com.assetiq.services.DocumentAttachmentService;
 import com.assetiq.services.TenantAwareService;
 import com.assetiq.storage.OrgAwareStorageService;
 import com.assetiq.storage.StoredObject;
+import com.assetiq.storage.UploadValidator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
@@ -22,12 +23,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -37,17 +36,12 @@ public class DocumentAttachmentServiceImpl extends TenantAwareService implements
 
     private static final Logger log = LoggerFactory.getLogger(DocumentAttachmentServiceImpl.class);
 
-    private static final Set<String> ALLOWED_TYPES = Set.of(
-            "application/pdf",
-            "image/jpeg", "image/png", "image/gif", "image/webp",
-            "application/msword",
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            "application/vnd.ms-excel",
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            "text/plain", "text/csv"
-    );
-
-    private static final long MAX_FILE_SIZE = 25 * 1024 * 1024; // 25 MB
+    /**
+     * Size, content-type allow-list and byte-signature checks all live in
+     * {@link UploadValidator}, so every entry point that accepts a file answers
+     * them the same way.
+     */
+    private final UploadValidator uploadValidator;
 
     private final DocumentAttachmentRepository attachmentRepository;
     private final UserRepository userRepository;
@@ -56,78 +50,67 @@ public class DocumentAttachmentServiceImpl extends TenantAwareService implements
     public DocumentAttachmentServiceImpl(OrganisationRepository organisationRepository,
                                          DocumentAttachmentRepository attachmentRepository,
                                          UserRepository userRepository,
-                                         OrgAwareStorageService orgAwareStorageService) {
+                                         OrgAwareStorageService orgAwareStorageService,
+                                         UploadValidator uploadValidator) {
         super(organisationRepository);
         this.attachmentRepository = attachmentRepository;
         this.userRepository = userRepository;
         this.orgAwareStorageService = orgAwareStorageService;
+        this.uploadValidator = uploadValidator;
     }
 
     // ── Upload ────────────────────────────────────────────────────────────────
 
     @Override
     public DocumentAttachmentDto upload(AttachmentEntityType entityType, UUID entityId, MultipartFile file) {
-        // 1. Validate file is not empty
-        if (file == null || file.isEmpty()) {
-            throw new IllegalArgumentException("File must not be empty.");
-        }
+        // 1. Size, content-type allow-list, and a byte-signature check that the
+        //    content is what the client's Content-Type claims. Throws with a
+        //    caller-safe message on any of them.
+        UploadValidator.ValidatedUpload validated = uploadValidator.validate(file);
 
-        // 2. Validate content type
-        String contentType = file.getContentType();
-        if (contentType == null || !ALLOWED_TYPES.contains(contentType)) {
-            throw new IllegalArgumentException(
-                    "Unsupported file type: " + contentType +
-                    ". Allowed types: PDF, images (JPEG/PNG/GIF/WEBP), Word, Excel, plain text, CSV.");
-        }
-
-        // 3. Validate file size
-        if (file.getSize() > MAX_FILE_SIZE) {
-            throw new IllegalArgumentException(
-                    "File size " + file.getSize() + " bytes exceeds the 25 MB limit.");
-        }
-
-        // 4. Resolve current org and user
+        // 2. Resolve current org and user
         Organisation org = requireTenantOrg();
         User currentUser = resolveCurrentUser(org);
 
-        // 5. Build storage key with sanitised filename
-        String originalName = file.getOriginalFilename() != null ? file.getOriginalFilename() : "upload";
-        String sanitised = sanitiseFilename(originalName);
-        String storageKey = "attachments/" +
+        // 3. Build the storage key. Every path segment is generated: the tenant
+        //    id, the entity, and a fresh UUID. The sanitised original name is the
+        //    trailing segment for legibility only, so a hostile filename can
+        //    neither collide with another object nor place one outside the
+        //    tenant's prefix. Prefixing by organisation mirrors what reports and
+        //    imports already do, and makes tenant isolation visible in the object
+        //    layout as well as in the queries below.
+        String storageKey = "attachments/" + org.getId() + "/" +
                 entityType.name().toLowerCase() + "/" +
                 entityId + "/" +
-                UUID.randomUUID() + "-" + sanitised;
-
-        // 6. Upload to storage
-        byte[] bytes;
-        try {
-            bytes = file.getBytes();
-        } catch (IOException e) {
-            throw new IllegalStateException("Failed to read uploaded file bytes: " + e.getMessage(), e);
-        }
+                UUID.randomUUID() + "-" + validated.sanitisedFilename();
 
         Map<String, String> metadata = Map.of(
                 "entityType", entityType.name(),
-                "entityId", entityId.toString()
+                "entityId", entityId.toString(),
+                "organisationId", org.getId().toString()
         );
 
-        orgAwareStorageService.store(storageKey, bytes, contentType, originalName, metadata);
-        log.debug("[DocumentAttachment] Stored file at key={} for entityType={} entityId={}", storageKey, entityType, entityId);
+        orgAwareStorageService.store(storageKey, validated.bytes(), validated.contentType(),
+                                     validated.sanitisedFilename(), metadata);
+        log.debug("[DocumentAttachment] Stored file at key={} for entityType={} entityId={}",
+                  storageKey, entityType, entityId);
 
-        // 7. Persist the attachment record
+        // 4. Persist the attachment record. originalName is the sanitised name:
+        //    it is echoed back to the UI and put in a Content-Disposition header,
+        //    so storing the raw client string would just move the problem.
         DocumentAttachment attachment = new DocumentAttachment();
         attachment.setEntityType(entityType);
         attachment.setEntityId(entityId);
-        attachment.setOriginalName(originalName);
-        attachment.setContentType(contentType);
+        attachment.setOriginalName(validated.sanitisedFilename());
+        attachment.setContentType(validated.contentType());
         attachment.setStorageKey(storageKey);
-        attachment.setFileSize(file.getSize());
+        attachment.setFileSize((long) validated.bytes().length);
         attachment.setUploadedBy(currentUser);
         attachment.setOrganisation(org);
 
         DocumentAttachment saved = attachmentRepository.save(attachment);
 
-        // 8. Return DTO with a fresh download URL
+        // 5. Return DTO with a fresh download URL
         DocumentAttachmentDto dto = toDto(saved);
         dto.setDownloadUrl(getDownloadUrl(saved.getId()));
         return dto;
@@ -181,10 +164,17 @@ public class DocumentAttachmentServiceImpl extends TenantAwareService implements
                 .orElseThrow(() -> new IllegalStateException(
                         "File not found in storage for attachment: " + attachmentId));
 
+        // Served as a download, never as a page. `attachment` stops the browser
+        // rendering the file in the application's own origin, and `nosniff` stops
+        // it second-guessing the declared type and rendering it anyway. Together
+        // with the upload allow-list, that is what keeps an uploaded file from
+        // ever executing as part of AssetIQ.
         return ResponseEntity.ok()
                 .header("Content-Type", attachment.getContentType())
+                .header("X-Content-Type-Options", "nosniff")
+                .header("Content-Security-Policy", "default-src 'none'; sandbox")
                 .header("Content-Disposition",
-                        "inline; filename=\"" + attachment.getOriginalName() + "\"")
+                        "attachment; filename=\"" + attachment.getOriginalName() + "\"")
                 .header("Content-Length", String.valueOf(stored.bytes().length))
                 .header("Cache-Control", "no-store")
                 .body(stored.bytes());
@@ -215,20 +205,6 @@ public class DocumentAttachmentServiceImpl extends TenantAwareService implements
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
-
-    /**
-     * Strips path separators, replaces spaces with underscores, and keeps only
-     * alphanumeric characters, dots, and hyphens to produce a safe S3 key segment.
-     */
-    private String sanitiseFilename(String filename) {
-        // Remove any path components (e.g. ../../evil)
-        String name = filename.replaceAll("[/\\\\]", "");
-        // Replace spaces with underscores
-        name = name.replace(' ', '_');
-        // Remove any character that isn't alphanumeric, a dot, hyphen, or underscore
-        name = name.replaceAll("[^A-Za-z0-9._\\-]", "");
-        return name.isEmpty() ? "file" : name;
-    }
 
     /**
      * Resolves the authenticated user within the given organisation.
