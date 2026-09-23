@@ -9,7 +9,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 COMPOSE_CMD="docker compose"
 command -v docker-compose &>/dev/null && COMPOSE_CMD="docker-compose"
-COMPOSE_FILE="${ASSETIQ_COMPOSE_FILE:-$ROOT_DIR/docker-compose.standalone.images.yml}"
+COMPOSE_FILE="${ASSETIQ_COMPOSE_FILE:-$ROOT_DIR/docker-compose.yml}"
 
 echo ""
 echo "AssetIQ Standalone — Health Check"
@@ -26,9 +26,9 @@ check_container() {
   fi
 }
 
-check_container "Backend API" backend "curl -fsS http://localhost:8080/actuator/health"
-check_container "Frontend" frontend "wget -qO- http://localhost:3000/"
-check_container "Reverse proxy" nginx "wget --no-check-certificate -qO- https://localhost/"
+check_container "Backend API" backend "wget -qO- http://127.0.0.1:8080/actuator/health/readiness"
+check_container "Web UI" web "wget -qO- http://127.0.0.1:3000/"
+check_container "TLS edge" edge "wget --no-check-certificate -qO- https://127.0.0.1:8443/healthz"
 
 echo ""
 echo "Container statuses:"

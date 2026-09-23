@@ -1,123 +1,76 @@
-# AssetIQ Standalone — Deployment Package
+# AssetIQ — self-hosted Docker distribution
 
-Self-hosted edition of AssetIQ. All data stays on your server.
+Everything needed to run AssetIQ on your own server: a production Compose
+stack, a bootstrap script that generates your secrets, and backup and health
+tooling.
 
-There are **two installation modes**. Pick one.
+**The operator's manual is [`../docs/self-hosting.md`](../docs/self-hosting.md).**
+It covers requirements, first run, the licence key, upgrading, backup and
+restore, and troubleshooting. This file is just the map of the directory.
 
-## Mode A — Prebuilt images (recommended for customers)
-
-No source code required. Pulls signed, checksummed images from the AssetIQ container registry.
+## Quick start
 
 ```bash
-# 1. Run the interactive setup wizard (generates app secrets, certs, and .env)
-cd assetiq-standalone
-./scripts/setup-standalone.sh
-
-# 2. Authenticate to the registry (once)
-docker login ghcr.io   # use the read:packages PAT that AssetIQ sends you
-
-# 3. Pull & start
-docker compose -f docker-compose.standalone.images.yml pull
-docker compose -f docker-compose.standalone.images.yml up -d
-
-# 4. Verify
+./scripts/bootstrap.sh --public-url https://assetiq.example.com --version 1.4.2
+docker compose pull
+docker compose up -d
 ./scripts/health-check.sh
-
-# 5. Open your browser
-open https://localhost
 ```
 
-## Mode B — Build from source (AssetIQ staff / advanced operators)
+`bootstrap.sh` generates `APP_JWT_SECRET`, `APP_DATA_ENCRYPTION_KEY` and the
+database and Redis passwords in exactly the formats the application validates at
+startup, writes them to `.env` at mode `0600`, and generates a self-signed TLS
+certificate. It refuses to overwrite an existing `.env`, because regenerating
+`APP_DATA_ENCRYPTION_KEY` makes every encrypted column permanently unreadable.
 
-Requires the backend and web UI source directories to be co-located. The
-license issuer is vendor-managed and is intentionally never distributed to a
-customer installation.
-
-```
-parent/
-├── assetiq-standalone/                   ← this directory
-├── Enterprise-Asset-Manager/             ← backend
-└── Enterprise-Asset-manager-Frontend/    ← web UI
-```
-
-```bash
-cd assetiq-standalone
-./scripts/setup-standalone.sh
-docker compose -f docker-compose.standalone.yml up -d --build
-open https://localhost
-```
-
-> **Heads-up:** Source builds also require the vendor public verification key at
-> `Enterprise-Asset-Manager/src/main/resources/license/public.pem`. The private
-> signing key must never be copied into this package. If the source bundle does
-> not contain the public key, use **Mode A** or obtain the release key from
-> AssetIQ operations.
-
-## Directory structure
+## Layout
 
 ```
-assetiq-standalone/
-├── docker-compose.standalone.yml   Main compose file
-├── .env.standalone.example         All environment variables documented
-├── .gitignore                      Excludes secrets from git
+.
+├── docker-compose.yml          The production stack: postgres 16, redis 7,
+│                               backend, web, TLS edge. Pinned image tags,
+│                               healthchecks, named volumes, resource limits.
+│                               Every service non-root with a read-only root
+│                               filesystem.
+├── docker-compose.build.yml    Overlay that swaps published images for local
+│                               build contexts. Changes nothing else, so what
+│                               you test from source is what ships.
+├── .env.example                Every variable the stack reads, documented.
+│                               No real values.
 ├── nginx/
-│   ├── nginx.conf                  Reverse proxy configuration
-│   └── certs/                      Place server.crt + server.key here
-├── scripts/
-│   ├── setup-standalone.sh         First-time interactive setup wizard
-│   ├── generate-self-signed-cert.sh  TLS certificate for local use
-│   ├── backup.sh                   Timestamped database backup
-│   └── health-check.sh             Verifies all services are healthy
+│   ├── nginx.conf              TLS edge: /api and / on ONE origin, which the
+│                               SameSite=Strict session cookie requires.
+│   └── certs/                  Your certificate and key go here (gitignored).
+└── scripts/
+    ├── bootstrap.sh            One-command first-time setup. Start here.
+    ├── health-check.sh         Health of every service.
+    ├── backup.sh               Database + uploads backup.
+    ├── smoke-compose.sh        Brings the stack up from source and asserts the
+    │                           backend is healthy, Flyway migrated, and the
+    │                           container is non-root on a read-only rootfs.
+    ├── smoke-test.sh           Post-install functional checks.
+    ├── generate-rsa-keys.sh    Keypair for the legacy online licence path.
+    └── generate-self-signed-cert.sh
 ```
 
-## Services
+## Notes
 
-| Service         | Internal port | Description                       |
-|-----------------|--------------|-----------------------------------|
-| `postgres`      | 5432         | PostgreSQL 16 application database|
-| `backend`       | 8080         | Spring Boot REST API              |
-| `frontend`      | 3000         | Next.js web UI                    |
-| `nginx`         | 80 / 443     | Reverse proxy (public entry point)|
+- **Pin your version.** `ASSETIQ_VERSION` is required and `latest` is rejected.
+  An AssetIQ image change is a schema migration; a moving tag runs it on
+  whatever restart happens next.
+- **No outbound internet is required.** The licence is verified locally against
+  a public key in the image — no licence server, no call-home. Outbound access
+  is needed only for SMTP, object storage or external SSO, if you enable them.
+- **Nothing here is a hard stop.** An absent, expired or invalid licence key
+  means free-tier quotas and a log line, never an outage and never data loss.
 
-## License activation
+## Changed in this release
 
-After the first `docker compose up`, open `https://<your-domain>`.
-A setup wizard will prompt you to enter your license key.
-
-Buy or renew a key at **portal.assetiq.io**.
-The backend verifies signatures locally with the bundled public key and checks
-revocation with `https://license.assetiq.io`; only the backend has outbound
-network access. Customer assets and operational records remain local.
-
-## Backup
-
-```bash
-./scripts/backup.sh
-# Writes timestamped gzip dumps to backups/
-# Automatically removes dumps older than 30 days
-```
-
-Schedule with cron:
-```
-0 2 * * * /opt/assetiq-standalone/scripts/backup.sh >> /var/log/assetiq-backup.log 2>&1
-```
-
-## Upgrade
-
-```bash
-git pull                    # pull latest source
-docker compose -f docker-compose.standalone.yml up -d --build
-```
-
-Flyway runs migrations automatically on startup.
-
-## TLS in production
-
-Replace the self-signed cert with a real one:
-```bash
-# With certbot (Let's Encrypt)
-certbot certonly --standalone -d assetiq.example.com
-cp /etc/letsencrypt/live/assetiq.example.com/fullchain.pem nginx/certs/server.crt
-cp /etc/letsencrypt/live/assetiq.example.com/privkey.pem   nginx/certs/server.key
-docker compose -f docker-compose.standalone.yml restart nginx
-```
+`docker-compose.standalone.yml`, `docker-compose.standalone.images.yml` and
+`scripts/setup-standalone.sh` were replaced by `docker-compose.yml`,
+`docker-compose.build.yml` and `scripts/bootstrap.sh`. The new stack adds Redis
+(the old one had none, so the rate limiter silently degraded to a no-op),
+read-only root filesystems, resource limits, non-root execution throughout, and
+a non-interactive bootstrap. If you have an existing installation, its `.env` is
+still valid; add `REDIS_PASSWORD`, `ASSETIQ_VERSION` and `APP_PUBLIC_URL`, and
+see `.env.example` for the full list.

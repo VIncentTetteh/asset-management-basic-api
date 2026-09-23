@@ -1,0 +1,37 @@
+# Build-from-source overlay for docker-compose.yml.
+#
+# For AssetIQ staff and for operators who have both repos checked out side by
+# side. It replaces the published `image:` references with local build contexts
+# and changes nothing else: every hardening setting in docker-compose.yml still
+# applies, so what is tested here is what ships.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+#
+# Expected layout:
+#   <parent>/Enterprise-Asset-Manager/           (this repo)
+#   <parent>/Enterprise-Asset-manager-Frontend/
+#
+# ASSETIQ_VERSION is still required — it tags the locally built images, so a
+# `docker images` listing never shows an ambiguous build.
+
+services:
+
+  backend:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        VERSION: ${ASSETIQ_VERSION}
+    image: assetiq-backend:${ASSETIQ_VERSION}
+
+  web:
+    build:
+      context: ../../Enterprise-Asset-manager-Frontend
+      dockerfile: Dockerfile
+      args:
+        VERSION: ${ASSETIQ_VERSION}
+        NEXT_PUBLIC_APP_MODE: standalone
+        # Browser traffic uses the same-origin edge route. A Docker service name
+        # is not resolvable from a customer's browser.
+        NEXT_PUBLIC_API_URL: /api/v1
+    image: assetiq-web:${ASSETIQ_VERSION}

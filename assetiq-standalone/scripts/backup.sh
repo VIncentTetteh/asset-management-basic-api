@@ -30,7 +30,7 @@ dump_db() {
   local file="$BACKUP_DIR/${db}_${TIMESTAMP}.sql.gz"
   echo "→ Backing up database: $db"
   PGPASSWORD="$PG_PASS" $COMPOSE_CMD \
-    -f "$ROOT_DIR/docker-compose.standalone.yml" \
+    -f "$ROOT_DIR/docker-compose.yml" \
     exec -T postgres \
     pg_dump -U "$PG_USER" "$db" | gzip > "$file"
   echo "  Written: $file"

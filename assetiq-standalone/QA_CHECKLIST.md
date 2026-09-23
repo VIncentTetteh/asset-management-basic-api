@@ -23,7 +23,7 @@ Mark each item ✅ pass / ❌ fail / ⏭ skip (with reason).
 | # | Test | Result | Notes |
 |---|------|--------|-------|
 | I1 | Clone repo on a clean machine with only Docker installed | | |
-| I2 | `./scripts/setup-standalone.sh` completes without errors | | |
+| I2 | `./scripts/bootstrap.sh --public-url ... --version ...` completes and writes .env at mode 0600 | | |
 | I3 | Vendor public verification key is present in the backend image; no private signing key is present | | |
 | I4 | `.env` file written with non-default passwords | | |
 | I5 | `docker compose up --build` brings all 4 services to healthy state | | |
@@ -130,7 +130,7 @@ Mark each item ✅ pass / ❌ fail / ⏭ skip (with reason).
 | S4 | Attempt to POST to `/api/v1/billing/webhooks/paystack` with wrong HMAC → 401 | | |
 | S5 | Inspect Docker image layers — no `.env` or `private.pem` baked in | | |
 | S6 | `APP_MODE=cloud` container has no `LicenseGuardFilter` in Spring context | | |
-| S7 | Internal services (postgres, backend, frontend) have no host port bindings | | |
+| S7 | Internal services (postgres, redis, backend, web) have no host port bindings; only `edge` publishes ports | | |
 | S8 | Response headers include `X-Frame-Options: DENY` and `X-Content-Type-Options: nosniff` | | |
 | S9 | Portal checkout endpoint returns 429 after 5 rapid requests from same IP | | |
 | S10| Swagger UI is accessible in standalone (docs needed) but `/actuator/env` is NOT | | |

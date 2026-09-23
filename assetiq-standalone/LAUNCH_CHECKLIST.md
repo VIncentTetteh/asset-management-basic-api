@@ -29,7 +29,7 @@ next section. Assign an owner and a target date for each item.
 | 2.1 | `docker compose up --build` tested on clean Ubuntu 22 + macOS 14 | DevOps | ☐ |
 | 2.2 | `./scripts/smoke-test.sh` passes on a clean install | DevOps | ☐ |
 | 2.3 | All 10 QA Checklist sections signed off | QA | ☐ |
-| 2.4 | Docker image sizes are reasonable (backend <500 MB, frontend <200 MB) | DevOps | ☐ |
+| 2.4 | Docker image sizes are reasonable (backend <500 MB, web <200 MB) | DevOps | ☐ |
 | 2.5 | `docker scout` or `trivy` image scan — no critical CVEs | DevOps | ☐ |
 | 2.6 | Bundle zip published to Customer Portal download page | DevOps | ☐ |
 | 2.7 | Checksum (SHA-256) of the bundle zip published alongside it | DevOps | ☐ |

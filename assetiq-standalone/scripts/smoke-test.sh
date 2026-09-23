@@ -81,7 +81,7 @@ echo -e "${BOLD}Results: ${GREEN}${PASS} passed${RESET}${BOLD}, ${RED}${FAIL} fa
 echo ""
 
 if [ "$FAIL" -gt 0 ]; then
-  echo "Run 'docker compose -f docker-compose.standalone.yml logs' to investigate."
+  echo "Run 'docker compose logs' to investigate."
   exit 1
 else
   echo -e "${GREEN}All smoke tests passed. Stack is healthy.${RESET}"
