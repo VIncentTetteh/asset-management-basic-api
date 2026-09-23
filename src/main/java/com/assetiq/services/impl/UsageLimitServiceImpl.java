@@ -1,7 +1,9 @@
 package com.assetiq.services.impl;
 
+import com.assetiq.enums.BillingPlanTier;
 import com.assetiq.enums.SubscriptionStatus;
 import com.assetiq.license.LicensePlanLimitsService;
+import com.assetiq.license.offline.OfflineLicenseService;
 import com.assetiq.models.Organisation;
 import com.assetiq.models.OrganisationSubscription;
 import com.assetiq.models.SubscriptionPlan;
@@ -47,6 +49,17 @@ public class UsageLimitServiceImpl implements UsageLimitService {
     private final Optional<LicensePlanLimitsService> licenseLimits;
 
     /**
+     * Present only when {@code app.license.offline.enabled=true} — the self-hosted
+     * SKU. When present, {@link #resolveEffectivePlan} derives the tier from the
+     * signed offline licence key instead of the Paystack subscription, and the seat
+     * allowance is narrowed to what that key grants.
+     *
+     * <p>Empty in the hosted deployment (the flag defaults to false), where every
+     * path below behaves exactly as it did before this field existed.</p>
+     */
+    private final Optional<OfflineLicenseService> offlineLicense;
+
+    /**
      * Days of full paid access after a failed payment. Must match
      * {@code SubscriptionDunningJob}, which downgrades when this window closes; reading
      * the same property keeps the promise in the reminder email true.
@@ -61,12 +74,14 @@ public class UsageLimitServiceImpl implements UsageLimitService {
             SubscriptionPlanRepository subscriptionPlanRepository,
             AssetRepository assetRepository,
             UserRepository userRepository,
-            Optional<LicensePlanLimitsService> licenseLimits) {
+            Optional<LicensePlanLimitsService> licenseLimits,
+            Optional<OfflineLicenseService> offlineLicense) {
         this.organisationSubscriptionRepository = organisationSubscriptionRepository;
         this.subscriptionPlanRepository = subscriptionPlanRepository;
         this.assetRepository = assetRepository;
         this.userRepository = userRepository;
         this.licenseLimits = licenseLimits;
+        this.offlineLicense = offlineLicense;
     }
 
     @Override
@@ -96,7 +111,7 @@ public class UsageLimitServiceImpl implements UsageLimitService {
         // Cloud mode: existing Paystack subscription logic unchanged
         SubscriptionPlan plan = resolveEffectivePlan(organisation);
         long userCount = userRepository.countByOrganisationAndDeletedAtIsNull(organisation);
-        if (userCount >= plan.getMaxEmployees()) {
+        if (userCount >= seatLimit(plan)) {
             throw new AccessDeniedException("Employee limit reached for current plan. Upgrade your subscription.");
         }
     }
@@ -111,9 +126,9 @@ public class UsageLimitServiceImpl implements UsageLimitService {
             return;
         }
         SubscriptionPlan plan = resolveEffectivePlan(organisation);
-        if (activeSeats >= plan.getMaxEmployees()) {
+        if (activeSeats >= seatLimit(plan)) {
             throw new AccessDeniedException(
-                    "All " + plan.getMaxEmployees() + " seats on your current plan are in use. "
+                    "All " + seatLimit(plan) + " seats on your current plan are in use. "
                             + "Deactivate another user or upgrade your subscription.");
         }
     }
@@ -136,14 +151,20 @@ public class UsageLimitServiceImpl implements UsageLimitService {
 
     @Override
     public SubscriptionPlan resolveEffectivePlan(Organisation organisation) {
+        // Self-hosted SKU: the signed offline licence key is the only source of
+        // entitlement. There is no Paystack subscription in a customer-run
+        // installation, so consulting one would always resolve to Freemium.
+        if (offlineLicense.isPresent()) {
+            return planForTier(offlineLicense.get().currentTier());
+        }
+
         OrganisationSubscription subscription = organisationSubscriptionRepository
                 .findFirstByOrganisationAndDeletedAtIsNullOrderByCreatedAtDesc(organisation)
                 .orElse(null);
         if (subscription != null && subscription.getPlan() != null && isEntitled(subscription)) {
             return subscription.getPlan();
         }
-        return subscriptionPlanRepository.findByCodeAndDeletedAtIsNull("FREEMIUM")
-                .orElseThrow(() -> new IllegalStateException("FREEMIUM plan is not configured"));
+        return freemiumPlan();
     }
 
     @Override
@@ -181,6 +202,35 @@ public class UsageLimitServiceImpl implements UsageLimitService {
                     || Instant.now(clock).isBefore(since.plus(Duration.ofDays(graceDays)));
         }
         return false;
+    }
+
+    /**
+     * The catalogue row for a licensed tier.
+     *
+     * <p>Plan codes match the tier names the {@code BillingPlanSeeder} writes
+     * (FREEMIUM / BASIC / BUSINESS / ENTERPRISE). A tier with no active row — a
+     * key issued against a catalogue this build does not carry — falls back to
+     * Freemium rather than throwing: an unresolvable licence must degrade, not
+     * take the installation down.</p>
+     */
+    private SubscriptionPlan planForTier(BillingPlanTier tier) {
+        return subscriptionPlanRepository.findByCodeAndDeletedAtIsNull(tier.name())
+                .orElseGet(this::freemiumPlan);
+    }
+
+    private SubscriptionPlan freemiumPlan() {
+        return subscriptionPlanRepository.findByCodeAndDeletedAtIsNull("FREEMIUM")
+                .orElseThrow(() -> new IllegalStateException("FREEMIUM plan is not configured"));
+    }
+
+    /**
+     * The seat ceiling to enforce: the plan's allowance, narrowed by the offline
+     * licence's seat count when one is in force. Without an offline licence this
+     * returns the plan's own figure, unchanged.
+     */
+    private int seatLimit(SubscriptionPlan plan) {
+        int planSeats = plan.getMaxEmployees();
+        return offlineLicense.map(l -> l.effectiveSeatLimit(planSeats)).orElse(planSeats);
     }
 
     /** Test seam. */

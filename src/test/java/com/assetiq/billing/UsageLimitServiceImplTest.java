@@ -48,9 +48,10 @@ class UsageLimitServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        // Cloud mode: no standalone license limits
+        // Cloud mode: no standalone license limits, no offline licence
         service = new UsageLimitServiceImpl(
-                subscriptionRepository, planRepository, assetRepository, userRepository, Optional.empty());
+                subscriptionRepository, planRepository, assetRepository, userRepository,
+                Optional.empty(), Optional.empty());
 
         org = new Organisation();
         org.setId(UUID.randomUUID());

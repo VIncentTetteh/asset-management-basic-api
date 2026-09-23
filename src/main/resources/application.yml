@@ -224,6 +224,16 @@ app:
   license:
     key: ${ASSETIQ_LICENSE_KEY:}
     server-url: ${LICENSE_SERVER_URL:https://license.assetiq.io}
+    # Self-hosted SKU: a signed, self-contained licence key verified locally
+    # against a public key baked into the image. No licence server, no call-home.
+    # OFF by default — the hosted deployment resolves entitlements from the
+    # Paystack subscription exactly as it always has.
+    offline:
+      enabled: ${APP_LICENSE_OFFLINE_ENABLED:false}
+      key: ${APP_LICENSE_OFFLINE_KEY:}
+      # Optional PEM override for the baked public key. Public material, not a
+      # secret; exists so a self-issuing operator need not rebuild the image.
+      public-key: ${APP_LICENSE_OFFLINE_PUBLIC_KEY:}
   jwt:
     # MUST be overridden in production. Generate with: openssl rand -base64 48
     secret: ${APP_JWT_SECRET:this-default-secret-must-be-at-least-32-characters-long-change-in-production}
