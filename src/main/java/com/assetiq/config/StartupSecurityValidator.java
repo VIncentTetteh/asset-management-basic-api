@@ -52,6 +52,10 @@ public class StartupSecurityValidator implements ApplicationRunner {
     @Value("${app.mode:cloud}")
     private String appMode;
 
+    /** Self-hosted SKU. See {@link #validatePaystackKey()}. */
+    @Value("${app.license.offline.enabled:false}")
+    private boolean offlineLicenceEnabled;
+
     @Value("${app.storage.s3.enabled:false}")
     private boolean s3Enabled;
 
@@ -134,7 +138,7 @@ public class StartupSecurityValidator implements ApplicationRunner {
      * single instance against a mounted volume by design.
      */
     private void validateDurableStorage() {
-        if (!"cloud".equalsIgnoreCase(appMode) || s3Enabled) {
+        if (!isHostedDeployment() || s3Enabled) {
             return;
         }
 
@@ -148,11 +152,30 @@ public class StartupSecurityValidator implements ApplicationRunner {
                 "Generated reports and imports would be held in this JVM's heap: lost on every " +
                 "restart, invisible to other replicas, and never evicted.\n" +
                 "Fix: set APP_STORAGE_S3_ENABLED=true with APP_STORAGE_S3_BUCKET and " +
-                "APP_STORAGE_S3_REGION, or run with APP_MODE=standalone.\n" +
+                "APP_STORAGE_S3_REGION, or run self-hosted (APP_LICENSE_OFFLINE_ENABLED=true).\n" +
                 "Current active profiles: " + Arrays.toString(environment.getActiveProfiles()));
         }
         log.warn("[STARTUP] In-memory file storage permitted because active profile is dev. " +
                  "Generated files will not survive a restart. Never ship this.");
+    }
+
+    /**
+     * {@code true} for the vendor-hosted SaaS, {@code false} for an installation
+     * the customer runs themselves.
+     *
+     * <p>Two signals mean self-hosted, and either is sufficient. {@code APP_MODE}
+     * is the older one, but setting it also switches on the legacy licence path
+     * that calls a vendor licence server, so the offline-licence flag has to
+     * stand on its own: a self-hosted deployment must be able to declare itself
+     * without opting into a call-home it was specifically designed to avoid.</p>
+     *
+     * <p>What hangs on this: a self-hosted installation has no Paystack account
+     * and, by design, stores uploads on a mounted volume rather than S3. Applying
+     * the hosted checks to it would refuse to boot over two things that are
+     * correct for it.</p>
+     */
+    private boolean isHostedDeployment() {
+        return "cloud".equalsIgnoreCase(appMode) && !offlineLicenceEnabled;
     }
 
     private void validateJwtSecret() {
@@ -170,6 +193,17 @@ public class StartupSecurityValidator implements ApplicationRunner {
     }
 
     private void validatePaystackKey() {
+        // A self-hosted installation has no Paystack account and no hosted
+        // billing: entitlement comes from its offline licence key, and the
+        // vendor collects payment out of band. Demanding a Paystack secret
+        // there would force every operator to invent a fake one to boot, which
+        // is worse than not asking. Cloud deployments stay strict.
+        if (!isHostedDeployment()) {
+            log.info("[SECURITY] Paystack key not required in this deployment mode " +
+                     "(appMode={}, offlineLicence={})", appMode, offlineLicenceEnabled);
+            return;
+        }
+
         if (paystackSecretKey == null || paystackSecretKey.isBlank()) {
             throw new IllegalStateException(
                 "[SECURITY STARTUP FAILURE] PAYSTACK_SECRET_KEY environment variable is not set. " +

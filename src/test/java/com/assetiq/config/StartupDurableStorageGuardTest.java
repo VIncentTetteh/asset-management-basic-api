@@ -70,10 +70,16 @@ class StartupDurableStorageGuardTest {
     }
 
     @Test
-    @DisplayName("allows standalone mode, which runs one instance against a mounted volume")
+    @DisplayName("allows standalone mode, which the operator owns the consequences of")
     void allowsStandaloneMode() {
-        // Self-hosted deployments are single-instance by design and back their storage with
-        // a host volume, so the multi-replica and restart concerns do not apply.
+        // A self-hosted install is single-instance by default, so the multi-replica 404s
+        // do not apply, and refusing to boot over storage would block an evaluation.
+        //
+        // The restart and unbounded-growth problems DO still apply: there is no local-disk
+        // storage backend, so with S3 off, generated files live in this JVM's heap. That is
+        // a documented, deliberate trade-off rather than a safe default -- see
+        // docs/self-hosting.md, which tells the operator to point the install at the
+        // bundled MinIO before going live.
         StartupSecurityValidator v = newValidator("standalone", false, "prod");
 
         assertThatCode(() -> v.run(mock(ApplicationArguments.class))).doesNotThrowAnyException();
