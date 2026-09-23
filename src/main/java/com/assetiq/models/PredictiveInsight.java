@@ -33,9 +33,28 @@ public class PredictiveInsight extends BaseEntity {
     @Column(columnDefinition = "TEXT")
     private String description;
 
-    /** Confidence score 0.0–1.0 */
+    /**
+     * What this insight was concluded from, in words — "3 maintenance events in
+     * the last 90 days; condition POOR", "warranty expiry 2026-11-04".
+     *
+     * <p>This replaced a fabricated confidence score. A heuristic's evidence is
+     * more useful than a decimal, because the user can check it against the
+     * record and disagree with the rule rather than with a number.
+     */
+    @Column(name = "basis", columnDefinition = "TEXT")
+    private String basis;
+
+    /**
+     * Always null since V64.
+     *
+     * @deprecated There was never a model behind this. The evidence lives in
+     *             {@link #getBasis()}. Retained only so a client still reading
+     *             the column sees null rather than an error; it will be dropped
+     *             once nothing reads it.
+     */
+    @Deprecated(forRemoval = true)
     @Column(name = "confidence")
-    private double confidence;
+    private Double confidence;
 
     /** Date the predicted event is expected to occur */
     @Column(name = "predicted_date")

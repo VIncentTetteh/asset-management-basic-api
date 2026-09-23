@@ -19,7 +19,17 @@ public class PredictiveInsightDto {
     private InsightSeverity severity;
     private String title;
     private String description;
-    private double confidence;
+
+    /** What the rule counted, in words. Replaces the old confidence score. */
+    private String basis;
+
+    /**
+     * Always null since V64.
+     *
+     * @deprecated No model ever produced this. Read {@link #getBasis()} instead.
+     */
+    @Deprecated(forRemoval = true)
+    private Double confidence;
     private LocalDate predictedDate;
     private boolean resolved;
     private Instant resolvedAt;

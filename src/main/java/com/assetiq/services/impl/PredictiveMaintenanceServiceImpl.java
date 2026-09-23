@@ -13,6 +13,8 @@ import com.assetiq.repositories.AssetRepository;
 import com.assetiq.repositories.MaintenanceRecordRepository;
 import com.assetiq.repositories.OrganisationRepository;
 import com.assetiq.repositories.PredictiveInsightRepository;
+import com.assetiq.services.insights.AssetSighting;
+import com.assetiq.services.insights.AssetSightingService;
 import com.assetiq.services.finance.DepreciationCalculator;
 import com.assetiq.services.PredictiveMaintenanceService;
 import com.assetiq.services.TenantAwareService;
@@ -34,18 +36,31 @@ public class PredictiveMaintenanceServiceImpl extends TenantAwareService impleme
 
     private static final Logger log = LoggerFactory.getLogger(PredictiveMaintenanceServiceImpl.class);
 
+    /** Assets below this purchase cost are not worth chasing across a warehouse. */
+    static final BigDecimal HIGH_VALUE_THRESHOLD = new BigDecimal("1000");
+
+    /**
+     * A gap in sightings long enough to be a decision rather than an oversight.
+     * Matches {@code CostWasteService.DEFAULT_IDLE_DAYS} so "not seen" means one
+     * thing across the product.
+     */
+    static final int UNSEEN_DAYS = com.assetiq.services.insights.CostWasteService.DEFAULT_IDLE_DAYS;
+
     private final AssetRepository assetRepo;
     private final MaintenanceRecordRepository maintenanceRepo;
     private final PredictiveInsightRepository insightRepo;
+    private final AssetSightingService sightingService;
 
     public PredictiveMaintenanceServiceImpl(OrganisationRepository organisationRepository,
                                             AssetRepository assetRepo,
                                             MaintenanceRecordRepository maintenanceRepo,
-                                            PredictiveInsightRepository insightRepo) {
+                                            PredictiveInsightRepository insightRepo,
+                                            AssetSightingService sightingService) {
         super(organisationRepository);
         this.assetRepo = assetRepo;
         this.maintenanceRepo = maintenanceRepo;
         this.insightRepo = insightRepo;
+        this.sightingService = sightingService;
     }
 
     // ── Generate ──────────────────────────────────────────────────────────────
@@ -91,6 +106,9 @@ public class PredictiveMaintenanceServiceImpl extends TenantAwareService impleme
                         .filter(r -> r.getAsset() != null)
                         .collect(Collectors.groupingBy(r -> r.getAsset().getId(), Collectors.toSet()));
 
+        // Two grouped queries for the whole tenant, not one per asset.
+        Map<UUID, AssetSighting> sightings = sightingService.sightingsFor(org);
+
         List<PredictiveInsight> generated = new ArrayList<>();
         for (Asset asset : assets) {
             Set<MaintenanceRecord> records =
@@ -100,7 +118,7 @@ public class PredictiveMaintenanceServiceImpl extends TenantAwareService impleme
             generated.addAll(checkWarrantyExpiry(asset, org));
             generated.addAll(checkAssetAging(asset, org));
             generated.addAll(checkDepreciationComplete(asset, org));
-            generated.addAll(checkUnderutilized(asset, org));
+            generated.addAll(checkUnseen(asset, sightings, org));
         }
         return generated;
     }
@@ -137,7 +155,9 @@ public class PredictiveMaintenanceServiceImpl extends TenantAwareService impleme
                 title,
                 "Asset '" + asset.getName() + "' has scheduled maintenance due on " + dueDate +
                         ". Ensure timely servicing to avoid downtime.",
-                0.90, dueDate, org));
+                // Arithmetic on a stored date. Nothing here is predicted.
+                "Scheduled maintenance due " + dueDate,
+                dueDate, org));
     }
 
     // ── Rule 2: Failure Risk ──────────────────────────────────────────────────
@@ -155,14 +175,18 @@ public class PredictiveMaintenanceServiceImpl extends TenantAwareService impleme
         InsightSeverity severity = badCondition ? InsightSeverity.CRITICAL
                 : (recentCount >= 5 ? InsightSeverity.HIGH : InsightSeverity.MEDIUM);
 
-        double confidence = Math.min(0.95, 0.60 + (recentCount * 0.05) + (badCondition ? 0.20 : 0));
         String desc = "Asset had " + recentCount + " maintenance events in the past 90 days" +
                 (badCondition ? " and is in " + asset.getCondition() + " condition" : "") +
-                ". High frequency indicates potential hardware failure.";
+                ". Frequent repairs often precede a failure, but AssetIQ records no " +
+                "telemetry from the asset itself — this is a pattern in the maintenance " +
+                "history, not a measurement of the hardware.";
+
+        String basis = recentCount + " maintenance events in the last 90 days"
+                + (badCondition ? "; condition " + asset.getCondition() : "");
 
         return List.of(upsertInsight(asset, InsightType.FAILURE_RISK, severity,
-                "Elevated failure risk detected",
-                desc, confidence, LocalDate.now().plusDays(30), org));
+                "Repeated repairs in the last 90 days",
+                desc, basis, LocalDate.now().plusDays(30), org));
     }
 
     // ── Rule 3: Warranty Expiry ───────────────────────────────────────────────
@@ -185,7 +209,9 @@ public class PredictiveMaintenanceServiceImpl extends TenantAwareService impleme
                 "Warranty expiring in " + daysLeft + " days",
                 "The warranty for '" + asset.getName() + "' expires on " + asset.getWarrantyExpiryDate() +
                         ". Consider renewal or replacement planning.",
-                0.99, asset.getWarrantyExpiryDate(), org));
+                // A stored date and today's date. Certain, not predicted.
+                "Warranty expiry date " + asset.getWarrantyExpiryDate(),
+                asset.getWarrantyExpiryDate(), org));
     }
 
     // ── Rule 4: Asset Aging ───────────────────────────────────────────────────
@@ -205,8 +231,12 @@ public class PredictiveMaintenanceServiceImpl extends TenantAwareService impleme
                 String.format("Asset at %.0f%% of useful life", utilizationPct),
                 "'" + asset.getName() + "' has consumed " + String.format("%.0f%%", utilizationPct) +
                         " of its " + asset.getUsefulLifeMonths() + "-month useful life. " +
-                        "Expected end-of-life: " + endOfLife + ". Plan replacement.",
-                0.85, endOfLife, org));
+                        "Expected end-of-life: " + endOfLife + ". Plan replacement. " +
+                        "Useful life is the accounting life on the record, not a measured " +
+                        "prediction of when this asset will stop working.",
+                monthsOwned + " of " + asset.getUsefulLifeMonths() + " months of useful life elapsed "
+                        + "(purchased " + asset.getPurchaseDate() + ")",
+                endOfLife, org));
     }
 
     // ── Rule 5: Depreciation Complete ────────────────────────────────────────
@@ -221,35 +251,82 @@ public class PredictiveMaintenanceServiceImpl extends TenantAwareService impleme
                 "'" + asset.getName() + "' has reached its residual value of " +
                         dep.residualValue() + " " + asset.getCurrency() +
                         " but remains in active use. Review disposal or write-off.",
-                0.99, LocalDate.now(), org));
+                // The depreciation engine's own output. Arithmetic, not a forecast.
+                "Fully depreciated to residual value " + dep.residualValue() + " " + asset.getCurrency()
+                        + " after " + dep.monthsInService() + " months in service",
+                LocalDate.now(), org));
     }
 
-    // ── Rule 6: Underutilized (IN_STOCK for >180 days with high value) ────────
+    // ── Rule 6: Not seen (high-value stock nobody has laid eyes on) ───────────
 
-    private List<PredictiveInsight> checkUnderutilized(Asset asset, Organisation org) {
+    /**
+     * High-value assets held in stock that nobody has been recorded seeing for
+     * {@link #UNSEEN_DAYS} days.
+     *
+     * <p>This used to be called "idle", measured from {@code updatedAt}, and it
+     * was wrong in the way that matters: {@code updatedAt} moves when anyone
+     * edits the record, so a bulk import or a corrected serial number reset it,
+     * and an asset in daily use could be reported as idle for six months. It
+     * cannot see use either — AssetIQ records no usage telemetry.
+     *
+     * <p>What it can see is a sighting: a scan, a checkout or check-in, or a
+     * physical audit verification. So the rule now measures exactly that, and
+     * says so. Two cases, kept apart because they mean different things:
+     * an asset last seen a long time ago, and an asset nobody has ever recorded
+     * seeing at all. The second is only raised once the record itself has been
+     * on the books longer than the threshold, so a tenant who imported their
+     * stock yesterday is not told it has gone missing.
+     */
+    private List<PredictiveInsight> checkUnseen(Asset asset, Map<UUID, AssetSighting> sightings,
+                                                Organisation org) {
         if (!AssetStatus.IN_STOCK.equals(asset.getStatus()) && !AssetStatus.RETIRED.equals(asset.getStatus())) {
             return Collections.emptyList();
         }
         if (asset.getPurchaseCost() == null
-                || asset.getPurchaseCost().compareTo(new BigDecimal("1000")) < 0) return Collections.emptyList();
-        if (asset.getUpdatedAt() == null) return Collections.emptyList();
+                || asset.getPurchaseCost().compareTo(HIGH_VALUE_THRESHOLD) < 0) return Collections.emptyList();
 
-        long daysIdle = ChronoUnit.DAYS.between(
-                asset.getUpdatedAt().atZone(java.time.ZoneOffset.UTC).toLocalDate(), LocalDate.now());
-        if (daysIdle < 180) return Collections.emptyList();
+        Instant now = Instant.now();
+        AssetSighting sighting = AssetSightingService.sightingFor(
+                asset.getId(), asset.getLastScannedAt(), sightings);
+
+        String title;
+        String description;
+        String basis;
+
+        if (sighting != null) {
+            long days = sighting.daysAgo(now);
+            if (days < UNSEEN_DAYS) return Collections.emptyList();
+            title = "Not seen for " + days + " days";
+            description = "'" + asset.getName() + "' (value: " + asset.getPurchaseCost() + " "
+                    + asset.getCurrency() + ") was last " + sighting.source().verb() + " " + days
+                    + " days ago and is held in stock. Consider redeployment or disposal to "
+                    + "recover value, or scan it to confirm it is still there.";
+            basis = sighting.describe(now);
+        } else {
+            // No scan, no checkout, no audit. All we know is how long the record
+            // has existed without any of those happening - which is a lower bound
+            // on the gap, and is reported as exactly that.
+            Instant recordActivity = asset.getUpdatedAt() != null ? asset.getUpdatedAt() : asset.getCreatedAt();
+            if (recordActivity == null) return Collections.emptyList();
+            long days = ChronoUnit.DAYS.between(recordActivity, now);
+            if (days < UNSEEN_DAYS) return Collections.emptyList();
+            title = "No recorded sighting";
+            description = "'" + asset.getName() + "' (value: " + asset.getPurchaseCost() + " "
+                    + asset.getCurrency() + ") is held in stock and has never been scanned, "
+                    + "checked out or confirmed by an audit. Its record has not changed for "
+                    + days + " days either, so there is no evidence anybody has seen it in at "
+                    + "least that long. Scan it to confirm it is still there.";
+            basis = "No scan, checkout or audit on record; record last changed " + days + " days ago";
+        }
 
         return List.of(upsertInsight(asset, InsightType.UNDERUTILIZED, InsightSeverity.LOW,
-                "High-value asset idle for " + daysIdle + " days",
-                "'" + asset.getName() + "' (value: " + asset.getPurchaseCost() + " " + asset.getCurrency() +
-                        ") has been idle for " + daysIdle + " days. " +
-                        "Consider redeployment or disposal to recover value.",
-                0.80, null, org));
+                title, description, basis, null, org));
     }
 
     // ── Upsert helper ─────────────────────────────────────────────────────────
 
     private PredictiveInsight upsertInsight(Asset asset, InsightType type, InsightSeverity severity,
-                                             String title, String description, double confidence,
+                                             String title, String description, String basis,
                                              LocalDate predictedDate, Organisation org) {
         insightRepo.deleteUnresolvedByAssetAndType(asset, type);
 
@@ -259,7 +336,7 @@ public class PredictiveMaintenanceServiceImpl extends TenantAwareService impleme
         insight.setSeverity(severity);
         insight.setTitle(title);
         insight.setDescription(description);
-        insight.setConfidence(confidence);
+        insight.setBasis(basis);
         insight.setPredictedDate(predictedDate);
         insight.setOrganisation(org);
         return insightRepo.save(insight);
@@ -339,7 +416,8 @@ public class PredictiveMaintenanceServiceImpl extends TenantAwareService impleme
         dto.setSeverity(i.getSeverity());
         dto.setTitle(i.getTitle());
         dto.setDescription(i.getDescription());
-        dto.setConfidence(i.getConfidence());
+        dto.setBasis(i.getBasis());
+        dto.setConfidence(i.getConfidence());   // always null since V64; see the DTO
         dto.setPredictedDate(i.getPredictedDate());
         dto.setResolved(i.isResolved());
         dto.setResolvedAt(i.getResolvedAt());
