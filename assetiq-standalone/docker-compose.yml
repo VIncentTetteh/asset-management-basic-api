@@ -132,6 +132,10 @@ services:
       APP_LICENSE_OFFLINE_KEY: ${APP_LICENSE_OFFLINE_KEY:-}
 
       APP_CORS_ALLOWED_ORIGINS: ${APP_PUBLIC_URL:?APP_PUBLIC_URL is required — e.g. https://assetiq.example.com}
+      # CorsConfig refuses a localhost origin under the prod profile, which would
+      # otherwise make every evaluation install crash-loop on first boot.
+      # bootstrap.sh sets this to true only when APP_PUBLIC_URL is localhost.
+      APP_CORS_ALLOW_LOCALHOST: ${APP_CORS_ALLOW_LOCALHOST:-false}
 
       # Object storage for generated reports and imports.
       #
@@ -226,8 +230,13 @@ services:
     user: "1000:1000"
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER when using the minio profile}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD when using the minio profile}
+      # Plain defaults, not `:?` — Compose interpolates every service in the
+      # file regardless of which profiles are active, so a required-variable
+      # marker here would break `docker compose up` for everyone not using
+      # MinIO. bootstrap.sh writes both values; MinIO itself refuses to start
+      # on an empty or too-short password, which is the error you want anyway.
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-}
     volumes:
       - minio_data:/data
     read_only: true

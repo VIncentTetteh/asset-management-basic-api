@@ -6,6 +6,7 @@ import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
 import jakarta.annotation.PostConstruct;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -87,10 +88,19 @@ public class OfflineLicenseService {
     /** Why verification failed, when it did. Null once {@link #verifiedClaims} is set. */
     private OfflineLicense verificationFailure;
 
+    /**
+     * {@code @Autowired} is required, not decorative: this class has two
+     * constructors, and Spring only infers injection when there is exactly one.
+     * Without the annotation it looks for a no-arg constructor, finds none, and
+     * the context fails to refresh — which does not show up in a unit test that
+     * constructs the service directly.
+     */
+    @Autowired
     public OfflineLicenseService(OfflineLicenseProperties props) {
         this(props, Clock.systemUTC());
     }
 
+    /** Test seam: lets a fixed clock drive expiry evaluation. */
     OfflineLicenseService(OfflineLicenseProperties props, Clock clock) {
         this.props = props;
         this.clock = clock;

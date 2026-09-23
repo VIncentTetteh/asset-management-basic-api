@@ -42,6 +42,7 @@ umask 077
 cat > "$ENV_FILE" <<EOF
 ASSETIQ_VERSION=0.0.0-smoke
 APP_PUBLIC_URL=https://localhost
+APP_CORS_ALLOW_LOCALHOST=true
 POSTGRES_DB=assetiq
 POSTGRES_USER=assetiq
 POSTGRES_PASSWORD=$(openssl rand -hex 24)
@@ -86,6 +87,16 @@ print((records[0].get("Health") or records[0].get("State") or "unknown")
     exited|dead)
       "${COMPOSE[@]}" logs --tail 80 backend
       fail "backend container exited" ;;
+    restarting)
+      # `restart: unless-stopped` turns a startup crash into a restart loop,
+      # which otherwise only surfaces as a five-minute timeout with no
+      # explanation. Spring prints this line once per failed refresh, so
+      # seeing it at all means the app is not going to come up on its own.
+      if "${COMPOSE[@]}" logs backend 2>/dev/null | grep -q "Application run failed"; then
+        "${COMPOSE[@]}" logs --tail 40 backend | grep -E "Application run failed|Caused by|BeanCreationException" | head -5
+        fail "backend is crash-looping on startup (see the lines above)"
+      fi
+      ;;
   esac
 
   [ "$(date +%s)" -lt "$deadline" ] || {

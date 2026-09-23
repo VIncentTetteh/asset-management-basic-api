@@ -54,6 +54,14 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# CorsConfig refuses localhost/127.0.0.1 as an origin under the prod profile,
+# so an evaluation install at https://localhost has to opt in explicitly or the
+# backend crash-loops before it ever serves a request.
+case "$PUBLIC_URL" in
+  *localhost*|*127.0.0.1*) ALLOW_LOCALHOST=true ;;
+  *)                       ALLOW_LOCALHOST=false ;;
+esac
+
 command -v openssl >/dev/null || die "openssl is required"
 command -v docker  >/dev/null || die "docker is required"
 
@@ -117,6 +125,9 @@ ASSETIQ_REGISTRY=public.ecr.aws/assetiq
 APP_PUBLIC_URL=${PUBLIC_URL}
 HTTP_PORT=80
 HTTPS_PORT=443
+# The prod profile rejects a localhost CORS origin outright. Set true only for
+# an evaluation install reached at localhost; leave false for a real hostname.
+APP_CORS_ALLOW_LOCALHOST=${ALLOW_LOCALHOST}
 
 # ── Database ─────────────────────────────────────────────────────────────────
 POSTGRES_DB=assetiq
