@@ -10,7 +10,7 @@ are four moving parts and no hidden ones.
 
 | Component | What it is | Where state lives |
 |---|---|---|
-| **backend** | Spring Boot 3 / Java 21 API, serves `/api/v1` and `/actuator` | PostgreSQL, plus an S3-compatible store for generated files — see [Object storage](#object-storage--read-this-one) |
+| **backend** | Spring Boot 3 / Java 21 API, serves `/api/v1` and `/actuator` | PostgreSQL, plus the `assetiq_storage` volume for uploaded and generated files — see [File storage](#file-storage) |
 | **web** | Next.js static export served by nginx on port 3000 | none — it is a pile of files |
 | **postgres** | PostgreSQL 16, the system of record | its data volume |
 | **redis** | Redis 7: rate-limiter counters, SSO handshake state | its data volume, none of it durable |
@@ -24,9 +24,11 @@ else:
   same hostname. If you front AssetIQ with your own proxy, preserve that.
 - **The licence never phones home and never stops the application.** See
   [Licence key](#licence-key).
-- **Configure object storage before you go live.** There is no local-disk
-  backend; the default keeps generated files in memory. See
-  [Object storage](#object-storage--read-this-one).
+- **Uploaded files live on a volume, and they are part of your backup.** The
+  database stores a key, not the bytes. See [File storage](#file-storage) and
+  [Backup and restore](#backup-and-restore).
+- **Uploaded files are not scanned for malware.** See
+  [What upload validation does and does not cover](#what-upload-validation-does-and-does-not-cover).
 
 ---
 
@@ -239,21 +241,54 @@ at the worst moment if left.
 can self-serve a forgotten password — an administrator must reset it. Set
 `SMTP_HOST`, `SMTP_USERNAME`, `SMTP_PASSWORD` and `APP_EMAIL_ENABLED=true`.
 
-### Object storage — read this one
+### File storage
 
-**AssetIQ has no local-disk storage backend.** With `APP_STORAGE_S3_ENABLED=false`
-(the default), generated reports and imports are held in the backend's JVM heap.
-That means:
+AssetIQ stores files for two purposes: **uploaded documents** — contracts,
+software licence certificates, expense receipts, disposal certificates, security
+policies, PCI SAQ and BoG control evidence, vulnerability scan reports — and
+**generated artefacts**, meaning report exports and import files.
 
-- every generated file is lost when the container restarts;
-- a second backend replica returns 404 for a file the first one produced;
-- the map is never evicted, so it is an unbounded path to an out-of-memory kill.
+The compose stack writes them to the `assetiq_storage` Docker volume, mounted at
+`/app/uploads` in the backend:
 
-This is acceptable while you evaluate. It is not acceptable in production, and
-nothing in the application will warn you about it at runtime.
+```
+APP_STORAGE_FILESYSTEM_ENABLED=true
+APP_STORAGE_FILESYSTEM_BASE_DIR=/app/uploads
+```
 
-The fix does not require leaving your own network. The compose stack bundles
-MinIO, which speaks S3, behind an optional profile:
+That is the default and it needs no action from you. The directory is created at
+startup, is owned by the application's uid (10001), is not readable by other
+users on the host, and the backend **refuses to start** if it is not writable —
+a storage directory that turns out to be read-only is otherwise discovered on
+the first upload, by a user.
+
+Two properties worth knowing:
+
+- **It is single-node.** A local directory belongs to one container. If you run
+  more than one backend, every replica must see the same directory, which means
+  either a shared filesystem or object storage. The Helm chart therefore defaults
+  to S3, not to this.
+- **It is in your backup.** `scripts/backup.sh` captures it in the same set as
+  the database, and `scripts/restore.sh` puts both back. This is not optional
+  diligence on your part: the `document_attachments` rows hold a storage key, not
+  the bytes, so a database-only restore gives you a system that lists every
+  document and 404s on all of them.
+
+#### Using object storage instead
+
+Worth doing if you run more than one backend container, if you already have an
+S3-compatible store you back up centrally, or if you want file storage to
+survive losing the host.
+
+Set `APP_STORAGE_S3_ENABLED=true` with `APP_STORAGE_S3_BUCKET`,
+`APP_STORAGE_S3_REGION` and, for a non-AWS store, `APP_STORAGE_S3_ENDPOINT` with
+`APP_STORAGE_S3_PATH_STYLE=true`. On AWS with an instance profile or IRSA, leave
+`AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` blank and let the SDK resolve the
+role. Set `APP_STORAGE_FILESYSTEM_ENABLED=false` at the same time, or S3 simply
+takes precedence and the volume goes unused.
+
+If you want an S3-compatible store without leaving your own network, the compose
+stack bundles MinIO behind an optional profile:
 
 ```bash
 docker compose --profile minio up -d
@@ -265,22 +300,84 @@ docker compose exec minio mc mb --ignore-existing local/assetiq
 ```
 
 `bootstrap.sh` has already written MinIO credentials and the matching
-`APP_STORAGE_S3_*` values into `.env`. Flip `APP_STORAGE_S3_ENABLED=true` and
-restart the backend:
+`APP_STORAGE_S3_*` values into `.env`. Set `APP_STORAGE_S3_ENABLED=true`,
+`APP_STORAGE_FILESYSTEM_ENABLED=false`, and restart the backend:
 
 ```bash
 docker compose up -d --force-recreate backend
 ```
 
-If you would rather use AWS S3, or any other S3-compatible store, set
-`APP_STORAGE_S3_BUCKET`, `APP_STORAGE_S3_REGION` and (for a non-AWS store)
-`APP_STORAGE_S3_ENDPOINT` with `APP_STORAGE_S3_PATH_STYLE=true`. On AWS with an
-instance profile or IRSA, leave `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`
-blank and let the SDK resolve the role.
+If you do, `scripts/backup.sh` writes an empty storage archive and says so:
+files are in the bucket, and backing the bucket up is yours to arrange —
+`mc mirror` to another host, or your provider's own tooling.
+
+#### There is no configuration in which uploads are silently lost
+
+The backend refuses to start when neither backend is enabled:
+
+```
+[STARTUP FAILURE] No durable file storage is configured.
+```
+
+Earlier builds fell through to an in-memory map in that case: files were held in
+the JVM heap, lost on every restart, invisible to a second replica and never
+evicted, and nothing said so. That fallback is gone. The heap-backed store still
+exists for the test suite behind `APP_STORAGE_IN_MEMORY_ENABLED=true`, and the
+application refuses to start with it enabled outside a dev or test profile.
 
 On Kubernetes, `values-production.yaml` sets `storage.s3.enabled: true` with an
 empty bucket on purpose, so a deployment that forgot to configure storage fails
-at the application rather than silently writing into a pod-local heap.
+at the application rather than writing into a pod-local directory that the next
+rollout discards.
+
+### What upload validation does and does not cover
+
+Every file entering AssetIQ, through any endpoint, passes the same checks:
+
+| Check | What it does |
+|---|---|
+| Size cap | 25 MB, on the actual bytes, not the length the client declares. Tunable with `APP_UPLOAD_MAX_FILE_SIZE`. |
+| Content-type allow-list | PDF, JPEG, PNG, GIF, WEBP, Word, Excel, PowerPoint, OpenDocument, plain text and CSV. Everything else is refused. |
+| SVG, HTML, XHTML and XML are refused outright | All four carry script that would execute in AssetIQ's own origin. |
+| Byte-signature verification | The leading bytes must match the declared type, so renaming an HTML payload to `invoice.pdf` does not get it in. |
+| Filename sanitisation | Path separators, quotes and control characters are stripped. The filename never determines where the file is stored: every path segment, including the tenant prefix, is generated. |
+| Download hardening | Files are served `Content-Disposition: attachment` with `X-Content-Type-Options: nosniff` and a restrictive CSP, so an uploaded file cannot be rendered as a page in AssetIQ's origin. |
+| Tenant scoping | Every document endpoint resolves the record by id **and** organisation before touching it. One tenant cannot list, download or delete another's attachment. |
+
+**What none of this is, is malware scanning.** Those checks bound what a file can
+be *interpreted* as. They say nothing about what it contains: a structurally
+valid PDF or XLSX carrying a malicious payload is accepted and stored, and will
+be handed to the next colleague who downloads it exactly as uploaded. The
+residual risk is the ordinary one for any file-sharing feature — a user of the
+same organisation, or an administrator, opens a malicious document in their own
+application (Acrobat, Excel, their OS previewer) and is compromised there. The
+hardening above prevents the *browser-side* class of attack, where the file
+executes inside AssetIQ itself and reaches another user's session; it does not
+prevent the *endpoint-side* class.
+
+What follows from that:
+
+- Uploads are trusted to the same degree as any other file a colleague emails
+  you. Treat the attachment feature as an internal file share among people who
+  already have accounts in the same organisation, not as a public intake.
+- **If you are under a regulatory obligation to scan uploads** — PCI DSS, BoG
+  directives, most ISO 27001 statements of applicability — put a scanning
+  gateway (ICAP proxy, or a WAF with AV) in front of AssetIQ, or turn the
+  feature off for the tenants concerned:
+
+  ```sql
+  -- All tenants:
+  UPDATE feature_flag SET enabled_globally = FALSE, rollout_percentage = 0
+   WHERE flag_key = 'commercial.document-attachments';
+
+  -- One tenant only (overrides the global default):
+  INSERT INTO feature_flag_organisation (id, feature_flag_id, organisation_id, enabled)
+  SELECT gen_random_uuid(), f.id, '<org-uuid>', FALSE
+    FROM feature_flag f WHERE f.flag_key = 'commercial.document-attachments';
+  ```
+
+- Endpoint anti-virus on the machines that download documents is doing real work
+  here and should not be relied on as an afterthought.
 
 ---
 
@@ -409,21 +506,27 @@ rollback unless you have decided to lose everything written since the snapshot.
 
 ## Backup and restore
 
-Two things must be backed up, and **both are required to recover**:
+Three things must be backed up, and **all three are required to recover**:
 
-1. **The PostgreSQL database.**
-2. **`APP_DATA_ENCRYPTION_KEY`.**
+1. **The PostgreSQL databases** — `assetiq` and `license_server`.
+2. **The file storage directory** — every uploaded contract, licence
+   certificate, receipt and piece of compliance evidence.
+3. **`APP_DATA_ENCRYPTION_KEY`.**
 
-A database backup restored without that key leaves every encrypted column —
-MFA secrets, SSO and webhook secrets, payment gateway tokens — permanently
-unreadable. There is no recovery path, no escrow, and no support process that
-can reconstruct it. Store it the way you would store a password database, in a
-different place from the database dump.
+The first two are one command, below, and one command to put back. The third is
+yours to keep somewhere else.
 
-If you use the bundled MinIO, also back up its `minio_data` volume — or,
-better, use `mc mirror` to copy the bucket somewhere off this host. With
-`APP_STORAGE_S3_ENABLED=false` there is nothing to back up, because generated
-files only ever existed in the backend's memory.
+**On the encryption key.** A database backup restored without it leaves every
+encrypted column — MFA secrets, SSO and webhook secrets, payment gateway tokens
+— permanently unreadable. There is no recovery path, no escrow, and no support
+process that can reconstruct it. Store it the way you would store a password
+database, in a different place from the dumps.
+
+**On the files.** `document_attachments` rows hold a *storage key*, not the
+bytes. A database-only restore therefore produces a system that lists every
+document and 404s on all of them — and it looks completely healthy until someone
+clicks one. This is why `backup.sh` captures both halves under a single
+timestamp and `restore.sh` refuses a set that is missing either.
 
 ### Backing up
 
@@ -432,63 +535,71 @@ cd assetiq-standalone
 ./scripts/backup.sh
 ```
 
-Or by hand:
+One set, one timestamp:
 
-```bash
-# Database
-docker compose exec -T postgres \
-  pg_dump -U assetiq -d assetiq --format=custom --compress=9 \
-  > assetiq-$(date -u +%Y%m%dT%H%M%SZ).dump
-
-# Object storage, if you run the bundled MinIO
-docker run --rm \
-  -v assetiq_minio_data:/data:ro \
-  -v "$PWD":/backup \
-  alpine tar czf /backup/assetiq-minio-$(date -u +%Y%m%dT%H%M%SZ).tar.gz -C /data .
+```
+backups/assetiq_20260923_020000.sql.gz          both databases
+backups/license_server_20260923_020000.sql.gz
+backups/storage_20260923_020000.tar.gz          the file storage directory
+backups/manifest_20260923_020000.txt            what was captured, and how
 ```
 
-Verify the dump is readable *before* you rely on it — a backup you have never
-restored is a hypothesis:
+Schedule it:
 
-```bash
-pg_restore --list assetiq-20260923T120000Z.dump | head
+```cron
+0 2 * * * /path/to/assetiq-standalone/scripts/backup.sh
 ```
+
+Sets older than 30 days are pruned; override with
+`ASSETIQ_BACKUP_RETENTION_DAYS`. Copy the `backups/` directory off this host —
+a backup that lives on the machine it protects is not a backup.
+
+If you moved file storage to S3 or MinIO, the storage archive is written empty
+and the script says so; back the bucket up with `mc mirror` or your provider's
+tooling instead.
 
 ### Restoring
 
 ```bash
 cd assetiq-standalone
-
-# 1. Stop the application, leave the database running.
-docker compose stop backend web edge
-
-# 2. Restore into a clean database. --clean drops existing objects first.
-docker compose exec -T postgres \
-  pg_restore -U assetiq -d assetiq --clean --if-exists --no-owner \
-  < assetiq-20260923T120000Z.dump
-
-# 3. Restore object storage, if you run the bundled MinIO.
-docker compose --profile minio stop minio
-docker run --rm -v assetiq_minio_data:/data -v "$PWD":/backup \
-  alpine sh -c 'rm -rf /data/* && tar xzf /backup/assetiq-minio-*.tar.gz -C /data'
-
-# 4. Confirm .env holds the SAME APP_DATA_ENCRYPTION_KEY the dump was taken
-#    under. If it does not, stop here — starting up will not fail, but every
-#    encrypted field will be garbage.
-
-# 5. Start.
-docker compose up -d
+./scripts/restore.sh --list          # what you have
+./scripts/restore.sh 20260923_020000
 ```
 
-On Kubernetes the same applies, using your database's own restore procedure and
-the same warning about the encryption key.
+It stops the backend, recreates both databases from the dumps, replaces the
+contents of the storage directory from the archive, and starts the backend
+again. It will not run against a partial set:
+
+```
+ERROR: backup set 20260923_020000 is incomplete. Missing:
+  backups/storage_20260923_020000.tar.gz
+Restoring part of a set produces a database whose document rows point at files
+that are not there. Refusing.
+```
+
+Before you start, confirm `.env` holds the **same `APP_DATA_ENCRYPTION_KEY`**
+the dumps were taken under. Starting up with the wrong one will not fail; every
+encrypted field will simply be garbage.
+
+On Kubernetes the shape is the same — your database's own restore procedure,
+plus restoring the PVC or the bucket — and so is the warning about the key.
 
 ### Restore drill
 
-Restore into a throwaway copy at least once a quarter. Point a second compose
-project at the dump, start it, log in, and open a record with an encrypted field
-(a user with MFA enabled is a good test). That exercise is the only way to find
-out you have been backing up the database but not the key.
+Restore into a throwaway copy at least once a quarter, and check both halves:
+
+1. Point a second compose project at a backup set and restore it.
+2. Log in and open a record with an encrypted field — a user with MFA enabled is
+   a good test. This catches a missing `APP_DATA_ENCRYPTION_KEY`.
+3. **Open a document attachment and confirm the file downloads.** This catches a
+   database-only restore, which is the failure that hides best.
+
+The repository rehearses exactly this in CI:
+`assetiq-standalone/scripts/smoke-compose.sh` brings the stack up, writes a
+marker into both the database and the storage directory, runs `backup.sh`,
+destroys both, runs `restore.sh`, and asserts both came back — and that an
+incomplete set is refused. A backup procedure nobody has run is a hypothesis;
+that script is how this one stops being one.
 
 ---
 
@@ -506,7 +617,9 @@ failures name themselves.
 | `JWT secret validation failed` | `APP_JWT_SECRET` is too short or too low-entropy | `openssl rand -hex 32` |
 | `APP_DATA_ENCRYPTION_KEY must be Base64 for exactly 32 random bytes` | Wrong format — often hex instead of Base64 | `openssl rand -base64 32` |
 | `ddl-auto='update' is NOT allowed` | Someone set Hibernate to mutate the schema | Set `SPRING_JPA_HIBERNATE_DDL_AUTO=validate`; Flyway owns the schema |
-| `app.storage.s3.enabled=false in cloud mode` | The install is not declaring itself self-hosted | Set `APP_LICENSE_OFFLINE_ENABLED=true` (the compose stack does), or configure object storage |
+| `No durable file storage is configured` | Both `APP_STORAGE_S3_ENABLED` and `APP_STORAGE_FILESYSTEM_ENABLED` are false | Set `APP_STORAGE_FILESYSTEM_ENABLED=true` with a writable `APP_STORAGE_FILESYSTEM_BASE_DIR` (the compose stack does), or configure S3 |
+| `Cannot use app.storage.filesystem.base-dir` | The storage directory is missing or not writable by uid 10001 | `mkdir -p` it and `chown 10001:10001`; on compose, check the `assetiq_storage` volume is mounted |
+| `app.storage.in-memory.enabled=true outside a dev` | The heap-backed test store was switched on in a real deployment | Set `APP_STORAGE_IN_MEMORY_ENABLED=false` and enable a durable backend |
 | `Validate failed ... applied migration ... has a different checksum` | The database was migrated by a different build | See below |
 | Connection refused to `postgres:5432` | Backend started before the database was ready | The compose file already gates on health; if you changed it, restore `depends_on: condition: service_healthy` |
 

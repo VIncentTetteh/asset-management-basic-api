@@ -4,8 +4,9 @@
 #
 # Brings Postgres, Redis and the backend up from source, waits for the backend
 # to report healthy, and asserts that Flyway migrated against the composed
-# Postgres rather than the app silently starting on an empty schema. Tears the
-# stack down on exit, pass or fail.
+# Postgres rather than the app silently starting on an empty schema. Then
+# rehearses backup.sh and restore.sh end to end, because an unrehearsed restore
+# is a guess. Tears the stack down on exit, pass or fail.
 #
 # Run from anywhere:   ./assetiq-standalone/scripts/smoke-compose.sh
 # Or via the Makefile: make selfhosted-smoke
@@ -22,12 +23,15 @@ ENV_FILE="$(mktemp -t assetiq-smoke-env.XXXXXX)"
 COMPOSE=(docker compose -p "$PROJECT" --env-file "$ENV_FILE"
          -f docker-compose.yml -f docker-compose.build.yml)
 
+BACKUP_DIR="$(mktemp -d -t assetiq-smoke-backups.XXXXXX)"
+
 cleanup() {
   local status=$?
   echo ""
   echo "==> tearing down"
   "${COMPOSE[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true
   rm -f "$ENV_FILE"
+  rm -rf "$BACKUP_DIR"
   exit "$status"
 }
 trap cleanup EXIT INT TERM
@@ -151,6 +155,93 @@ if ! "${COMPOSE[@]}" exec -T backend sh -c 'touch /tmp/probe && rm /tmp/probe'; 
   fail "/tmp is not writable — the JVM needs it"
 fi
 info "/tmp is writable"
+
+# ── Assert durable file storage is actually in use ───────────────────────────
+# The backend refuses to start without a durable backend, so reaching this point
+# means one is configured. Prove it is the filesystem one and that it is
+# writable by the app's uid, rather than trusting the env var.
+STORAGE_DIR=/app/uploads
+info "checking the file storage directory is writable by the backend"
+if ! "${COMPOSE[@]}" exec -T backend sh -c \
+      "touch $STORAGE_DIR/.smoke-probe && rm $STORAGE_DIR/.smoke-probe"; then
+  fail "$STORAGE_DIR is not writable — uploads would fail at runtime"
+fi
+info "$STORAGE_DIR is writable"
+
+# ── Rehearse backup and restore ──────────────────────────────────────────────
+# The failure being designed out: a database-only restore. document_attachments
+# rows hold a storage key, not bytes, so a restore that brings back the rows and
+# not the files produces a system that lists every document and 404s on all of
+# them. This proves one command captures both and one command puts both back.
+info "rehearsing backup.sh (database + file storage)"
+
+MARKER_KEY="attachments/smoke/$(date +%s)/evidence.txt"
+MARKER_BODY="restore-marker-$$"
+"${COMPOSE[@]}" exec -T backend sh -c \
+  "mkdir -p \"\$(dirname $STORAGE_DIR/$MARKER_KEY)\" && printf '%s' '$MARKER_BODY' > $STORAGE_DIR/$MARKER_KEY" \
+  || fail "could not write the marker file into $STORAGE_DIR"
+
+# A row that must survive the database half of the round trip.
+MARKER_TABLE="smoke_restore_marker_$$"
+"${COMPOSE[@]}" exec -T postgres psql -U assetiq -d assetiq -q -v ON_ERROR_STOP=1 \
+  -c "CREATE TABLE \"$MARKER_TABLE\" (v text); INSERT INTO \"$MARKER_TABLE\" VALUES ('$MARKER_BODY');" \
+  >/dev/null || fail "could not create the database marker table"
+
+export ASSETIQ_COMPOSE_CMD="docker compose -p $PROJECT --env-file $ENV_FILE"
+export ASSETIQ_COMPOSE_FILES="-f docker-compose.yml -f docker-compose.build.yml"
+export ASSETIQ_BACKUP_DIR="$BACKUP_DIR"
+export POSTGRES_USER=assetiq
+POSTGRES_PASSWORD="$(grep '^POSTGRES_PASSWORD=' "$ENV_FILE" | cut -d= -f2-)"
+export POSTGRES_PASSWORD
+export APP_STORAGE_FILESYSTEM_BASE_DIR="$STORAGE_DIR"
+export ASSETIQ_RESTORE_ASSUME_YES=1
+
+# backup.sh writes into its own repo-relative backups/ dir; point it at the
+# throwaway one so a smoke run never drops files into a real installation.
+( cd "$(pwd)" && ASSETIQ_BACKUP_DIR="$BACKUP_DIR" ./scripts/backup.sh ) \
+  > "$BACKUP_DIR/backup.log" 2>&1 || { cat "$BACKUP_DIR/backup.log"; fail "backup.sh failed"; }
+
+TS="$(grep -o 'Restore with: ./scripts/restore.sh [0-9_]*' "$BACKUP_DIR/backup.log" \
+      | awk '{print $NF}')"
+[ -n "$TS" ] || { cat "$BACKUP_DIR/backup.log"; fail "could not determine the backup timestamp"; }
+info "backup set $TS written"
+
+for f in "assetiq_$TS.sql.gz" "license_server_$TS.sql.gz" "storage_$TS.tar.gz" "manifest_$TS.txt"; do
+  [ -s "$BACKUP_DIR/$f" ] || fail "backup set is missing or empty: $f"
+done
+info "backup set contains both databases and the storage archive"
+
+# Destroy both halves, so a restore that only does one of them fails here.
+info "destroying the marker file and the marker table"
+"${COMPOSE[@]}" exec -T backend sh -c "rm -f $STORAGE_DIR/$MARKER_KEY" \
+  || fail "could not remove the marker file"
+"${COMPOSE[@]}" exec -T postgres psql -U assetiq -d assetiq -q \
+  -c "DROP TABLE \"$MARKER_TABLE\";" >/dev/null || fail "could not drop the marker table"
+
+info "running restore.sh $TS"
+./scripts/restore.sh "$TS" > "$BACKUP_DIR/restore.log" 2>&1 \
+  || { cat "$BACKUP_DIR/restore.log"; fail "restore.sh failed"; }
+
+# The file must be back, byte for byte.
+restored="$("${COMPOSE[@]}" exec -T backend sh -c "cat $STORAGE_DIR/$MARKER_KEY" 2>/dev/null \
+            | tr -d '\r\n')"
+[ "$restored" = "$MARKER_BODY" ] \
+  || fail "the storage file was not restored (expected '$MARKER_BODY', got '${restored:-<nothing>}')"
+info "file storage restored"
+
+# And so must the row.
+restored_row="$("${COMPOSE[@]}" exec -T postgres psql -U assetiq -d assetiq -tAc \
+                "SELECT v FROM \"$MARKER_TABLE\"" 2>/dev/null | tr -d '[:space:]')"
+[ "$restored_row" = "$MARKER_BODY" ] \
+  || fail "the database row was not restored (got '${restored_row:-<nothing>}')"
+info "database restored"
+
+# A partial set must be refused rather than half-applied.
+rm -f "$BACKUP_DIR/storage_$TS.tar.gz"
+if ./scripts/restore.sh "$TS" >/dev/null 2>&1; then
+  fail "restore.sh accepted a set with no storage archive — a database-only restore"
+fi
+info "restore.sh refuses an incomplete backup set"
 
 echo ""
 echo "SMOKE TEST PASSED"
