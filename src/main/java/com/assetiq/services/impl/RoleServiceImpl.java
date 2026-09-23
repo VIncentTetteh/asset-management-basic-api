@@ -214,6 +214,50 @@ public class RoleServiceImpl extends TenantAwareService implements RoleService {
         return mapToDto(role);
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public com.assetiq.dto.invitation.RoleEffectivePermissionsDto getEffectivePermissions(UUID roleId) {
+        Organisation org = requireTenantOrg();
+        Role role = roleRepository.findByIdAndOrganisationAndDeletedAtIsNull(roleId, org)
+                .orElseThrow(() -> new IllegalArgumentException("Role not found"));
+
+        // Grant-all roles carry no permission rows at all — the flag is the grant —
+        // so reading the join table for one would report an administrator as
+        // having nothing.
+        List<String> names = role.isGrantAllPermissions()
+                ? List.copyOf(RolePermissionDefaults.allPermissionNames())
+                : roleRepository.findPermissionNamesByRoleId(roleId);
+
+        List<com.assetiq.security.PermissionCatalogue.Entry> entries =
+                com.assetiq.security.PermissionCatalogue.describe(names);
+        List<com.assetiq.dto.invitation.PermissionDescriptionDto> described = entries.stream()
+                .map(RoleServiceImpl::describe)
+                .toList();
+
+        return new com.assetiq.dto.invitation.RoleEffectivePermissionsDto(
+                role.getId(), role.getName(), role.getDescription(),
+                role.isSystemRole(), role.isGrantAllPermissions(),
+                described.size(), described,
+                com.assetiq.security.PermissionCatalogue.grouped(entries).entrySet().stream()
+                        .collect(Collectors.toMap(java.util.Map.Entry::getKey,
+                                e -> e.getValue().stream().map(RoleServiceImpl::describe).toList(),
+                                (a, b) -> a, java.util.LinkedHashMap::new)),
+                entries.stream().filter(e -> !e.enforced())
+                        .map(com.assetiq.security.PermissionCatalogue.Entry::key).sorted().toList());
+    }
+
+    @Override
+    public List<com.assetiq.dto.invitation.PermissionDescriptionDto> permissionCatalogue() {
+        return com.assetiq.security.PermissionCatalogue.describe(RolePermissionDefaults.allPermissionNames())
+                .stream().map(RoleServiceImpl::describe).toList();
+    }
+
+    private static com.assetiq.dto.invitation.PermissionDescriptionDto describe(
+            com.assetiq.security.PermissionCatalogue.Entry e) {
+        return new com.assetiq.dto.invitation.PermissionDescriptionDto(
+                e.key(), e.label(), e.summary(), e.group(), e.write(), e.enforced());
+    }
+
     // ── Internal helpers ──────────────────────────────────────────────────────
 
     /**

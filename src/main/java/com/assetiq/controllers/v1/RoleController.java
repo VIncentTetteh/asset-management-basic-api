@@ -85,6 +85,33 @@ public class RoleController {
         return ResponseEntity.ok(permissions);
     }
 
+    /**
+     * GET /api/v1/roles/permissions/catalogue — every permission, described in
+     * plain language and grouped by area of the product.
+     *
+     * <p>{@code /roles/permissions} above stays exactly as it was (a flat list of
+     * authority strings) because the web app already consumes it; this is the
+     * version a permission matrix can render without inventing its own labels,
+     * and it is the only place that says which permissions gate nothing today.
+     */
+    @GetMapping("/permissions/catalogue")
+    @PreAuthorize("hasAnyAuthority('SYSTEM_ADMIN','VIEW_ROLES','MANAGE_ROLES','MANAGE_ORGANIZATION_SETTINGS','VIEW_ASSETS')")
+    public ResponseEntity<List<com.assetiq.dto.invitation.PermissionDescriptionDto>> getPermissionCatalogue() {
+        return ResponseEntity.ok(roleService.permissionCatalogue());
+    }
+
+    /**
+     * GET /api/v1/roles/{id}/effective-permissions — what someone holding this
+     * role will actually be able to do, resolved (grant-all included) and worded
+     * for a human.
+     */
+    @GetMapping("/{id}/effective-permissions")
+    @PreAuthorize("hasAnyAuthority('SYSTEM_ADMIN','VIEW_ROLES','MANAGE_ROLES','MANAGE_ORGANIZATION_SETTINGS','MANAGE_USERS','VIEW_USERS')")
+    public ResponseEntity<com.assetiq.dto.invitation.RoleEffectivePermissionsDto> getEffectivePermissions(
+            @PathVariable UUID id) {
+        return ResponseEntity.ok(roleService.getEffectivePermissions(id));
+    }
+
     @GetMapping("/by-name")
     @PreAuthorize("hasAnyAuthority('SYSTEM_ADMIN','VIEW_ROLES','MANAGE_ROLES','MANAGE_ORGANIZATION_SETTINGS')")
     @EnforceTenant
