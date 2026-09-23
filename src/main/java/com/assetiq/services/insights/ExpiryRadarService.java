@@ -145,8 +145,13 @@ public class ExpiryRadarService {
                             int limit, CurrencyConversion fx, boolean showMoney) {
         Map<String, Bucket> buckets = new LinkedHashMap<>();
         buckets.put("OVERDUE", new Bucket(fx, "OVERDUE", "Already past due", null, -1));
-        for (int start = 0; start < horizon; start += BUCKET_WIDTH_DAYS) {
-            int end = Math.min(start + BUCKET_WIDTH_DAYS - 1, horizon);
+        for (int start = 0; start <= horizon; start += BUCKET_WIDTH_DAYS) {
+            // The last bucket runs to the horizon itself rather than stopping one
+            // day short, so an item due exactly on the horizon is counted.
+            int end = start + BUCKET_WIDTH_DAYS * 2 > horizon ? horizon : start + BUCKET_WIDTH_DAYS - 1;
+            if (start > end) {
+                break;
+            }
             String key = "DUE_" + start + "_" + end;
             buckets.put(key, new Bucket(fx, key, "Due in " + start + "-" + end + " days", start, end));
         }

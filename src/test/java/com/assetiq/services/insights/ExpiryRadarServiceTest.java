@@ -83,8 +83,21 @@ class ExpiryRadarServiceTest {
         assertThat(bucketCount(contracts, "OVERDUE")).isEqualTo(1L);
         assertThat(bucketCount(contracts, "DUE_0_29")).isEqualTo(1L);
         assertThat(bucketCount(contracts, "DUE_30_59")).isEqualTo(1L);
-        assertThat(bucketCount(contracts, "DUE_60_89")).isEqualTo(1L);
-        assertThat(bucketValue(contracts, "DUE_60_89")).isEqualTo("800.00");
+        assertThat(bucketCount(contracts, "DUE_60_90")).isEqualTo(1L);
+        assertThat(bucketValue(contracts, "DUE_60_90")).isEqualTo("800.00");
+    }
+
+    @Test
+    @DisplayName("an item due exactly on the horizon is counted, not dropped")
+    void theHorizonItselfIsInclusive() {
+        LocalDate today = LocalDate.now();
+        when(contractRepository.findDueBy(eq(org), any())).thenReturn(List.of(
+                due("OnTheEdge", today.plusDays(30), "100", "GHS")));
+
+        Map<String, Object> contracts = stream(service.radar(org, 30, null, everything), "CONTRACT");
+
+        assertThat(contracts.get("dueWithinHorizon")).isEqualTo(1L);
+        assertThat(bucketCount(contracts, "DUE_0_30")).isEqualTo(1L);
     }
 
     @Test
@@ -99,8 +112,8 @@ class ExpiryRadarServiceTest {
         Map<String, Object> r = service.radar(org, 30, null, everything);
         Map<String, Object> licences = stream(r, "LICENCE");
 
-        assertThat(bucketCount(licences, "DUE_0_29")).isEqualTo(3L);
-        assertThat(bucketValue(licences, "DUE_0_29")).isEqualTo("600.00");   // 50*10 + 100
+        assertThat(bucketCount(licences, "DUE_0_30")).isEqualTo(3L);
+        assertThat(bucketValue(licences, "DUE_0_30")).isEqualTo("600.00");   // 50*10 + 100
         assertThat(r.get("complete")).isEqualTo(false);
         assertThat(r.get("missingRates")).isEqualTo(List.of("JPY->GHS"));
     }
