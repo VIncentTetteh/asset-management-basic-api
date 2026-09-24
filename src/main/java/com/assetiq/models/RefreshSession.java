@@ -36,4 +36,28 @@ public class RefreshSession extends BaseEntity {
 
     @Column(name = "replaced_by_token_hash", length = 64)
     private String replacedByTokenHash;
+
+    /**
+     * When this token was spent by a rotation, as distinct from {@code revokedAt},
+     * which is also set by logout, password change and reuse detection.
+     */
+    @Column(name = "consumed_at")
+    private Instant consumedAt;
+
+    /**
+     * The replacement refresh token, sealed under a key derived from the raw token
+     * this row represents. The server stores only the hash of that raw token, so it
+     * cannot open the envelope on its own; a caller presenting the consumed token can.
+     * Used only inside the replay grace window — see RefreshSessionService.
+     */
+    @Column(name = "replacement_envelope", columnDefinition = "text")
+    private String replacementEnvelope;
+
+    /**
+     * The absolute cap for this whole session family, carried forward unchanged by
+     * every rotation. Rotation extends {@code expiresAt} (the idle timeout); it never
+     * extends this.
+     */
+    @Column(name = "family_expires_at")
+    private Instant familyExpiresAt;
 }
