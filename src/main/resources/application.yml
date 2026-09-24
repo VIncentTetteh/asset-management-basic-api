@@ -254,7 +254,38 @@ app:
     # Short-lived bearer token; rotating refresh sessions provide continuity.
     expiration: ${APP_JWT_EXPIRATION:900000}
   auth:
-    refresh-token-lifetime: ${APP_REFRESH_TOKEN_LIFETIME:PT12H}
+    # ── Refresh session lifetime ──────────────────────────────────────────────
+    # Two clocks, and they do different jobs.
+    #
+    # refresh-token-lifetime is the IDLE timeout: how long a family may go unused
+    # before it dies. Every rotation resets it, so this is "how long may the app
+    # sit closed". It used to be PT12H, which meant a field worker who finished a
+    # shift and opened the app the next morning had to retype their password —
+    # every single day. P30D is the common shape for a mobile field app.
+    #
+    # refresh-absolute-lifetime is the CAP: no amount of use extends a family past
+    # it. At P90D a device that is used daily is still forced back through a real
+    # password (and MFA) once a quarter.
+    #
+    # THE TRADE-OFF, plainly: a refresh token on a lost or stolen unlocked phone is
+    # now good for up to 30 days of silence, where it used to die within 12 hours.
+    # That is the price of not making people type a password every morning. It is
+    # acceptable only because revocation is immediate and reliable: logout,
+    # password change, MFA change, admin deactivation, and erasure all revoke the
+    # whole family at once (SessionRevocationService), and the access token stays
+    # at 15 minutes so a revoked session dies within one access-token window.
+    # Shorten these if your deployment cannot rely on people reporting a lost
+    # device promptly; both accept any ISO-8601 duration (e.g. PT12H, P7D).
+    refresh-token-lifetime: ${APP_REFRESH_TOKEN_LIFETIME:P30D}
+    refresh-absolute-lifetime: ${APP_REFRESH_ABSOLUTE_LIFETIME:P90D}
+    # How long after a refresh token is spent it may still be presented to replay
+    # the SAME replacement instead of tripping reuse detection. It exists for one
+    # case: a mobile process killed between the server committing a rotation and
+    # the device writing the replacement to disk. 30s covers a kill-and-relaunch
+    # and a retry storm while staying far short of "an attacker replays it minutes
+    # later" — that still revokes the family, as does any replay once the family
+    # has rotated past the replacement. Set to PT0S to disable the window entirely.
+    refresh-replay-grace: ${APP_REFRESH_REPLAY_GRACE:PT30S}
   security:
     # Base64-encoded 32-byte AES key. Production should inject this through its
     # secret manager; never commit the value.
