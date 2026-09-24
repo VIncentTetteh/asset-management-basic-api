@@ -130,17 +130,21 @@ public class MfaController {
      * Body: { "code": "123456" }
      */
     @PostMapping("/verify")
-    public ResponseEntity<Map<String, String>> verify(Authentication auth,
+    public ResponseEntity<Map<String, Object>> verify(Authentication auth,
                                                       @RequestBody Map<String, String> body) {
         User user = resolveUser(auth);
 
         if (user.getMfaSecret() == null) {
-            return ResponseEntity.badRequest().body(Map.of("error", "MFA setup not started. Call POST /setup first."));
+            return ResponseEntity.badRequest().body(AuthResponses.body(
+                    "Start setting up two-factor authentication first — scan the QR code from POST /setup, "
+                            + "then send the code it shows.",
+                    "MFA_SETUP_NOT_STARTED"));
         }
 
         String code = body.get("code");
         if (code == null || code.isBlank()) {
-            return ResponseEntity.badRequest().body(Map.of("error", "Missing 'code' in request body."));
+            return ResponseEntity.badRequest().body(AuthResponses.body(
+                    "Enter the 6-digit code from your authenticator app.", "MFA_CODE_MISSING"));
         }
 
         if (!isValidTotp(user, code)) {
@@ -162,17 +166,20 @@ public class MfaController {
      * Body: { "code": "123456" }
      */
     @DeleteMapping("/disable")
-    public ResponseEntity<Map<String, String>> disable(Authentication auth,
+    public ResponseEntity<Map<String, Object>> disable(Authentication auth,
                                                        @RequestBody Map<String, String> body) {
         User user = resolveUser(auth);
 
         if (!Boolean.TRUE.equals(user.getMfaEnabled())) {
-            return ResponseEntity.badRequest().body(Map.of("error", "MFA is not enabled."));
+            return ResponseEntity.badRequest().body(AuthResponses.body(
+                    "Two-factor authentication is not enabled on this account, so there is nothing to disable.",
+                    "MFA_NOT_ENABLED"));
         }
 
         String code = body.get("code");
         if (code == null || code.isBlank()) {
-            return ResponseEntity.badRequest().body(Map.of("error", "Missing 'code' in request body."));
+            return ResponseEntity.badRequest().body(AuthResponses.body(
+                    "Enter the 6-digit code from your authenticator app.", "MFA_CODE_MISSING"));
         }
 
         if (!isValidTotp(user, code)) {
@@ -205,10 +212,14 @@ public class MfaController {
         String code = body.get("code");
 
         if (challengeToken == null || challengeToken.isBlank()) {
-            return ResponseEntity.badRequest().body(Map.of("error", "Missing mfaChallengeToken."));
+            return ResponseEntity.badRequest().body(AuthResponses.body(
+                    "This sign-in step has no challenge token. Start again from the sign-in page.",
+                    AuthResponses.CODE_MFA_CHALLENGE_INVALID,
+                    "mfaChallengeExpired", true));
         }
         if (code == null || code.isBlank()) {
-            return ResponseEntity.badRequest().body(Map.of("error", "Missing 'code' in request body."));
+            return ResponseEntity.badRequest().body(AuthResponses.body(
+                    "Enter the 6-digit code from your authenticator app.", "MFA_CODE_MISSING"));
         }
 
         // Validate the challenge token
@@ -216,15 +227,19 @@ public class MfaController {
         try {
             claims = jwtUtil.parseToken(challengeToken);
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("error", "Invalid or expired challenge token."));
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(AuthResponses.body(
+                    "This sign-in attempt has expired. Sign in again to get a new code prompt.",
+                    AuthResponses.CODE_MFA_CHALLENGE_INVALID,
+                    "mfaChallengeExpired", true));
         }
 
         // Ensure this is actually a challenge token and not a regular JWT
         Boolean isMfaChallenge = claims.get("mfaChallenge", Boolean.class);
         if (!Boolean.TRUE.equals(isMfaChallenge)) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("error", "Provided token is not an MFA challenge token."));
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(AuthResponses.body(
+                    "This sign-in attempt has expired. Sign in again to get a new code prompt.",
+                    AuthResponses.CODE_MFA_CHALLENGE_INVALID,
+                    "mfaChallengeExpired", true));
         }
 
         // Look up the user
@@ -241,21 +256,35 @@ public class MfaController {
                         .orElseThrow(() -> new IllegalStateException("User not found"));
             }
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("error", "User not found."));
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(AuthResponses.body(
+                    "This sign-in attempt has expired. Sign in again to get a new code prompt.",
+                    AuthResponses.CODE_MFA_CHALLENGE_INVALID,
+                    "mfaChallengeExpired", true));
         }
 
         Number challengeSessionVersion = claims.get("sessionVersion", Number.class);
         if (challengeSessionVersion == null
                 || challengeSessionVersion.longValue() != user.getSessionVersion()) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("error", "MFA challenge has been revoked."));
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(AuthResponses.body(
+                    "This sign-in attempt is no longer valid because the account's sessions were revoked. "
+                            + "Sign in again.",
+                    AuthResponses.CODE_MFA_CHALLENGE_INVALID,
+                    "mfaChallengeExpired", true));
+        }
+
+        // The account can have been suspended between /login and this exchange; the
+        // challenge token alone must not carry a blocked account through the gate.
+        if (user.getStatus() != com.assetiq.enums.UserStatus.ACTIVE) {
+            return AuthResponses.accountNotActive(user);
         }
 
         // Verify the TOTP code
         if (!isValidTotp(user, code)) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("error", "Invalid authenticator code."));
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(AuthResponses.body(
+                    "That code was not correct. Codes change every 30 seconds — check your authenticator "
+                            + "app and enter the current one.",
+                    AuthResponses.CODE_MFA_CODE_INVALID,
+                    "mfaCodeInvalid", true));
         }
 
         // Update last login timestamp
@@ -388,7 +417,7 @@ public class MfaController {
      */
     @DeleteMapping("/admin/reset/{userId}")
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_USERS','MANAGE_SECURITY_SETTINGS')")
-    public ResponseEntity<Map<String, String>> adminResetMfa(@PathVariable UUID userId) {
+    public ResponseEntity<Map<String, Object>> adminResetMfa(@PathVariable UUID userId) {
         // Scoped to the caller's tenant. A bare findById here let an admin in one
         // organisation disable MFA for a user in another by guessing/leaking a UUID —
         // @PreAuthorize proves the caller is *an* admin, never that they administer
@@ -397,8 +426,8 @@ public class MfaController {
                 .orElse(null);
 
         if (target == null) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                    .body(Map.of("error", "User not found."));
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(AuthResponses.body(
+                    "User not found.", AuthResponses.CODE_NOT_FOUND));
         }
 
         if (!Boolean.TRUE.equals(target.getMfaEnabled()) && target.getMfaSecret() == null) {
