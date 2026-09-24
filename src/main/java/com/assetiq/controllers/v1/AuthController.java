@@ -120,11 +120,13 @@ public class AuthController {
     public ResponseEntity<?> register(@Valid @RequestBody RegisterRequest request) {
         // Validate input
         if (!request.getEmail().matches("^[A-Za-z0-9+_.-]+@(.+)$")) {
-            return ResponseEntity.badRequest().body(Map.of("error", "Invalid email format"));
+            return ResponseEntity.badRequest().body(
+                    AuthResponses.body("Invalid email format", AuthResponses.CODE_BAD_REQUEST));
         }
 
         if (request.getPassword().length() < 8) {
-            return ResponseEntity.badRequest().body(Map.of("error", "Password must be at least 8 characters"));
+            return ResponseEntity.badRequest().body(
+                    AuthResponses.body("Password must be at least 8 characters", AuthResponses.CODE_BAD_REQUEST));
         }
 
         UUID tenantId = TenantContext.getOrganisationId();
@@ -139,7 +141,8 @@ public class AuthController {
         var existingUser = userRepository.findByEmailAndOrganisationId(
                 request.getEmail(), tenantId);
         if (existingUser.isPresent()) {
-            return ResponseEntity.badRequest().body(Map.of("error", "Email already registered in this organization"));
+            return ResponseEntity.badRequest().body(AuthResponses.body(
+                    "Email already registered in this organization", "DUPLICATE"));
         }
 
         // Validate organization exists
@@ -240,10 +243,11 @@ public class AuthController {
             }
         }
 
-        // Check user status
+        // Check user status. Reached only after the password matched, so naming the
+        // state leaks nothing — see the note on the verification gate below.
         if (user.getStatus() != UserStatus.ACTIVE) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("error", "User account is " + user.getStatus().toString().toLowerCase()));
+            log.info("[AUTH] Login blocked — account status {} for user {}", user.getStatus(), user.getId());
+            return AuthResponses.accountNotActive(user);
         }
 
         // ── Email verification gate ──────────────────────────────────────────
@@ -255,12 +259,11 @@ public class AuthController {
         // cannot lock out an existing account.
         if (requireEmailVerification && !user.isEmailVerified()) {
             log.info("[AUTH] Login blocked pending email verification for user {}", user.getId());
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of(
-                            "error", "Please verify your email address before signing in.",
-                            // Machine-readable so the client can offer "resend" rather than
-                            // having to string-match the message.
-                            "emailVerificationRequired", true));
+            // The text goes out under BOTH "message" (what every client reads, and what
+            // the GlobalExceptionHandler envelope uses) and the legacy "error" key, and
+            // "emailVerificationRequired" stays so a client can offer "resend" without
+            // string-matching English. See AuthResponses.
+            return AuthResponses.emailVerificationRequired();
         }
 
         // ── MFA check ────────────────────────────────────────────────────────
@@ -280,6 +283,9 @@ public class AuthController {
             return ResponseEntity.status(HttpStatus.ACCEPTED)
                     .body(Map.of(
                             "mfaRequired", true,
+                            // Not an error, but the client still has something to tell the
+                            // user; "message" is the key every surface already renders.
+                            "message", "Enter the 6-digit code from your authenticator app to finish signing in.",
                             "mfaChallengeToken", challengeToken));
         }
 
@@ -361,7 +367,7 @@ public class AuthController {
             // clients discard the body of a failed refresh and the mobile client
             // reads "message" — so "error" can be dropped in a later major version.
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("message", reason, "error", reason));
+                    .body(AuthResponses.body(reason, "SESSION_EXPIRED"));
         }
 
         User user = rotated.user();
@@ -414,9 +420,12 @@ public class AuthController {
                 .<ResponseEntity<?>>map(user -> ResponseEntity.ok(Map.of(
                         "message", "Email verified. You can now sign in.",
                         "email", user.getEmail())))
-                .orElseGet(() -> ResponseEntity.badRequest().body(Map.of(
-                        "error", "This verification link is invalid or has expired. "
-                                + "Request a new one and try again.")));
+                .orElseGet(() -> ResponseEntity.badRequest().body(AuthResponses.body(
+                        "This verification link is invalid or has expired. "
+                                + "Request a new one from the sign-in page and try again.",
+                        AuthResponses.CODE_EMAIL_VERIFICATION_REQUIRED,
+                        "emailVerificationRequired", true,
+                        "resendVerificationPath", AuthResponses.RESEND_VERIFICATION_PATH)));
     }
 
     /**
@@ -488,7 +497,9 @@ public class AuthController {
     public ResponseEntity<?> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
         var userOpt = userRepository.findByResetPasswordToken(sha256Hex(request.getToken()));
         if (userOpt.isEmpty()) {
-            return ResponseEntity.badRequest().body(Map.of("error", "Invalid reset token"));
+            return ResponseEntity.badRequest().body(AuthResponses.body(
+                    "This password reset link is invalid. Request a new one from the sign-in page.",
+                    "RESET_TOKEN_INVALID"));
         }
 
         User user = userOpt.get();
@@ -496,12 +507,16 @@ public class AuthController {
         // Check if token was already used
         if (user.getResetPasswordTokenUsed() != null && user.getResetPasswordTokenUsed()) {
             log.warn("[AUTH] Attempt to reuse password reset token for user {}", user.getId());
-            return ResponseEntity.badRequest().body(Map.of("error", "Reset token has already been used"));
+            return ResponseEntity.badRequest().body(AuthResponses.body(
+                    "This password reset link has already been used. Request a new one from the sign-in page.",
+                    "RESET_TOKEN_USED"));
         }
 
         // Check if token expired
         if (user.getResetPasswordTokenExpiry() == null || user.getResetPasswordTokenExpiry().isBefore(Instant.now())) {
-            return ResponseEntity.badRequest().body(Map.of("error", "Reset token has expired"));
+            return ResponseEntity.badRequest().body(AuthResponses.body(
+                    "This password reset link has expired. Request a new one from the sign-in page.",
+                    "RESET_TOKEN_EXPIRED"));
         }
 
         // Encode new password
@@ -511,6 +526,11 @@ public class AuthController {
         user.setResetPasswordToken(null);
         user.setResetPasswordTokenExpiry(null);
         user.setResetPasswordTokenUsed(true);
+        // A reset proves possession of the mailbox, which is a stronger claim than the
+        // password the lockout was protecting; leaving the account locked would strand a
+        // user who did exactly what the lockout message told them to do.
+        user.setFailedLoginAttempts(0);
+        user.setLockedUntil(null);
         userRepository.save(user);
         sessionRevocationService.revokeAll(user);
 
@@ -528,15 +548,17 @@ public class AuthController {
         // F-1: accept token from Bearer header OR HttpOnly cookie
         String token = resolveToken(authHeader, authCookie);
         if (token == null) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("error", "Missing or invalid authorization"));
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(AuthResponses.body(
+                    "You are not signed in. Sign in and try again.",
+                    AuthResponses.CODE_UNAUTHENTICATED));
         }
         io.jsonwebtoken.Claims profileClaims;
         try {
             profileClaims = jwtUtil.parseToken(token);
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("error", "Invalid or expired token"));
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(AuthResponses.body(
+                    "Your session has expired. Sign in again to continue.",
+                    AuthResponses.CODE_UNAUTHENTICATED));
         }
         String email = profileClaims.getSubject();
         String profileOrgIdStr = profileClaims.get("organisationId", String.class);
@@ -553,8 +575,8 @@ public class AuthController {
             userOpt = userRepository.findSoleByEmail(email);
         }
         if (userOpt.isEmpty()) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                    .body(Map.of("error", "User not found"));
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(AuthResponses.body(
+                    "User not found", AuthResponses.CODE_NOT_FOUND));
         }
 
         User user = userOpt.get();
@@ -573,15 +595,17 @@ public class AuthController {
         // F-1: accept token from Bearer header OR HttpOnly cookie
         String token = resolveToken(authHeader, authCookie);
         if (token == null) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("error", "Missing or invalid authorization"));
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(AuthResponses.body(
+                    "You are not signed in. Sign in and try again.",
+                    AuthResponses.CODE_UNAUTHENTICATED));
         }
         io.jsonwebtoken.Claims parsedClaims;
         try {
             parsedClaims = jwtUtil.parseToken(token);
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("error", "Invalid or expired token"));
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(AuthResponses.body(
+                    "Your session has expired. Sign in again to continue.",
+                    AuthResponses.CODE_UNAUTHENTICATED));
         }
         String email = parsedClaims.getSubject();
         String orgId = parsedClaims.get("organisationId", String.class);
@@ -679,8 +703,9 @@ public class AuthController {
         UUID organisationId = TenantContext.getOrganisationId();
         if (authentication == null || organisationId == null) {
             clearAuthCookies(servletResponse);
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("error", "Authenticated account is required"));
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(AuthResponses.body(
+                    "You are not signed in. Sign in and try again.",
+                    AuthResponses.CODE_UNAUTHENTICATED));
         }
         User user = userRepository.findByEmailAndOrganisationId(authentication.getName(), organisationId)
                 .orElseThrow(() -> new AccessDeniedException("Authenticated account no longer exists"));
@@ -813,10 +838,13 @@ public class AuthController {
                         "name", u.getOrganisation().getName()))
                 .sorted(Comparator.comparing(m -> m.get("name").toLowerCase(Locale.ROOT)))
                 .toList();
-        return new LoginResolution(null, ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
-                "error", "This email belongs to several organisations. Choose one to sign in to.",
-                "code", "ORGANISATION_REQUIRED",
-                "organisations", organisations)));
+        return new LoginResolution(null, ResponseEntity.status(HttpStatus.CONFLICT).body(
+                AuthResponses.body(
+                        "This email belongs to several organisations. Choose the one to sign in to.",
+                        AuthResponses.CODE_ORGANISATION_REQUIRED,
+                        // "code" predates "errorCode" here and is kept for existing clients.
+                        "code", AuthResponses.CODE_ORGANISATION_REQUIRED,
+                        "organisations", organisations)));
     }
 
     private void recordFailedLogin(User user) {
@@ -829,17 +857,13 @@ public class AuthController {
         userRepository.save(user);
     }
 
-    private static ResponseEntity<Map<String, String>> invalidCredentials() {
-        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                .body(Map.of("error", "Invalid email or password"));
+    private static ResponseEntity<Map<String, Object>> invalidCredentials() {
+        return AuthResponses.invalidCredentials();
     }
 
-    private static ResponseEntity<Map<String, String>> lockedOut(User user) {
+    private static ResponseEntity<Map<String, Object>> lockedOut(User user) {
         log.warn("[AUTH] Login rejected — account locked until {} for user {}", user.getLockedUntil(), user.getId());
-        return ResponseEntity.status(HttpStatus.LOCKED)
-                .body(Map.of("error",
-                        "Account temporarily locked due to too many failed attempts. "
-                                + "Try again after " + user.getLockedUntil()));
+        return AuthResponses.lockedOut(user);
     }
 
     public static class LoginRequest {

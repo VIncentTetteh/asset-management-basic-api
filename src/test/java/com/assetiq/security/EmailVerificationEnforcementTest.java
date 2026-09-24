@@ -4,6 +4,7 @@ import com.assetiq.dto.TenantRegisterRequest;
 import com.assetiq.models.User;
 import com.assetiq.repositories.UserRepository;
 import com.assetiq.services.EmailService;
+import com.assetiq.services.EmailVerificationService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -21,6 +22,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.verify;
@@ -68,6 +70,63 @@ class EmailVerificationEnforcementTest {
         mockMvc.perform(login(email))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.emailVerificationRequired").value(true));
+    }
+
+    @Test
+    @DisplayName("the 403 tells the user what to do, under the key clients read")
+    void unverifiedUser_isToldWhatToDo() throws Exception {
+        String email = register();
+
+        // The bug this pins: the explanation used to live only under "error", so the
+        // client fell back to the bare status and showed the word "Forbidden".
+        mockMvc.perform(login(email))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.message", containsString("verify your email address")))
+                .andExpect(jsonPath("$.error", containsString("verify your email address")))
+                .andExpect(jsonPath("$.errorCode").value("EMAIL_VERIFICATION_REQUIRED"))
+                .andExpect(jsonPath("$.emailVerificationRequired").value(true))
+                .andExpect(jsonPath("$.resendVerificationPath").value("/api/v1/auth/resend-verification"));
+    }
+
+    @Test
+    @DisplayName("a blocked user can ask for a new link with no session at all")
+    void blockedUser_canResendWithoutSigningIn() throws Exception {
+        String email = register();
+
+        // Sign-in is refused …
+        mockMvc.perform(login(email)).andExpect(status().isForbidden());
+
+        // … and the endpoint the 403 points at is reachable with no token or cookie.
+        mockMvc.perform(resendFor(email))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.message").isString());
+    }
+
+    @Test
+    @DisplayName("a second resend inside the cooldown sends no second email")
+    void resend_isThrottledPerAddress() throws Exception {
+        String email = register();
+        User user = userRepository.findAllByEmail(email).get(0);
+        // Registration has just issued a link; an immediate resend must be suppressed,
+        // silently — the response is constant so it cannot become an enumeration signal.
+        String tokenBefore = user.getEmailVerificationToken();
+
+        mockMvc.perform(resendFor(email)).andExpect(status().isOk());
+
+        assertThat(userRepository.findAllByEmail(email).get(0).getEmailVerificationToken())
+                .as("a resend inside the cooldown must not mint a new token")
+                .isEqualTo(tokenBefore);
+
+        // Push the issue time outside the cooldown and the resend works again.
+        user.setEmailVerificationTokenExpiry(
+                Instant.now().plus(EmailVerificationService.TOKEN_TTL).minusSeconds(120));
+        userRepository.save(user);
+
+        mockMvc.perform(resendFor(email)).andExpect(status().isOk());
+
+        assertThat(userRepository.findAllByEmail(email).get(0).getEmailVerificationToken())
+                .as("outside the cooldown a fresh link is issued")
+                .isNotEqualTo(tokenBefore);
     }
 
     @Test
