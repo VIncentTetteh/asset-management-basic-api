@@ -39,6 +39,18 @@ public class EmailVerificationService {
     /** How long a verification link stays valid. Long enough to survive a spam folder. */
     public static final Duration TOKEN_TTL = Duration.ofHours(48);
 
+    /**
+     * Shortest gap between two verification emails to the same account.
+     *
+     * <p>{@code POST /auth/resend-verification} is unauthenticated by necessity — a user
+     * who cannot sign in has to be able to ask for a new link — which makes it a way to
+     * send mail to an address of the caller's choosing. The interceptor's auth tier
+     * (5/min, 20/hour) brakes one client; this brakes the <em>recipient</em>, so a
+     * distributed caller still cannot flood one inbox. Suppression is silent: the
+     * endpoint's response is constant by design and must not become a signal.
+     */
+    public static final Duration RESEND_COOLDOWN = Duration.ofMinutes(1);
+
     private final UserRepository userRepository;
     private final EmailService emailService;
 
@@ -61,6 +73,10 @@ public class EmailVerificationService {
      */
     public void sendVerificationEmail(User user) {
         if (user.isEmailVerified()) {
+            return;
+        }
+        if (withinResendCooldown(user)) {
+            log.info("[AUTH] Suppressed verification email for user {} — within resend cooldown", user.getId());
             return;
         }
         try {
@@ -118,6 +134,20 @@ public class EmailVerificationService {
 
         log.info("[AUTH] Email verified for user {}", user.getId());
         return Optional.of(user);
+    }
+
+    /**
+     * True when this account was sent a link less than {@link #RESEND_COOLDOWN} ago.
+     * There is no "issued at" column; the expiry minus the fixed TTL is that instant,
+     * which keeps this an expand-only change with no migration.
+     */
+    private boolean withinResendCooldown(User user) {
+        Instant expiry = user.getEmailVerificationTokenExpiry();
+        if (user.getEmailVerificationToken() == null || expiry == null) {
+            return false;
+        }
+        Instant issuedAt = expiry.minus(TOKEN_TTL);
+        return issuedAt.isAfter(Instant.now().minus(RESEND_COOLDOWN));
     }
 
     private String generateToken(User user) throws Exception {

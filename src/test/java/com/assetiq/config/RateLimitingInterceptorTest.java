@@ -120,6 +120,27 @@ class RateLimitingInterceptorTest {
             verify(rateLimiter).tryConsume(eq(TIER_AUTH_HOUR), any(), anyInt(), anyInt());
             verify(rateLimiter, never()).tryConsume(eq(TIER_API_MINUTE), any(), anyInt(), anyInt());
         }
+
+        @Test
+        @DisplayName("resend-verification is braked by the auth tier and 429s when exhausted")
+        void resendVerification_usesAuthTierAndCanBeExhausted() throws Exception {
+            // It is unauthenticated by necessity (a blocked user has no session) and it
+            // sends mail to an address the caller names, so it must sit behind the strict
+            // tier rather than the 100/min general one.
+            when(rateLimiter.tryConsume(eq(TIER_AUTH_MINUTE), any(), eq(AUTH_REQUESTS_PER_MINUTE), anyInt()))
+                    .thenReturn(new RedisRateLimiter.RateLimitResult(false, 0, 37));
+            when(rateLimiter.tryConsume(eq(TIER_AUTH_HOUR), any(), eq(AUTH_REQUESTS_PER_HOUR), anyInt()))
+                    .thenReturn(new RedisRateLimiter.RateLimitResult(true, 12, 3000));
+
+            MockHttpServletRequest req = new MockHttpServletRequest("POST", "/api/v1/auth/resend-verification");
+            req.setRemoteAddr("10.0.0.9");
+            MockHttpServletResponse resp = new MockHttpServletResponse();
+
+            assertThat(interceptor.preHandle(req, resp, new Object())).isFalse();
+            assertThat(resp.getStatus()).isEqualTo(429);
+            assertThat(resp.getHeader(HEADER_RETRY_AFTER)).isNotNull();
+            verify(rateLimiter, never()).tryConsume(eq(TIER_API_MINUTE), any(), anyInt(), anyInt());
+        }
     }
 
     // ── General API tier ──────────────────────────────────────────────────────
