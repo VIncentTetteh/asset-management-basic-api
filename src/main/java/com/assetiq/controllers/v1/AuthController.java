@@ -352,8 +352,16 @@ public class AuthController {
             rotated = refreshSessionService.rotate(rawRefreshToken);
         } catch (org.springframework.security.access.AccessDeniedException rejected) {
             clearAuthCookies(servletResponse);
+            String reason = rejected.getMessage();
+            // The house error envelope is {"message": ...}; this endpoint alone used
+            // {"error": ...}, which is why the mobile client had nothing to show the
+            // user. Both keys are emitted: "message" is the one to read, "error" is
+            // kept because it is a public response shape and an unknown consumer may
+            // still be reading it. No current consumer does — the web and desktop
+            // clients discard the body of a failed refresh and the mobile client
+            // reads "message" — so "error" can be dropped in a later major version.
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("error", rejected.getMessage()));
+                    .body(Map.of("message", reason, "error", reason));
         }
 
         User user = rotated.user();
