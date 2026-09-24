@@ -42,10 +42,12 @@ public class HttpLlmClient implements LlmClient {
     private static final String PROVIDER_ANTHROPIC = "anthropic";
     private static final String PROVIDER_GROQ      = "groq";
     private static final String PROVIDER_OLLAMA    = "ollama";
+    private static final String PROVIDER_XAI       = "xai";
 
     private static final String ANTHROPIC_URL     = "https://api.anthropic.com/v1/messages";
     private static final String ANTHROPIC_VERSION = "2023-06-01";
     private static final String GROQ_URL          = "https://api.groq.com/openai/v1/chat/completions";
+    private static final String XAI_URL           = "https://api.x.ai/v1/chat/completions";
 
     /** Deterministic ceiling on the reply, so one answer cannot exhaust the quota. */
     private static final int MAX_TOKENS = 1200;
@@ -77,6 +79,12 @@ public class HttpLlmClient implements LlmClient {
     @Value("${ollama.model:llama3.1:8b}")
     private String ollamaModel;
 
+    @Value("${xai.api.key:}")
+    private String xaiApiKey;
+
+    @Value("${xai.model:grok-4.7}")
+    private String xaiModel;
+
     public HttpLlmClient(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
         this.httpClient   = HttpClient.newBuilder()
@@ -95,6 +103,7 @@ public class HttpLlmClient implements LlmClient {
             case PROVIDER_GROQ      -> hasText(groqApiKey);
             case PROVIDER_ANTHROPIC -> hasText(anthropicApiKey);
             case PROVIDER_OLLAMA    -> hasText(ollamaBaseUrl);
+            case PROVIDER_XAI       -> hasText(xaiApiKey);
             default -> false;
         };
     }
@@ -111,8 +120,10 @@ public class HttpLlmClient implements LlmClient {
                     GROQ_URL, "Bearer " + groqApiKey, groqModel, systemPrompt, messages);
             case PROVIDER_OLLAMA    -> callOpenAiCompatible(
                     ollamaBaseUrl + "/v1/chat/completions", null, ollamaModel, systemPrompt, messages);
+            case PROVIDER_XAI       -> callOpenAiCompatible(
+                    XAI_URL, "Bearer " + xaiApiKey, xaiModel, systemPrompt, messages);
             default -> throw new LlmUnavailableException(LlmUnavailableException.Reason.NOT_CONFIGURED,
-                    "Unknown ai.provider '" + provider() + "'. Valid values: groq, anthropic, ollama.");
+                    "Unknown ai.provider '" + provider() + "'. Valid values: groq, anthropic, ollama, xai.");
         };
     }
 

@@ -158,6 +158,16 @@ Resources:
               *[!0-9a-f]*|"") echo "data-key secret is not hex; refusing to start" >&2; exit 1 ;;
             esac
             [ "${!#DATA_KEY_HEX}" -eq 64 ] || { echo "data-key secret is not 64 hex chars; refusing to start" >&2; exit 1; }
+            # The AI key is optional and created out of band: it belongs to the
+            # operator's account with the model vendor, and rotating it must not
+            # require a stack update. A deployment with no such secret still boots
+            # — the assistant reports itself unconfigured rather than the app
+            # failing to start.
+            AI_KEY=$(aws secretsmanager get-secret-value --region ${AWS::Region} \
+              --secret-id '${ProjectName}/${Environment}/ai' --query SecretString --output text 2>/dev/null \
+              | jq -r '.XAI_API_KEY // ""' || echo "")
+            if [ -n "$AI_KEY" ]; then AI_PROVIDER_NAME=xai; else AI_PROVIDER_NAME=groq; fi
+
             # Email turns on only when the secret carries a real SMTP host; the
             # placeholder created by the foundation stack has an empty one.
             EMAIL_SECRET=$(aws secretsmanager get-secret-value --region ${AWS::Region} \
@@ -180,6 +190,8 @@ Resources:
             SPRING_DATASOURCE_PASSWORD=$DB_PASS
             APP_JWT_SECRET=$JWT_SECRET
             PAYSTACK_SECRET_KEY=$PAYSTACK_KEY
+            AI_PROVIDER=$AI_PROVIDER_NAME
+            XAI_API_KEY=$AI_KEY
             APP_DATA_ENCRYPTION_KEY=$DATA_KEY_B64
             APP_BILLING_CALLBACK_URL=https://${DistributionDomain}/billing/callback/
             SPRING_DATA_REDIS_HOST=redis

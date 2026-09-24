@@ -50,10 +50,10 @@ public final class LogRedactor {
 
     /**
      * Vendor keys that are recognisable by prefix on their own: Paystack secret/public,
-     * Groq, OpenAI, Anthropic, GitHub, AWS access key ids, Slack.
+     * Groq, OpenAI, Anthropic, xAI, GitHub, AWS access key ids, Slack.
      */
     private static final Pattern VENDOR_KEY = Pattern.compile(
-            "\\b(sk_live_|sk_test_|pk_live_|pk_test_|gsk_|sk-ant-|sk-|ghp_|gho_|AKIA|xox[baprs]-)"
+            "\\b(sk_live_|sk_test_|pk_live_|pk_test_|gsk_|sk-ant-|sk-|xai-|ghp_|gho_|AKIA|xox[baprs]-)"
             + "[A-Za-z0-9._-]{6,}");
 
     /**

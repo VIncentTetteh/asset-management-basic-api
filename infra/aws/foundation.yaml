@@ -438,6 +438,13 @@ Resources:
                   - !Ref DataEncryptionKeySecret
                   - !Ref EmailSecret
                   - !GetAtt Database.MasterUserSecret.SecretArn
+                  # The AI provider key is created out of band (it belongs to the
+                  # operator's own account with the model vendor, and rotating it
+                  # must not require a stack update), so it is granted by name
+                  # rather than by !Ref. Secrets Manager appends a random suffix
+                  # to every secret ARN, hence the trailing wildcard — it matches
+                  # this one secret's versions, not other secrets.
+                  - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${ProjectName}/${Environment}/ai-*"
                 Condition:
                   Bool: { "aws:SecureTransport": "true" }
               - Effect: Allow

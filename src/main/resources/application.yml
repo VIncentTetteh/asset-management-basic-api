@@ -449,7 +449,7 @@ app:
 
 # ── AI / LLM ─────────────────────────────────────────────────────────────────
 ai:
-  # Provider: groq (free) | anthropic (paid) | ollama (local)
+  # Provider: groq (free) | anthropic (paid) | ollama (local) | xai (Grok)
   provider: ${AI_PROVIDER:groq}
   # Assistant quotas. The provider key is a shared, exhaustible resource, so one
   # tenant (or one runaway script) must not be able to spend it all. Enforced in
@@ -463,6 +463,13 @@ groq:
   api:
     key: ${GROQ_API_KEY:}
   model: ${GROQ_MODEL:llama-3.3-70b-versatile}
+
+# xAI (Grok). OpenAI-compatible chat completions, so it reuses the same request
+# path as groq/ollama; only the endpoint, key and model differ.
+xai:
+  api:
+    key: ${XAI_API_KEY:}
+  model: ${XAI_MODEL:grok-4.7}
 
 anthropic:
   api:

@@ -36,6 +36,7 @@ class LogRedactorTest {
     private static final String GROQ = "gsk" + "_" + "dg2RabcdefghijklmnopQ";
     private static final String ANTHROPIC = "sk" + "-ant-" + "api03-abcdefghijklmnop";
     private static final String AWS_KEY = "AKIA" + "IOSFODNN7EXAMPLE";
+    private static final String XAI = "xai" + "-" + "abcdefghijklmnopqrstuvwx";
     private static final String OPAQUE_TOKEN = "abc123" + "def456" + "ghi789";
     private static final String PASSWORD = "hunter" + "2";
 
@@ -70,6 +71,7 @@ class LogRedactorTest {
                     new Case("GROQ_API_KEY=" + GROQ, "dg2RabcdefghijklmnopQ"),
                     new Case("anthropic " + ANTHROPIC, "api03-abcdefghijklmnop"),
                     new Case("aws " + AWS_KEY, "IOSFODNN7EXAMPLE"),
+                    new Case("XAI_API_KEY=" + XAI, "abcdefghijklmnopqrstuvwx"),
             };
 
             for (Case c : cases) {
