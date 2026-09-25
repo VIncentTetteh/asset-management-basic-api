@@ -4,6 +4,8 @@ import com.assetiq.models.Webhook;
 import com.assetiq.models.WebhookDelivery;
 import com.assetiq.repositories.WebhookDeliveryRepository;
 import com.assetiq.repositories.WebhookRepository;
+import com.assetiq.security.SecretCryptoService;
+import com.assetiq.services.FeatureFlagService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -13,6 +15,7 @@ import org.springframework.stereotype.Component;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.net.URI;
+import java.net.InetAddress;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -20,6 +23,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 
 /**
  * Dead-letter-queue (DLQ) retry scheduler for webhook deliveries.
@@ -46,6 +50,8 @@ public class WebhookDeliveryRetryScheduler {
     private final WebhookDeliveryRepository deliveryRepository;
     private final WebhookRepository webhookRepository;
     private final HttpClient httpClient;
+    private final SecretCryptoService secretCryptoService;
+    private final FeatureFlagService featureFlagService;
 
     /** Maximum total attempts (primary + DLQ) before giving up. */
     @Value("${app.webhook.dlq.max-total-attempts:20}")
@@ -64,9 +70,13 @@ public class WebhookDeliveryRetryScheduler {
     private int httpTimeoutSeconds;
 
     public WebhookDeliveryRetryScheduler(WebhookDeliveryRepository deliveryRepository,
-                                         WebhookRepository webhookRepository) {
+                                         WebhookRepository webhookRepository,
+                                         SecretCryptoService secretCryptoService,
+                                         FeatureFlagService featureFlagService) {
         this.deliveryRepository = deliveryRepository;
         this.webhookRepository = webhookRepository;
+        this.secretCryptoService = secretCryptoService;
+        this.featureFlagService = featureFlagService;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(5))
                 .build();
@@ -76,7 +86,8 @@ public class WebhookDeliveryRetryScheduler {
      * Run every 5 minutes (fixed delay; not fixed rate, so runs never overlap).
      */
     @Scheduled(fixedDelayString = "${app.webhook.dlq.retry-interval-ms:300000}")
-    void retryFailedDeliveries() {
+    @SchedulerLock(name = "webhookDeliveryRetry", lockAtMostFor = "PT10M", lockAtLeastFor = "PT4M")
+    public void retryFailedDeliveries() {
         // NOTE: No @Transactional here — this method makes HTTP calls per delivery.
         // Wrapping the entire loop in one transaction would hold a DB connection open
         // for the duration of every HTTP round-trip.  Instead, each deliveryRepository.save()
@@ -103,6 +114,11 @@ public class WebhookDeliveryRetryScheduler {
                 deliveryRepository.save(delivery);
                 continue;
             }
+            if (wh.getOrganisation() == null || !featureFlagService.isEnabledFor(
+                    "commercial.outbound-webhooks", wh.getOrganisation().getId())) {
+                // Keep the delivery pending while the commercially contained feature is off.
+                continue;
+            }
 
             boolean success = attemptDelivery(delivery, wh);
             if (success) succeeded++;
@@ -118,6 +134,7 @@ public class WebhookDeliveryRetryScheduler {
         long start = System.currentTimeMillis();
         int newAttempts = delivery.getAttempts() + 1;
         try {
+            assertSafeEndpoint(wh.getUrl());
             HttpRequest.Builder reqBuilder = HttpRequest.newBuilder()
                     .uri(URI.create(wh.getUrl()))
                     .timeout(Duration.ofSeconds(httpTimeoutSeconds))
@@ -129,7 +146,7 @@ public class WebhookDeliveryRetryScheduler {
                             delivery.getPayload() != null ? delivery.getPayload() : "{}",
                             StandardCharsets.UTF_8));
 
-            String sig = computeSignature(delivery.getPayload(), wh.getSecret());
+            String sig = computeSignature(delivery.getPayload(), secretCryptoService.decrypt(wh.getSecret()));
             if (sig != null) reqBuilder.header("X-Webhook-Signature", sig);
 
             HttpResponse<String> response = httpClient.send(reqBuilder.build(),
@@ -188,6 +205,27 @@ public class WebhookDeliveryRetryScheduler {
             return new String(hex);
         } catch (Exception e) {
             return null;
+        }
+    }
+
+    private void assertSafeEndpoint(String value) {
+        try {
+            URI uri = URI.create(value);
+            if (!"https".equalsIgnoreCase(uri.getScheme()) || uri.getHost() == null
+                    || uri.getUserInfo() != null || uri.getPort() == 0) {
+                throw new IllegalArgumentException("Webhook URL must be a valid HTTPS endpoint");
+            }
+            for (InetAddress address : InetAddress.getAllByName(uri.getHost())) {
+                if (address.isAnyLocalAddress() || address.isLoopbackAddress()
+                        || address.isLinkLocalAddress() || address.isSiteLocalAddress()
+                        || address.isMulticastAddress()) {
+                    throw new IllegalArgumentException("Webhook URL resolves to a private or local address");
+                }
+            }
+        } catch (IllegalArgumentException rejected) {
+            throw rejected;
+        } catch (Exception invalid) {
+            throw new IllegalArgumentException("Webhook URL could not be safely resolved", invalid);
         }
     }
 

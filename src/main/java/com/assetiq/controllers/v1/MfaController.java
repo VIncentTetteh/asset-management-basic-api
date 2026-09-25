@@ -1,8 +1,12 @@
 package com.assetiq.controllers.v1;
 
 import com.assetiq.models.User;
+import com.assetiq.multitenancy.TenantContext;
 import com.assetiq.repositories.UserRepository;
 import com.assetiq.security.JwtUtil;
+import com.assetiq.services.RefreshSessionService;
+import com.assetiq.services.SessionRevocationService;
+import com.assetiq.security.SecretCryptoService;
 import dev.samstevens.totp.code.CodeVerifier;
 import dev.samstevens.totp.code.DefaultCodeVerifier;
 import dev.samstevens.totp.code.HashingAlgorithm;
@@ -16,12 +20,17 @@ import dev.samstevens.totp.time.SystemTimeProvider;
 import io.jsonwebtoken.Claims;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
+import jakarta.servlet.http.HttpServletResponse;
 
 import java.time.Instant;
+import java.time.Duration;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.Map;
@@ -44,6 +53,9 @@ public class MfaController {
 
     private final UserRepository userRepository;
     private final JwtUtil jwtUtil;
+    private final RefreshSessionService refreshSessionService;
+    private final SecretCryptoService secretCryptoService;
+    private final SessionRevocationService sessionRevocationService;
     private final SecretGenerator secretGenerator = new DefaultSecretGenerator();
     private final QrGenerator qrGenerator = new ZxingPngQrGenerator();
     private final CodeVerifier codeVerifier = new DefaultCodeVerifier(
@@ -53,9 +65,18 @@ public class MfaController {
     @Value("${app.jwt.expiration:86400000}")
     private long jwtExpirationMillis;
 
-    public MfaController(UserRepository userRepository, JwtUtil jwtUtil) {
+    @Value("${app.auth.cookie-secure:true}")
+    private boolean authCookieSecure;
+
+    public MfaController(UserRepository userRepository, JwtUtil jwtUtil,
+                         RefreshSessionService refreshSessionService,
+                         SecretCryptoService secretCryptoService,
+                         SessionRevocationService sessionRevocationService) {
         this.userRepository = userRepository;
         this.jwtUtil = jwtUtil;
+        this.refreshSessionService = refreshSessionService;
+        this.secretCryptoService = secretCryptoService;
+        this.sessionRevocationService = sessionRevocationService;
     }
 
     /**
@@ -69,7 +90,7 @@ public class MfaController {
         User user = resolveUser(auth);
 
         String secret = secretGenerator.generate();
-        user.setMfaSecret(secret);
+        user.setMfaSecret(secretCryptoService.encrypt(secret));
         userRepository.save(user);
 
         QrData qrData = new QrData.Builder()
@@ -111,14 +132,14 @@ public class MfaController {
             return ResponseEntity.badRequest().body(Map.of("error", "Missing 'code' in request body."));
         }
 
-        if (!codeVerifier.isValidCode(user.getMfaSecret(), code)) {
+        if (!codeVerifier.isValidCode(secretCryptoService.decrypt(user.getMfaSecret()), code)) {
             return ResponseEntity.status(401).body(Map.of("error", "Invalid TOTP code."));
         }
 
         user.setMfaEnabled(true);
-        userRepository.save(user);
+        sessionRevocationService.revokeAll(user);
 
-        return ResponseEntity.ok(Map.of("message", "MFA enabled successfully."));
+        return ResponseEntity.ok(Map.of("message", "MFA enabled successfully. Sign in again to continue."));
     }
 
     /**
@@ -141,15 +162,15 @@ public class MfaController {
             return ResponseEntity.badRequest().body(Map.of("error", "Missing 'code' in request body."));
         }
 
-        if (!codeVerifier.isValidCode(user.getMfaSecret(), code)) {
+        if (!codeVerifier.isValidCode(secretCryptoService.decrypt(user.getMfaSecret()), code)) {
             return ResponseEntity.status(401).body(Map.of("error", "Invalid TOTP code."));
         }
 
         user.setMfaEnabled(false);
         user.setMfaSecret(null);
-        userRepository.save(user);
+        sessionRevocationService.revokeAll(user);
 
-        return ResponseEntity.ok(Map.of("message", "MFA disabled successfully."));
+        return ResponseEntity.ok(Map.of("message", "MFA disabled successfully. All sessions were revoked."));
     }
 
     /**
@@ -163,7 +184,8 @@ public class MfaController {
      * caller is in the middle of the login flow and does not yet have a real token.
      */
     @PostMapping("/challenge")
-    public ResponseEntity<?> challenge(@RequestBody Map<String, String> body) {
+    public ResponseEntity<?> challenge(@RequestBody Map<String, String> body,
+                                       HttpServletResponse servletResponse) {
         String challengeToken = body.get("mfaChallengeToken");
         String code = body.get("code");
 
@@ -208,8 +230,16 @@ public class MfaController {
                     .body(Map.of("error", "User not found."));
         }
 
+        Number challengeSessionVersion = claims.get("sessionVersion", Number.class);
+        if (challengeSessionVersion == null
+                || challengeSessionVersion.longValue() != user.getSessionVersion()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", "MFA challenge has been revoked."));
+        }
+
         // Verify the TOTP code
-        if (user.getMfaSecret() == null || !codeVerifier.isValidCode(user.getMfaSecret(), code)) {
+        if (user.getMfaSecret() == null
+                || !codeVerifier.isValidCode(secretCryptoService.decrypt(user.getMfaSecret()), code)) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("error", "Invalid authenticator code."));
         }
@@ -223,6 +253,10 @@ public class MfaController {
         fullClaims.put("email", user.getEmail());
         fullClaims.put("firstName", user.getFirstName());
         fullClaims.put("lastName", user.getLastName());
+        fullClaims.put("sessionVersion", user.getSessionVersion());
+        // Short-lived proof used by @RequireFreshMfa. Refresh deliberately does
+        // not copy this claim, so step-up assurance cannot be extended silently.
+        fullClaims.put("mfaAuthenticatedAt", Instant.now().getEpochSecond());
 
         if (user.getRole() != null) {
             String roleName = user.getRole().getName();
@@ -238,9 +272,13 @@ public class MfaController {
         }
 
         String token = jwtUtil.generateToken(user.getEmail(), fullClaims, jwtExpirationMillis);
+        RefreshSessionService.IssuedRefreshToken refresh = refreshSessionService.issue(user);
+        setSessionCookies(servletResponse, token, refresh);
 
         return ResponseEntity.ok(Map.of(
                 "token", token,
+                "refreshToken", refresh.token(),
+                "tokenType", "Bearer",
                 "user", Map.of(
                         "id", user.getId(),
                         "email", user.getEmail(),
@@ -248,6 +286,19 @@ public class MfaController {
                         "lastName", user.getLastName(),
                         "role", user.getRole() != null ? user.getRole().getName() : "NONE"),
                 "expiresIn", jwtExpirationMillis / 1000));
+    }
+
+    private void setSessionCookies(HttpServletResponse response, String accessToken,
+                                   RefreshSessionService.IssuedRefreshToken refresh) {
+        ResponseCookie access = ResponseCookie.from("access_token", accessToken)
+                .httpOnly(true).secure(authCookieSecure).sameSite("Strict")
+                .path("/api").maxAge(jwtExpirationMillis / 1000).build();
+        long refreshMaxAge = Math.max(0, Duration.between(Instant.now(), refresh.expiresAt()).toSeconds());
+        ResponseCookie refreshCookie = ResponseCookie.from("refresh_token", refresh.token())
+                .httpOnly(true).secure(authCookieSecure).sameSite("Strict")
+                .path("/api/v1/auth").maxAge(refreshMaxAge).build();
+        response.addHeader(HttpHeaders.SET_COOKIE, access.toString());
+        response.addHeader(HttpHeaders.SET_COOKIE, refreshCookie.toString());
     }
 
     /**
@@ -260,7 +311,11 @@ public class MfaController {
     @DeleteMapping("/admin/reset/{userId}")
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_USERS','MANAGE_SECURITY_SETTINGS')")
     public ResponseEntity<Map<String, String>> adminResetMfa(@PathVariable UUID userId) {
-        User target = userRepository.findById(userId)
+        // Scoped to the caller's tenant. A bare findById here let an admin in one
+        // organisation disable MFA for a user in another by guessing/leaking a UUID —
+        // @PreAuthorize proves the caller is *an* admin, never that they administer
+        // *this* user. Out-of-tenant ids now read as "not found".
+        User target = userRepository.findByIdAndOrganisationId(userId, requireTenant())
                 .orElse(null);
 
         if (target == null) {
@@ -274,15 +329,37 @@ public class MfaController {
 
         target.setMfaEnabled(false);
         target.setMfaSecret(null);
-        userRepository.save(target);
+        sessionRevocationService.revokeAll(target);
 
         return ResponseEntity.ok(Map.of(
                 "message", "MFA has been reset for user " + target.getEmail() + ". They can re-enrol at any time."
         ));
     }
 
+    /**
+     * Resolves the calling user within the current tenant.
+     *
+     * <p>Scoped by organisation because an email is only unique <em>per tenant</em> —
+     * the same address may legitimately exist in two organisations, and an unscoped
+     * {@code findByEmail} would resolve the wrong account (or throw on a non-unique
+     * result). {@code TenantFilter} does not skip {@code /api/v1/mfa}, so every
+     * authenticated request here is guaranteed to carry tenant context.
+     */
     private User resolveUser(Authentication auth) {
-        return userRepository.findByEmail(auth.getName())
+        return userRepository.findByEmailAndOrganisationId(auth.getName(), requireTenant())
                 .orElseThrow(() -> new IllegalStateException("Authenticated user not found"));
+    }
+
+    /**
+     * Fails closed when no tenant is resolved. {@code TenantFilter} already 403s
+     * authenticated requests without an organisation, so reaching this is a bug
+     * rather than a reachable state — it must never silently widen a query.
+     */
+    private UUID requireTenant() {
+        UUID organisationId = TenantContext.getOrganisationId();
+        if (organisationId == null) {
+            throw new AccessDeniedException("No organisation context for this request.");
+        }
+        return organisationId;
     }
 }

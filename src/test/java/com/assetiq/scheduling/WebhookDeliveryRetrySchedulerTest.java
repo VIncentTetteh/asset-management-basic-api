@@ -4,6 +4,8 @@ import com.assetiq.models.Webhook;
 import com.assetiq.models.WebhookDelivery;
 import com.assetiq.repositories.WebhookDeliveryRepository;
 import com.assetiq.repositories.WebhookRepository;
+import com.assetiq.security.SecretCryptoService;
+import com.assetiq.services.FeatureFlagService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -29,12 +31,15 @@ class WebhookDeliveryRetrySchedulerTest {
 
     @Mock WebhookDeliveryRepository deliveryRepository;
     @Mock WebhookRepository         webhookRepository;
+    @Mock SecretCryptoService       secretCryptoService;
+    @Mock FeatureFlagService        featureFlagService;
 
     WebhookDeliveryRetryScheduler scheduler;
 
     @BeforeEach
     void setUp() {
-        scheduler = new WebhookDeliveryRetryScheduler(deliveryRepository, webhookRepository);
+        scheduler = new WebhookDeliveryRetryScheduler(
+                deliveryRepository, webhookRepository, secretCryptoService, featureFlagService);
         ReflectionTestUtils.setField(scheduler, "maxTotalAttempts",   20);
         ReflectionTestUtils.setField(scheduler, "maxAgeHours",        24);
         ReflectionTestUtils.setField(scheduler, "minRetryGapMinutes", 5);

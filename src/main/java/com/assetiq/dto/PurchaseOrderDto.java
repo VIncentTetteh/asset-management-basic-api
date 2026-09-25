@@ -3,6 +3,7 @@ package com.assetiq.dto;
 import com.assetiq.enums.POStatus;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.DecimalMin;
 import lombok.Data;
 
 
@@ -18,6 +19,7 @@ public class PurchaseOrderDto {
     private String poNumber;
 
     @NotNull(message = "Total amount is required")
+    @DecimalMin(value = "0.01", message = "Total amount must be greater than zero")
     private BigDecimal totalAmount;
 
     private String currency;
@@ -26,9 +28,16 @@ public class PurchaseOrderDto {
 
     private UUID approvedById;
 
+    private UUID requestedById;
+
+    private UUID rejectedById;
+
+    private Instant approvedAt;
+
+    private Instant rejectedAt;
+
     private String remarks;
 
-    @NotNull(message = "Organisation ID is required")
     private UUID organisationId;
 
     @NotNull(message = "Department ID is required")
@@ -44,4 +53,3 @@ public class PurchaseOrderDto {
 
     private Instant updatedAt;
 }
-

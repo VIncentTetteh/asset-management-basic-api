@@ -134,6 +134,8 @@ class SsoControllerSecurityTest {
                 mock(RoleRepository.class),
                 mock(JwtUtil.class),
                 mock(PasswordEncoder.class),
+                mock(com.assetiq.services.RefreshSessionService.class),
+                mock(com.assetiq.security.SecretCryptoService.class),
                 redisProvider);
     }
 

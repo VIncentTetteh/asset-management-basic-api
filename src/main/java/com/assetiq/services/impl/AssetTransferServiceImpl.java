@@ -2,6 +2,7 @@ package com.assetiq.services.impl;
 
 import com.assetiq.dto.AssetTransferDto;
 import com.assetiq.enums.TransferStatus;
+import com.assetiq.enums.UserStatus;
 import com.assetiq.models.AssetTransfer;
 import com.assetiq.models.Asset;
 import com.assetiq.models.Department;
@@ -14,6 +15,7 @@ import com.assetiq.services.AssetTransferService;
 import com.assetiq.services.NotificationService;
 import com.assetiq.services.TenantAwareService;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -66,8 +68,7 @@ public class AssetTransferServiceImpl extends TenantAwareService implements Asse
                 transferDto.getToDepartmentId(), org)
                 .orElseThrow(() -> new IllegalArgumentException("To-department not found in your organisation"));
 
-        User requester = userRepository.findByIdAndOrganisation(transferDto.getRequestedById(), org)
-                .orElseThrow(() -> new IllegalArgumentException("Requester not found in your organisation"));
+        User requester = resolveCurrentUser(org);
 
         AssetTransfer transfer = new AssetTransfer();
         transfer.setAsset(asset);
@@ -174,12 +175,11 @@ public class AssetTransferServiceImpl extends TenantAwareService implements Asse
         if (!transfer.getOrganisation().getId().equals(org.getId())) {
             throw new IllegalArgumentException("Transfer not found");
         }
-        // C4 fix: resolve approver from current authenticated user
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth != null && auth.getName() != null) {
-            userRepository.findByEmailAndOrganisationId(auth.getName(), org.getId())
-                    .ifPresent(transfer::setApprovedBy);
+        User approver = resolveCurrentUser(org);
+        if (transfer.getRequestedBy().getId().equals(approver.getId())) {
+            throw new AccessDeniedException("Transfer requests require approval by a different user");
         }
+        transfer.setApprovedBy(approver);
         transfer.setStatus(TransferStatus.APPROVED);
         return mapToDto(transferRepository.save(transfer));
     }
@@ -254,5 +254,18 @@ public class AssetTransferServiceImpl extends TenantAwareService implements Asse
         dto.setStatus(transfer.getStatus());
         dto.setReason(transfer.getReason());
         return dto;
+    }
+
+    private User resolveCurrentUser(Organisation org) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || auth.getName() == null) {
+            throw new AccessDeniedException("No authenticated user in security context");
+        }
+        User user = userRepository.findByEmailAndOrganisationId(auth.getName(), org.getId())
+                .orElseThrow(() -> new AccessDeniedException("Authenticated user not found in organisation"));
+        if (user.getDeletedAt() != null || user.getStatus() != UserStatus.ACTIVE || user.isLockedOut()) {
+            throw new AccessDeniedException("Authenticated user account is not active");
+        }
+        return user;
     }
 }

@@ -49,6 +49,9 @@ springdoc:
 app:
   auth:
     cookie-secure: ${APP_AUTH_COOKIE_SECURE:true}
+    # Self-serve signup means anyone can register with an address they don't own.
+    # Escape hatch is env-driven, but it should never be turned off in production.
+    require-email-verification: ${APP_AUTH_REQUIRE_EMAIL_VERIFICATION:true}
   startup:
     # Prevent startup if the JWT secret is still the insecure default.
     skip-secret-validation: false

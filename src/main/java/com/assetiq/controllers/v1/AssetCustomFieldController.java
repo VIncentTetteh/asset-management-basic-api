@@ -2,6 +2,7 @@ package com.assetiq.controllers.v1;
 
 import com.assetiq.dto.AssetCustomFieldDto;
 import com.assetiq.services.AssetCustomFieldService;
+import com.assetiq.services.FeatureFlagGate;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -17,6 +18,7 @@ import java.util.UUID;
  */
 @RestController
 @RequestMapping("/api/v1/assets/{assetId}/custom-fields")
+@FeatureFlagGate("commercial.governed-custom-fields")
 public class AssetCustomFieldController {
 
     private final AssetCustomFieldService fieldService;

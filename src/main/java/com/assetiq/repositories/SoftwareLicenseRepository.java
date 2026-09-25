@@ -6,6 +6,8 @@ import com.assetiq.models.SoftwareLicense;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -34,4 +36,9 @@ public interface SoftwareLicenseRepository extends JpaRepository<SoftwareLicense
     List<SoftwareLicense> findOverAllocated(@Param("org") Organisation org);
 
     boolean existsByLicenseKeyAndOrganisationIdAndDeletedAtIsNull(String licenseKey, UUID organisationId);
+
+    @Query("SELECT l FROM SoftwareLicense l WHERE l.deletedAt IS NULL " +
+            "AND l.expiryDate = :expiryDate")
+    Page<SoftwareLicense> findExpiringOn(
+            @Param("expiryDate") LocalDate expiryDate, Pageable pageable);
 }

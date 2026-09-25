@@ -1,6 +1,7 @@
 package com.assetiq.dto;
 
 import com.assetiq.enums.TransferStatus;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 
@@ -25,9 +26,10 @@ public class AssetTransferDto {
 
     private UUID toLocationId;
 
-    @NotNull(message = "Requested by user ID is required")
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private UUID requestedById;
 
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private UUID approvedById;
 
     private LocalDate transferDate;
@@ -36,4 +38,3 @@ public class AssetTransferDto {
 
     private String reason;
 }
-

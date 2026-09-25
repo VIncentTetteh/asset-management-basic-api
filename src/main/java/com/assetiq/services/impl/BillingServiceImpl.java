@@ -7,6 +7,7 @@ import com.assetiq.enums.SubscriptionStatus;
 import com.assetiq.exceptions.PaymentGatewayException;
 import com.assetiq.models.*;
 import com.assetiq.repositories.*;
+import com.assetiq.security.SecretCryptoService;
 import com.assetiq.services.BillingService;
 import com.assetiq.services.TenantAwareService;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -39,6 +40,7 @@ public class BillingServiceImpl extends TenantAwareService implements BillingSer
     private final AssetRepository assetRepository;
     private final PaystackGatewayService paystackGatewayService;
     private final ObjectMapper objectMapper;
+    private final SecretCryptoService secretCryptoService;
 
     @org.springframework.beans.factory.annotation.Value("${paystack.secret.key:}")
     private String paystackSecretKey;
@@ -63,7 +65,8 @@ public class BillingServiceImpl extends TenantAwareService implements BillingSer
             UserRepository userRepository,
             AssetRepository assetRepository,
             PaystackGatewayService paystackGatewayService,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            SecretCryptoService secretCryptoService) {
         super(organisationRepository);
         this.subscriptionPlanRepository = subscriptionPlanRepository;
         this.organisationSubscriptionRepository = organisationSubscriptionRepository;
@@ -72,6 +75,7 @@ public class BillingServiceImpl extends TenantAwareService implements BillingSer
         this.assetRepository = assetRepository;
         this.paystackGatewayService = paystackGatewayService;
         this.objectMapper = objectMapper;
+        this.secretCryptoService = secretCryptoService;
     }
 
     /**
@@ -181,7 +185,9 @@ public class BillingServiceImpl extends TenantAwareService implements BillingSer
         payment.setAmountMinor(targetPlan.getAmountMinor());
         payment.setCurrency(targetPlan.getCurrency());
         payment.setStatus(PaymentStatus.PENDING);
-        payment.setRawGatewayPayload(response.toString());
+        // Gateway payloads can contain reusable tokens and customer PII. Persist only
+        // the normalized fields required for reconciliation, never the raw response.
+        payment.setRawGatewayPayload(null);
         billingPaymentRepository.save(payment);
 
         BillingCheckoutResponse dto = new BillingCheckoutResponse();
@@ -217,10 +223,10 @@ public class BillingServiceImpl extends TenantAwareService implements BillingSer
         if (subscription.getPaystackSubscriptionCode() != null && subscription.getPaystackEmailToken() != null) {
             if (enabled) {
                 paystackGatewayService.enableSubscription(subscription.getPaystackSubscriptionCode(),
-                        subscription.getPaystackEmailToken());
+                        secretCryptoService.decrypt(subscription.getPaystackEmailToken()));
             } else {
                 paystackGatewayService.disableSubscription(subscription.getPaystackSubscriptionCode(),
-                        subscription.getPaystackEmailToken());
+                        secretCryptoService.decrypt(subscription.getPaystackEmailToken()));
             }
         }
 
@@ -263,6 +269,14 @@ public class BillingServiceImpl extends TenantAwareService implements BillingSer
                 organisationSubscriptionRepository.findByPaystackSubscriptionCodeAndDeletedAtIsNull(subscriptionCode)
                         .ifPresent(s -> {
                             s.setStatus(SubscriptionStatus.PAST_DUE);
+                            // Start the dunning clock on the first failure only —
+                            // Paystack retries an invoice several times, and each retry
+                            // fires this webhook again. Overwriting the timestamp would
+                            // restart the grace period on every retry and the account
+                            // would never actually reach downgrade.
+                            if (s.getPastDueSince() == null) {
+                                s.setPastDueSince(Instant.now());
+                            }
                             organisationSubscriptionRepository.save(s);
                         });
             }
@@ -286,7 +300,7 @@ public class BillingServiceImpl extends TenantAwareService implements BillingSer
         if (!"success".equalsIgnoreCase(gatewayStatus)) {
             payment.setStatus(PaymentStatus.FAILED);
             payment.setGatewayResponse(data.path("gateway_response").asText(null));
-            payment.setRawGatewayPayload(response.toString());
+            payment.setRawGatewayPayload(null);
             billingPaymentRepository.save(payment);
             throw new IllegalStateException("Payment is not successful");
         }
@@ -295,7 +309,7 @@ public class BillingServiceImpl extends TenantAwareService implements BillingSer
         if (paidAmount != payment.getAmountMinor()) {
             payment.setStatus(PaymentStatus.FAILED);
             payment.setGatewayResponse("Amount mismatch");
-            payment.setRawGatewayPayload(response.toString());
+            payment.setRawGatewayPayload(null);
             billingPaymentRepository.save(payment);
             throw new IllegalStateException("Payment validation failed");
         }
@@ -305,16 +319,21 @@ public class BillingServiceImpl extends TenantAwareService implements BillingSer
         payment.setChannel(data.path("channel").asText(null));
         payment.setGatewayResponse(data.path("gateway_response").asText(null));
         payment.setPaidAt(Instant.now());
-        payment.setRawGatewayPayload(response.toString());
-        payment.setPaystackAuthorizationCode(data.path("authorization").path("authorization_code").asText(null));
+        payment.setRawGatewayPayload(null);
+        payment.setPaystackAuthorizationCode(secretCryptoService.encrypt(
+                data.path("authorization").path("authorization_code").asText(null)));
         payment.setPaystackCustomerCode(data.path("customer").path("customer_code").asText(null));
         payment.setPaystackSubscriptionCode(data.path("subscription").path("subscription_code").asText(null));
-        payment.setPaystackEmailToken(data.path("subscription").path("email_token").asText(null));
+        payment.setPaystackEmailToken(secretCryptoService.encrypt(
+                data.path("subscription").path("email_token").asText(null)));
         billingPaymentRepository.save(payment);
 
         OrganisationSubscription subscription = getOrProvisionFreemiumSubscription(org);
         subscription.setPlan(payment.getPlan());
         subscription.setStatus(SubscriptionStatus.ACTIVE);
+        // A successful payment ends any dunning sequence in progress: stop the clock so
+        // a later failure starts a fresh grace period rather than resuming the old one.
+        subscription.setPastDueSince(null);
         subscription.setCurrentPeriodStart(Instant.now());
         subscription.setCurrentPeriodEnd(calculatePeriodEnd(Instant.now(), payment.getPlan()));
         subscription.setNextBillingAt(subscription.getCurrentPeriodEnd());

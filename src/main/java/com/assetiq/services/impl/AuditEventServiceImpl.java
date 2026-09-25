@@ -10,9 +10,14 @@ import com.assetiq.services.AuditEventService;
 import com.assetiq.services.TenantAwareService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
+
+import jakarta.persistence.criteria.Predicate;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.ArrayList;
 import java.util.Locale;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -50,8 +55,38 @@ public class AuditEventServiceImpl extends TenantAwareService implements AuditEv
         // Normalise method to upper-case so UPPER(e.method) = UPPER(:method) matches
         String normMethod = method != null ? method.toUpperCase(Locale.ROOT) : null;
 
+        Specification<AuditEvent> specification = (root, query, builder) -> {
+            List<Predicate> predicates = new ArrayList<>();
+            predicates.add(builder.equal(root.get("organisation"), org));
+            predicates.add(builder.isNull(root.get("deletedAt")));
+
+            if (actorId != null) {
+                predicates.add(builder.equal(root.get("actor").get("id"), actorId));
+            }
+            if (start != null) {
+                predicates.add(builder.greaterThanOrEqualTo(root.get("createdAt"), start));
+            }
+            if (end != null) {
+                predicates.add(builder.lessThanOrEqualTo(root.get("createdAt"), end));
+            }
+            if (success != null) {
+                predicates.add(builder.equal(root.get("success"), success));
+            }
+            if (normMethod != null) {
+                predicates.add(builder.equal(builder.upper(root.get("method")), normMethod));
+            }
+            if (path != null) {
+                predicates.add(builder.like(root.get("path"), "%" + path + "%"));
+            }
+            if (eventType != null) {
+                predicates.add(builder.equal(root.get("eventType"), eventType));
+            }
+
+            return builder.and(predicates.toArray(Predicate[]::new));
+        };
+
         return auditEventRepository
-                .findFiltered(org, actorId, start, end, success, normMethod, path, eventType)
+                .findAll(specification, Sort.by(Sort.Direction.DESC, "createdAt"))
                 .stream()
                 .map(this::mapToDto)
                 .collect(Collectors.toList());

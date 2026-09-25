@@ -30,6 +30,9 @@ public interface NotificationRepository extends JpaRepository<Notification, UUID
 
     Optional<Notification> findByIdAndUserAndOrganisationAndDeletedAtIsNull(UUID id, User user, Organisation org);
 
+    boolean existsByUserAndOrganisationAndDeduplicationKey(
+            User user, Organisation organisation, String deduplicationKey);
+
     @Modifying
     @Query("UPDATE Notification n SET n.read = true, n.readAt = :readAt WHERE n.user = :user AND n.organisation = :org AND n.read = false AND n.deletedAt IS NULL")
     int markAllReadByUserAndOrganisation(@Param("user") User user, @Param("org") Organisation org, @Param("readAt") java.time.Instant readAt);

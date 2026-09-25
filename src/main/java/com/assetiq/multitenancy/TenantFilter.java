@@ -41,7 +41,7 @@ public class TenantFilter extends OncePerRequestFilter {
 
         String path = request.getRequestURI();
         log.debug("[TENANT_FILTER] Checking path: {}", path);
-        if (path.startsWith("/api/v1/tenant") || path.startsWith("/api/v1/auth") ||
+        if (path.startsWith("/api/v1/tenant") ||
                 path.startsWith("/api/v1/billing/webhooks") ||
                 path.equals("/api/info") || path.equals("/api/cache/ping") || path.equals("/api/db/hits")) {
             log.debug("[TENANT_FILTER] Skipping for path: {}", path);
@@ -59,7 +59,7 @@ public class TenantFilter extends OncePerRequestFilter {
             UUID orgIdFromToken = extractOrgIdFromToken(auth);
 
             if (orgIdFromToken != null) {
-                if (organisationRepository.existsById(orgIdFromToken)) {
+                if (organisationRepository.existsByIdAndDeletedAtIsNull(orgIdFromToken)) {
                     TenantContext.setOrganisationId(orgIdFromToken);
                 } else {
                     response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Organisation not found or inactive");
@@ -76,7 +76,7 @@ public class TenantFilter extends OncePerRequestFilter {
                 }
                 if (user.getOrganisation() != null && user.getOrganisation().getId() != null) {
                     UUID orgId = user.getOrganisation().getId();
-                    if (organisationRepository.existsById(orgId)) {
+                    if (organisationRepository.existsByIdAndDeletedAtIsNull(orgId)) {
                         TenantContext.setOrganisationId(orgId);
                     }
                 }
@@ -87,7 +87,7 @@ public class TenantFilter extends OncePerRequestFilter {
             if (header != null && !header.isBlank()) {
                 try {
                     UUID orgId = UUID.fromString(header.trim());
-                    if (organisationRepository.existsById(orgId)) {
+                    if (organisationRepository.existsByIdAndDeletedAtIsNull(orgId)) {
                         TenantContext.setOrganisationId(orgId);
                     }
                 } catch (IllegalArgumentException e) {
@@ -97,7 +97,7 @@ public class TenantFilter extends OncePerRequestFilter {
             }
         }
 
-        boolean isPublicPath = path.startsWith("/api/v1/tenant") || path.startsWith("/api/v1/auth")
+        boolean isPublicPath = path.startsWith("/api/v1/tenant") || isPublicAuthPath(path)
                 || path.startsWith("/api/v1/billing/webhooks")
                 || path.startsWith("/swagger-ui") || path.startsWith("/v3/api-docs")
                 || path.startsWith("/actuator") || path.startsWith("/webjars")
@@ -115,6 +115,16 @@ public class TenantFilter extends OncePerRequestFilter {
         } finally {
             TenantContext.clear();
         }
+    }
+
+    private boolean isPublicAuthPath(String path) {
+        return path.equals("/api/v1/auth/login")
+                || path.equals("/api/v1/auth/forgot-password")
+                || path.equals("/api/v1/auth/reset-password")
+                || path.equals("/api/v1/auth/verify-email")
+                || path.equals("/api/v1/auth/resend-verification")
+                || path.equals("/api/v1/auth/refresh")
+                || path.equals("/api/v1/auth/logout");
     }
 
     private UUID extractOrgIdFromToken(Authentication auth) {

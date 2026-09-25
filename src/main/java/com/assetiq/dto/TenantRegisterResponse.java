@@ -17,6 +17,5 @@ public class TenantRegisterResponse {
     private String lastName;
     private String role;
 
-    private String token; // JWT for immediate login
-    private long expiresIn; // seconds
+    private boolean verificationRequired;
 }

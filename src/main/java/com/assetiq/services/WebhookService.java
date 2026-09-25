@@ -21,8 +21,8 @@ public interface WebhookService {
 
     void delete(UUID id);
 
-    /** Fires an event to all active webhooks subscribed to eventName. */
-    void dispatch(String eventName, Map<String, Object> data);
+    /** Fires a tenant-owned event only to that tenant's active subscriptions. */
+    void dispatch(UUID organisationId, String eventName, Map<String, Object> data);
 
     /** Test-fire a webhook and return a synthetic delivery record. */
     WebhookDeliveryDto test(UUID webhookId);

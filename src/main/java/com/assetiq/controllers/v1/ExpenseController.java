@@ -7,6 +7,7 @@ import com.assetiq.services.ExpenseService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
+import com.assetiq.security.annotation.RequireFreshMfa;
 
 import jakarta.validation.Valid;
 import java.util.List;
@@ -25,13 +26,13 @@ public class ExpenseController {
 
     /** Submit a new expense for approval. */
     @PostMapping
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','ROLE_USER')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','ROLE_USER','MANAGE_EXPENSES')")
     public ResponseEntity<ExpenseDto> submit(@Valid @RequestBody ExpenseDto dto) {
         return ResponseEntity.ok(expenseService.submit(dto));
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','ROLE_USER')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','ROLE_USER','MANAGE_EXPENSES')")
     public ResponseEntity<ExpenseDto> getById(@PathVariable UUID id) {
         try {
             return ResponseEntity.ok(expenseService.getById(id));
@@ -41,7 +42,7 @@ public class ExpenseController {
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','ROLE_USER')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','ROLE_USER','MANAGE_EXPENSES')")
     public ResponseEntity<PagedResponseDto<ExpenseDto>> list(@ModelAttribute ExpenseFilterRequest req) {
         return ResponseEntity.ok(expenseService.listPaged(req));
     }
@@ -54,13 +55,14 @@ public class ExpenseController {
     }
 
     @GetMapping("/users/{userId}")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','ROLE_USER')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','ROLE_USER','MANAGE_EXPENSES')")
     public ResponseEntity<List<ExpenseDto>> listByUser(@PathVariable UUID userId) {
         return ResponseEntity.ok(expenseService.listByUser(userId));
     }
 
     /** Approve a submitted expense. */
     @PostMapping("/{id}/approve")
+    @RequireFreshMfa
     @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','MANAGE_EXPENSES','VIEW_REPORTS')")
     public ResponseEntity<ExpenseDto> approve(@PathVariable UUID id) {
         try {
@@ -72,6 +74,7 @@ public class ExpenseController {
 
     /** Reject a submitted expense with an optional reason. */
     @PostMapping("/{id}/reject")
+    @RequireFreshMfa
     @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','MANAGE_EXPENSES','VIEW_REPORTS')")
     public ResponseEntity<ExpenseDto> reject(
             @PathVariable UUID id,

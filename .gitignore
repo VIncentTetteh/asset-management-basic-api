@@ -48,3 +48,4 @@ node_modules/
 
 # local per-developer compose port overrides (see docker-compose.yml)
 docker-compose.override.yml
+__pycache__/

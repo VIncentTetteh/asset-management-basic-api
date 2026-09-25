@@ -47,7 +47,6 @@ public class SupplierServiceImpl extends TenantAwareService implements SupplierS
         supplier.setEmail(supplierDto.getEmail());
         supplier.setPhone(supplierDto.getPhone());
         supplier.setAddress(supplierDto.getAddress());
-        supplier.setBankDetails(supplierDto.getBankDetails());
         supplier.setTaxId(supplierDto.getTaxId());
         supplier.setStatus(supplierDto.getStatus() != null ? supplierDto.getStatus() : SupplierStatus.ACTIVE);
         supplier.setOrganisation(org);
@@ -90,7 +89,6 @@ public class SupplierServiceImpl extends TenantAwareService implements SupplierS
         supplier.setEmail(supplierDto.getEmail());
         supplier.setPhone(supplierDto.getPhone());
         supplier.setAddress(supplierDto.getAddress());
-        supplier.setBankDetails(supplierDto.getBankDetails());
         supplier.setTaxId(supplierDto.getTaxId());
         supplier.setStatus(supplierDto.getStatus() != null ? supplierDto.getStatus() : supplier.getStatus());
 
@@ -123,9 +121,6 @@ public class SupplierServiceImpl extends TenantAwareService implements SupplierS
         }
         if (supplierDto.getAddress() != null) {
             supplier.setAddress(supplierDto.getAddress());
-        }
-        if (supplierDto.getBankDetails() != null) {
-            supplier.setBankDetails(supplierDto.getBankDetails());
         }
         if (supplierDto.getTaxId() != null) {
             supplier.setTaxId(supplierDto.getTaxId());
@@ -169,7 +164,6 @@ public class SupplierServiceImpl extends TenantAwareService implements SupplierS
         dto.setEmail(supplier.getEmail());
         dto.setPhone(supplier.getPhone());
         dto.setAddress(supplier.getAddress());
-        dto.setBankDetails(supplier.getBankDetails());
         dto.setTaxId(supplier.getTaxId());
         dto.setStatus(supplier.getStatus());
         dto.setOrganisationId(supplier.getOrganisation().getId());

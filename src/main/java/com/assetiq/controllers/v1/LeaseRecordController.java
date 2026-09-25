@@ -38,7 +38,7 @@ public class LeaseRecordController {
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','ROLE_USER')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','ROLE_USER','MANAGE_LEASES','VIEW_CONTRACTS')")
     public ResponseEntity<LeaseRecordDto> getById(@PathVariable UUID id) {
         try {
             return ResponseEntity.ok(leaseRecordService.getById(id));
@@ -48,13 +48,13 @@ public class LeaseRecordController {
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','ROLE_USER')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','ROLE_USER','MANAGE_LEASES','VIEW_CONTRACTS')")
     public ResponseEntity<List<LeaseRecordDto>> listAll() {
         return ResponseEntity.ok(leaseRecordService.listAll());
     }
 
     @GetMapping("/assets/{assetId}")
-    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','ROLE_USER')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ORG_ADMIN','ROLE_ADMIN','ROLE_USER','MANAGE_LEASES','VIEW_CONTRACTS')")
     public ResponseEntity<List<LeaseRecordDto>> listByAsset(@PathVariable UUID assetId) {
         return ResponseEntity.ok(leaseRecordService.listByAsset(assetId));
     }

@@ -1,6 +1,7 @@
 package com.assetiq.dto;
 
 import com.assetiq.enums.DisposalMethod;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 
@@ -24,12 +25,13 @@ public class DisposalRecordDto {
 
     private BigDecimal saleValue;
 
-    @NotNull(message = "Approved by user ID is required")
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private UUID approvedById;
 
     private String reason;
 
     private String complianceDocumentUrl;
 
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private UUID organisationId;
 }

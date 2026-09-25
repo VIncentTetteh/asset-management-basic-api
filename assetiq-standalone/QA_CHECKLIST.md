@@ -24,9 +24,9 @@ Mark each item ✅ pass / ❌ fail / ⏭ skip (with reason).
 |---|------|--------|-------|
 | I1 | Clone repo on a clean machine with only Docker installed | | |
 | I2 | `./scripts/setup-standalone.sh` completes without errors | | |
-| I3 | RSA keys created at `keys/private.pem` and `keys/public.pem` | | |
+| I3 | Vendor public verification key is present in the backend image; no private signing key is present | | |
 | I4 | `.env` file written with non-default passwords | | |
-| I5 | `docker compose up --build` brings all 5 services to healthy state | | |
+| I5 | `docker compose up --build` brings all 4 services to healthy state | | |
 | I6 | `./scripts/smoke-test.sh` passes all checks | | |
 | I7 | Browser navigates to `https://localhost` without errors | | |
 | I8 | Setup wizard appears on first load | | |
@@ -38,8 +38,8 @@ Mark each item ✅ pass / ❌ fail / ⏭ skip (with reason).
 
 | # | Test | Result | Notes |
 |---|------|--------|-------|
-| P1 | Visit customer portal pricing page — all 3 plan cards render correctly | | |
-| P2 | Click "Get started" on Professional → checkout form appears pre-filled | | |
+| P1 | Visit customer portal pricing page — Freemium, Basic, Business, and Enterprise render correctly | | |
+| P2 | Click "Get Business" → checkout form appears pre-filled | | |
 | P3 | Submit checkout with valid email/org → redirects to Paystack hosted page | | |
 | P4 | Complete Paystack test payment (card `4084 0840 8408 4081`) | | |
 | P5 | Redirected back to `/checkout/verify` — license key displayed immediately | | |
@@ -67,8 +67,8 @@ Mark each item ✅ pass / ❌ fail / ⏭ skip (with reason).
 
 | # | Test | Result | Notes |
 |---|------|--------|-------|
-| L1 | Create assets up to the plan limit (e.g. 500 for Starter) | | |
-| L2 | Attempt to create asset #501 → backend returns HTTP 403 | | |
+| L1 | Create assets up to the selected plan limit | | |
+| L2 | Attempt to create one asset beyond the limit → backend returns HTTP 403 | | |
 | L3 | Mobile app shows "Plan limit reached" toast on the 403 | | |
 | L4 | Web UI shows appropriate plan-limit message | | |
 | L5 | At 80% of limit (400/500 assets), `X-License-Warning` header is present | | |
@@ -125,12 +125,12 @@ Mark each item ✅ pass / ❌ fail / ⏭ skip (with reason).
 | # | Test | Result | Notes |
 |---|------|--------|-------|
 | S1 | Attempt to forge a license JWT with a different private key → activate fails | | |
-| S2 | Replay a valid validate request → Bucket4j returns 429 after 30 req/min | | |
-| S3 | Attempt to access `/v1/admin/keys` without `X-Admin-Key` → 403 | | |
+| S2 | Vendor validation endpoint rate limiting is verified in the vendor environment | | |
+| S3 | No license-issuer admin API or private signing key exists in the customer bundle | | |
 | S4 | Attempt to POST to `/api/v1/billing/webhooks/paystack` with wrong HMAC → 401 | | |
 | S5 | Inspect Docker image layers — no `.env` or `private.pem` baked in | | |
 | S6 | `APP_MODE=cloud` container has no `LicenseGuardFilter` in Spring context | | |
-| S7 | Internal services (postgres, backend, license-server) have no host port bindings | | |
+| S7 | Internal services (postgres, backend, frontend) have no host port bindings | | |
 | S8 | Response headers include `X-Frame-Options: DENY` and `X-Content-Type-Options: nosniff` | | |
 | S9 | Portal checkout endpoint returns 429 after 5 rapid requests from same IP | | |
 | S10| Swagger UI is accessible in standalone (docs needed) but `/actuator/env` is NOT | | |

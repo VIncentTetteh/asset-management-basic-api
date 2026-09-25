@@ -21,7 +21,6 @@ public class SoftwareLicenseDto {
     @NotBlank(message = "Vendor is required")
     private String vendor;
 
-    private String licenseKey;
     private String productName;
     private String version;
 

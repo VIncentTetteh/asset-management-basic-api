@@ -23,7 +23,10 @@ public class QrRevision extends BaseEntity {
     @Column(name = "generated_at", nullable = false)
     private Instant generatedAt;
 
-    @Column(length = 200)
+    // Stored as TEXT: the column is free text with no meaningful upper bound, and
+    // the migrated schema declares it TEXT. Pinning a varchar length here would
+    // both fail ddl-auto=validate and invite a truncating migration.
+    @Column(columnDefinition = "TEXT")
     private String reason;
 
     @ManyToOne(fetch = FetchType.LAZY)

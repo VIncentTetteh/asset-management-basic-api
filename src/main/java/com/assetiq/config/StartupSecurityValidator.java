@@ -37,6 +37,9 @@ public class StartupSecurityValidator implements ApplicationRunner {
     @Value("${paystack.secret.key:}")
     private String paystackSecretKey;
 
+    @Value("${app.security.data-encryption-key:}")
+    private String dataEncryptionKey;
+
     @Value("${app.startup.skip-secret-validation:false}")
     private boolean skipValidation;
 
@@ -48,6 +51,9 @@ public class StartupSecurityValidator implements ApplicationRunner {
 
     @Value("${app.mode:cloud}")
     private String appMode;
+
+    @Value("${app.storage.s3.enabled:false}")
+    private boolean s3Enabled;
 
     private final Environment environment;
 
@@ -61,12 +67,17 @@ public class StartupSecurityValidator implements ApplicationRunner {
         // Never allow Hibernate to silently mutate a production schema.
         validateDdlAuto();
 
+        // Durability check also runs always: losing generated files is a data-loss
+        // class of failure, not a security-configuration one.
+        validateDurableStorage();
+
         if (skipValidation) {
             log.warn("[SECURITY] Startup secret validation is DISABLED. This must NOT be used in production.");
             return;
         }
 
         validateJwtSecret();
+        validateDataEncryptionKey();
         validatePaystackKey();
 
         // Warn if email is disabled — forgot-password and DSAR acknowledgements will silently fail
@@ -105,6 +116,45 @@ public class StartupSecurityValidator implements ApplicationRunner {
         log.warn("[SECURITY] Hibernate ddl-auto='{}' permitted because active profile is dev. Never ship this.", value);
     }
 
+    /**
+     * Refuses to boot a cloud deployment that has no durable object storage.
+     *
+     * <p>{@code app.storage.s3.enabled} defaults to {@code false}, and
+     * {@code OrgAwareStorageService} silently falls back to
+     * {@code InMemoryFileStorageService} — a {@code ConcurrentHashMap} holding whole file
+     * bodies in the JVM heap. In a hosted deployment that is three separate faults at once:
+     * every generated report and import is lost on restart or redeploy; a second replica
+     * returns 404 for a file the first one produced, because the map is per-process; and
+     * the map is never evicted, so it is an unbounded heap-growth path to OOM.
+     *
+     * <p>None of that surfaces in testing — a single instance that is never restarted
+     * behaves correctly — which is exactly why this is a startup check rather than a note
+     * in a runbook. Dev, test and local profiles are exempt, matching
+     * {@link #validateDdlAuto()}; standalone deployments are exempt because they run a
+     * single instance against a mounted volume by design.
+     */
+    private void validateDurableStorage() {
+        if (!"cloud".equalsIgnoreCase(appMode) || s3Enabled) {
+            return;
+        }
+
+        boolean devProfileActive = Arrays.stream(environment.getActiveProfiles())
+                .map(p -> p.toLowerCase(Locale.ROOT))
+                .anyMatch(DDL_MUTATION_ALLOWED_PROFILES::contains);
+
+        if (!devProfileActive) {
+            throw new IllegalStateException(
+                "[STARTUP FAILURE] app.storage.s3.enabled=false in cloud mode.\n" +
+                "Generated reports and imports would be held in this JVM's heap: lost on every " +
+                "restart, invisible to other replicas, and never evicted.\n" +
+                "Fix: set APP_STORAGE_S3_ENABLED=true with APP_STORAGE_S3_BUCKET and " +
+                "APP_STORAGE_S3_REGION, or run with APP_MODE=standalone.\n" +
+                "Current active profiles: " + Arrays.toString(environment.getActiveProfiles()));
+        }
+        log.warn("[STARTUP] In-memory file storage permitted because active profile is dev. " +
+                 "Generated files will not survive a restart. Never ship this.");
+    }
+
     private void validateJwtSecret() {
         try {
             JwtSecretValidator.validateSecretEntropy(jwtSecret);
@@ -130,5 +180,17 @@ public class StartupSecurityValidator implements ApplicationRunner {
         } else {
             log.info("[SECURITY] ✓ Paystack key validation passed");
         }
+    }
+
+    private void validateDataEncryptionKey() {
+        try {
+            byte[] decoded = java.util.Base64.getDecoder().decode(dataEncryptionKey == null ? "" : dataEncryptionKey);
+            if (decoded.length != 32) throw new IllegalArgumentException("key length");
+        } catch (IllegalArgumentException invalid) {
+            throw new IllegalStateException(
+                    "[SECURITY STARTUP FAILURE] APP_DATA_ENCRYPTION_KEY must be Base64 for exactly 32 random bytes. " +
+                    "Generate with: openssl rand -base64 32");
+        }
+        log.info("[SECURITY] ✓ data-encryption key validation passed");
     }
 }

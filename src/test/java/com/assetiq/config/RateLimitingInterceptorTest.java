@@ -172,20 +172,65 @@ class RateLimitingInterceptorTest {
     class ClientKeyExtraction {
 
         @Test
-        @DisplayName("X-Client-ID header takes highest precedence")
-        void clientId_xClientIdTakesPriority() throws Exception {
+        @DisplayName("X-Client-ID is IGNORED when remoteAddr is not a trusted proxy")
+        void clientId_xClientIdIgnoredForUntrustedRemote() throws Exception {
+            // A bucket key the caller chooses is not a rate limit: an attacker simply
+            // sends a fresh X-Client-ID per request and mints unlimited buckets, which
+            // defeated the 5/min auth brute-force brake entirely. The header is now only
+            // honoured from a trusted proxy, exactly like X-Forwarded-For below.
+            when(rateLimiter.tryConsume(any(), any(), anyInt(), anyInt()))
+                    .thenReturn(new RedisRateLimiter.RateLimitResult(true, 99, 55));
+
+            // No trusted proxies configured — default empty list
+            MockHttpServletRequest req = generalRequest("10.4.0.1");
+            req.addHeader("X-Client-ID", "my-app-v2");
+            req.addHeader("Authorization", "Bearer sometoken");
+
+            interceptor.preHandle(req, new MockHttpServletResponse(), new Object());
+
+            verify(rateLimiter).tryConsume(
+                    eq(TIER_API_MINUTE),
+                    argThat(k -> k.startsWith("jwt:") && !k.contains("my-app-v2")),
+                    anyInt(), anyInt());
+        }
+
+        @Test
+        @DisplayName("X-Client-ID IS honoured when remoteAddr is in a trusted CIDR")
+        void clientId_xClientIdTrustedForKnownProxy() throws Exception {
+            // The header's legitimate use — an internal gateway assigning per-tenant
+            // client identifiers — is preserved behind the trusted-proxy check.
+            config.setTrustedProxyCidrs(List.of("10.0.0.0/8"));
             when(rateLimiter.tryConsume(any(), any(), anyInt(), anyInt()))
                     .thenReturn(new RedisRateLimiter.RateLimitResult(true, 99, 55));
 
             MockHttpServletRequest req = generalRequest("10.4.0.1");
             req.addHeader("X-Client-ID", "my-app-v2");
             req.addHeader("Authorization", "Bearer sometoken");
-            req.addHeader("X-Forwarded-For", "203.0.113.1");
 
             interceptor.preHandle(req, new MockHttpServletResponse(), new Object());
 
-            // Bucket key should start with "cid:"
-            verify(rateLimiter).tryConsume(eq(TIER_API_MINUTE), argThat(k -> k.startsWith("cid:")), anyInt(), anyInt());
+            verify(rateLimiter).tryConsume(
+                    eq(TIER_API_MINUTE), argThat(k -> k.equals("cid:my-app-v2")), anyInt(), anyInt());
+        }
+
+        @Test
+        @DisplayName("an unauthenticated caller cannot rotate X-Client-ID to escape the auth brake")
+        void clientId_cannotBypassAuthTierByRotatingHeader() throws Exception {
+            // The regression this fix exists for, at the tier that matters: login carries
+            // no Bearer token, so brute-force attempts must bucket on remoteAddr — an
+            // address the attacker cannot vary per request.
+            when(rateLimiter.tryConsume(any(), any(), anyInt(), anyInt()))
+                    .thenReturn(new RedisRateLimiter.RateLimitResult(true, 4, 55));
+
+            for (String rotated : List.of("attacker-1", "attacker-2", "attacker-3")) {
+                MockHttpServletRequest req = authRequest("203.0.113.99");
+                req.addHeader("X-Client-ID", rotated);
+                interceptor.preHandle(req, new MockHttpServletResponse(), new Object());
+            }
+
+            // All three landed in the same remoteAddr bucket, so the brake still counts them.
+            verify(rateLimiter, times(3)).tryConsume(
+                    eq(TIER_AUTH_MINUTE), eq("ip:203.0.113.99"), anyInt(), anyInt());
         }
 
         @Test

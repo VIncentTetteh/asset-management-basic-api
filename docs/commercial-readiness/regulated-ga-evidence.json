@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "releaseCandidate": null,
+  "supportedClients": ["api", "web"],
+  "attestations": [
+    {"id":"legal_privacy_contracts","status":"pending","evidenceUri":null,"sha256":null,"approvedBy":null,"approvedAt":null,"expiresAt":null},
+    {"id":"support_sla_on_call","status":"pending","evidenceUri":null,"sha256":null,"approvedBy":null,"approvedAt":null,"expiresAt":null},
+    {"id":"external_penetration_retest","status":"pending","evidenceUri":null,"sha256":null,"approvedBy":null,"approvedAt":null,"expiresAt":null},
+    {"id":"security_architecture_threat_model","status":"pending","evidenceUri":null,"sha256":null,"approvedBy":null,"approvedAt":null,"expiresAt":null},
+    {"id":"dr_restore_failover_rpo_rto","status":"pending","evidenceUri":null,"sha256":null,"approvedBy":null,"approvedAt":null,"expiresAt":null},
+    {"id":"performance_capacity_slo_30_days","status":"pending","evidenceUri":null,"sha256":null,"approvedBy":null,"approvedAt":null,"expiresAt":null},
+    {"id":"wcag_2_2_aa_manual_assessment","status":"pending","evidenceUri":null,"sha256":null,"approvedBy":null,"approvedAt":null,"expiresAt":null},
+    {"id":"current_regulatory_mapping_approval","status":"pending","evidenceUri":null,"sha256":null,"approvedBy":null,"approvedAt":null,"expiresAt":null},
+    {"id":"commercial_billing_operations","status":"pending","evidenceUri":null,"sha256":null,"approvedBy":null,"approvedAt":null,"expiresAt":null},
+    {"id":"privacy_data_governance_exercises","status":"pending","evidenceUri":null,"sha256":null,"approvedBy":null,"approvedAt":null,"expiresAt":null},
+    {"id":"controlled_pilot_acceptance","status":"pending","evidenceUri":null,"sha256":null,"approvedBy":null,"approvedAt":null,"expiresAt":null},
+    {"id":"executive_ga_approval","status":"pending","evidenceUri":null,"sha256":null,"approvedBy":null,"approvedAt":null,"expiresAt":null}
+  ]
+}
+

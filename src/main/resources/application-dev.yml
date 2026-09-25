@@ -51,3 +51,6 @@ app:
     # dev runs over plain http://localhost, so the Secure cookie flag must be
     # relaxed explicitly here rather than via an implicit code-level default.
     cookie-secure: false
+    # Local dev usually has no SMTP server, so a verification link would never
+    # arrive and every freshly registered tenant would be unable to sign in.
+    require-email-verification: false

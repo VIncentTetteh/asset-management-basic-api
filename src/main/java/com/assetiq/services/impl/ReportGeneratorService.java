@@ -45,8 +45,11 @@ public class ReportGeneratorService {
     private final FileStorageService storageService;
     private final ReportMetadataRepository reportMetadataRepository;
 
-    // In-memory cache: reportId → (contentType, bytes)
-    private final Map<UUID, ReportEntry> cache = new ConcurrentHashMap<>();
+    // In-memory metadata cache, keyed by (organisation, report) — never by report id
+    // alone. This cache is shared by every tenant in the JVM, so the tenant has to be
+    // part of the key: a hit must be impossible to obtain from another organisation,
+    // rather than merely guarded by a check somewhere above it.
+    private final Map<CacheKey, ReportEntry> cache = new ConcurrentHashMap<>();
 
     @Value("${app.storage.s3.report-prefix:reports}")
     private String reportPrefix;
@@ -71,6 +74,9 @@ public class ReportGeneratorService {
     }
 
     public record ReportEntry(String contentType, String filename, String storageKey) {}
+
+    /** Cache key. The organisation is part of the identity, not a filter applied later. */
+    private record CacheKey(UUID organisationId, UUID reportId) {}
 
     // ── Public generate methods ───────────────────────────────────────────────
 
@@ -121,15 +127,27 @@ public class ReportGeneratorService {
         return store("financial", normalized, contentType, filename, bytes);
     }
 
+    /**
+     * Resolve a report the calling tenant owns, or {@code null}.
+     *
+     * <p>Returning {@code null} for "exists but belongs to someone else" is deliberate:
+     * callers turn it into a 404, so a foreign report is indistinguishable from a
+     * missing one and report ids stay unprobeable.
+     */
     public ReportEntry get(UUID reportId) {
-        ReportEntry entry = cache.get(reportId);
+        UUID orgId = TenantContext.getOrganisationId();
+        // No tenant context means nothing is visible. Fail closed rather than throwing:
+        // an unresolved tenant is a 404, never a 500 that hints the report exists.
+        if (orgId == null) return null;
+
+        CacheKey key = new CacheKey(orgId, reportId);
+        ReportEntry entry = cache.get(key);
         if (entry != null) return entry;
 
-        Organisation org = requireOrg();
-        return reportMetadataRepository.findByIdAndOrganisationIdAndDeletedAtIsNull(reportId, org.getId())
+        return reportMetadataRepository.findByIdAndOrganisationIdAndDeletedAtIsNull(reportId, orgId)
                 .map(md -> {
                     ReportEntry e = new ReportEntry(md.getContentType(), md.getFilename(), md.getStorageKey());
-                    cache.put(reportId, e);
+                    cache.put(key, e);
                     return e;
                 })
                 .orElse(null);
@@ -152,7 +170,9 @@ public class ReportGeneratorService {
     }
 
     public void evictFromCache(UUID reportId) {
-        cache.remove(reportId);
+        UUID orgId = TenantContext.getOrganisationId();
+        if (orgId == null) return;
+        cache.remove(new CacheKey(orgId, reportId));
     }
 
     public UUID generatePurchaseOrderReport(String format) throws IOException {
@@ -223,7 +243,7 @@ public class ReportGeneratorService {
         md.setStorageKey(key);
         reportMetadataRepository.save(md);
 
-        cache.put(id, new ReportEntry(contentType, filename, key));
+        cache.put(new CacheKey(org.getId(), id), new ReportEntry(contentType, filename, key));
         return id;
     }
 

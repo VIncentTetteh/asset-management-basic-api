@@ -9,10 +9,12 @@ import com.assetiq.models.Role;
 import com.assetiq.models.User;
 import com.assetiq.repositories.*;
 import com.assetiq.security.PermissionCacheService;
+import com.assetiq.security.RbacAuditService;
 import com.assetiq.services.EmailService;
 import com.assetiq.services.TenantAwareService;
 import com.assetiq.services.UsageLimitService;
 import com.assetiq.services.UserService;
+import com.assetiq.services.SessionRevocationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -40,6 +42,8 @@ public class UserServiceImpl extends TenantAwareService implements UserService {
     private final UsageLimitService usageLimitService;
     private final EmailService emailService;
     private final PermissionCacheService permissionCacheService;
+    private final SessionRevocationService sessionRevocationService;
+    private final RbacAuditService rbacAuditService;
 
     @Value("${app.email.base-url:http://localhost:3000}")
     private String baseUrl;
@@ -51,7 +55,9 @@ public class UserServiceImpl extends TenantAwareService implements UserService {
             PasswordEncoder passwordEncoder,
             UsageLimitService usageLimitService,
             EmailService emailService,
-            PermissionCacheService permissionCacheService) {
+            PermissionCacheService permissionCacheService,
+            SessionRevocationService sessionRevocationService,
+            RbacAuditService rbacAuditService) {
         super(organisationRepository);
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
@@ -60,6 +66,8 @@ public class UserServiceImpl extends TenantAwareService implements UserService {
         this.usageLimitService = usageLimitService;
         this.emailService = emailService;
         this.permissionCacheService = permissionCacheService;
+        this.sessionRevocationService = sessionRevocationService;
+        this.rbacAuditService = rbacAuditService;
     }
 
     @Override
@@ -205,7 +213,10 @@ public class UserServiceImpl extends TenantAwareService implements UserService {
             user.setDepartment(dept);
         }
         if (dto.getStatus() != null) {
-            user.setStatus(dto.getStatus());
+            if (dto.getStatus() != user.getStatus()) {
+                user.setStatus(dto.getStatus());
+                sessionRevocationService.revokeAll(user);
+            }
         }
 
         return toDto(userRepository.save(user));
@@ -251,7 +262,8 @@ public class UserServiceImpl extends TenantAwareService implements UserService {
         User user = userRepository.findByIdAndOrganisation(id, org)
                 .orElseThrow(() -> new IllegalArgumentException("User not found in your organisation"));
         user.setStatus(UserStatus.INACTIVE);
-        return toDto(userRepository.save(user));
+        sessionRevocationService.revokeAll(user);
+        return toDto(user);
     }
 
     @Override
@@ -262,8 +274,13 @@ public class UserServiceImpl extends TenantAwareService implements UserService {
                 .orElseThrow(() -> new IllegalArgumentException("User not found in your organisation"));
         Role role = roleRepository.findByIdAndOrganisationAndDeletedAtIsNull(roleId, org)
                 .orElseThrow(() -> new IllegalArgumentException("Role not found in your organisation"));
-        user.setRole(role);
-        UserDto saved = toDto(userRepository.save(user));
+        String oldRoleName = user.getRole() == null ? null : user.getRole().getName();
+        if (user.getRole() == null || !user.getRole().getId().equals(role.getId())) {
+            user.setRole(role);
+            sessionRevocationService.revokeAll(user);
+            rbacAuditService.recordUserRoleAssigned(userId, oldRoleName, role.getName());
+        }
+        UserDto saved = toDto(user);
         permissionCacheService.evictForUser(user.getEmail(), org.getId().toString());
         return saved;
     }

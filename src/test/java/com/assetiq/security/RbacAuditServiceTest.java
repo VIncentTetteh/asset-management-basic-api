@@ -24,6 +24,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
@@ -35,7 +36,7 @@ import static org.mockito.Mockito.*;
  *  2. recordUserRoleAssigned persists an AuditEvent with oldValue / newValue.
  *  3. recordPermissionDenied persists an AuditEvent typed PERMISSION_DENIED.
  *  4. Actor is resolved from the security context.
- *  5. Failures during save are swallowed (audit is best-effort).
+ *  5. Security-mutation audit failures propagate so the caller can roll back.
  */
 @ExtendWith(MockitoExtension.class)
 class RbacAuditServiceTest {
@@ -193,11 +194,12 @@ class RbacAuditServiceTest {
     // ── Resilience ────────────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("Save failure is swallowed — does not propagate to caller")
-    void saveFailure_isSwallowed() {
+    @DisplayName("Security mutation save failure propagates to enforce fail-closed behavior")
+    void mutationSaveFailure_propagates() {
         when(auditEventRepository.save(any())).thenThrow(new RuntimeException("DB unavailable"));
 
-        // Should not throw
-        rbacAuditService.recordRoleCreated(UUID.randomUUID(), "FINANCE");
+        assertThatThrownBy(() -> rbacAuditService.recordRoleCreated(UUID.randomUUID(), "FINANCE"))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("DB unavailable");
     }
 }

@@ -4,6 +4,7 @@ import com.assetiq.dto.WebhookDeliveryDto;
 import com.assetiq.dto.WebhookDto;
 import com.assetiq.dto.PagedResponseDto;
 import com.assetiq.services.WebhookService;
+import com.assetiq.services.FeatureFlagGate;
 import jakarta.validation.Valid;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -19,6 +20,7 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/v1/webhooks")
 @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','MANAGE_ORGANIZATION_SETTINGS')")
+@FeatureFlagGate("commercial.outbound-webhooks")
 public class WebhooksController {
 
     private final WebhookService webhookService;

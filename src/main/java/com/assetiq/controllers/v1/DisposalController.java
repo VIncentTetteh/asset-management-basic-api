@@ -31,14 +31,14 @@ public class DisposalController {
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_USER')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','DISPOSE_ASSET')")
     public ResponseEntity<DisposalRecordDto> getDisposalById(@PathVariable UUID id) {
         DisposalRecordDto record = disposalService.getDisposalById(id);
         return ResponseEntity.ok(record);
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_USER')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN','ROLE_ORG_ADMIN','ROLE_USER','DISPOSE_ASSET')")
     public ResponseEntity<Set<DisposalRecordDto>> getDisposals(
             @RequestParam(required = false) UUID assetId,
             @RequestParam(required = false) LocalDate startDate,

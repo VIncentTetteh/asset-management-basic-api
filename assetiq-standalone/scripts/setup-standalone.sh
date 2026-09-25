@@ -7,11 +7,9 @@
 #
 # What it does:
 #   1. Checks prerequisites (docker, docker compose, openssl)
-#   2. Generates RSA key pair for the license server
-#   3. Generates a self-signed TLS certificate (or skips if certs exist)
-#   4. Writes a .env file from your answers
-#   5. Copies the RSA public key into the backend bundle
-#   6. Prints a summary and the `docker compose up` command
+#   2. Generates a self-signed TLS certificate (or skips if certs exist)
+#   3. Writes a .env file using the backend's real production variable names
+#   4. Prints a summary and the `docker compose up` command
 
 set -euo pipefail
 
@@ -34,6 +32,7 @@ prompt()  { local var="$1"; local msg="$2"; local default="${3:-}";
             else read -rp "  $msg: " val; fi
             eval "$var=\"\$val\""; }
 randHex() { openssl rand -hex "$1"; }
+randBase64() { openssl rand -base64 "$1" | tr -d '\n'; }
 
 echo ""
 echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
@@ -63,17 +62,9 @@ echo "  docker compose ✓"
 echo "  openssl        ✓"
 echo ""
 
-# ── 2. RSA Keys ───────────────────────────────────────────────────────────────
+# ── 2. TLS Certificate ────────────────────────────────────────────────────────
 
-if [ -f "keys/private.pem" ] && [ -f "keys/public.pem" ]; then
-  warn "RSA keys already exist in keys/ — skipping generation."
-else
-  info "Generating RSA-2048 key pair for the License Server…"
-  bash scripts/generate-rsa-keys.sh
-fi
-echo ""
-
-# ── 3. TLS Certificate ────────────────────────────────────────────────────────
+prompt DOMAIN "Domain name (e.g. assetiq.example.com)" "localhost"
 
 if [ -f "nginx/certs/server.crt" ] && [ -f "nginx/certs/server.key" ]; then
   warn "TLS certificate already exists in nginx/certs/ — skipping."
@@ -82,7 +73,6 @@ else
   echo "  For local / intranet use, a self-signed certificate will be generated."
   echo "  For production, press Enter to skip and place your own cert in nginx/certs/."
   echo ""
-  prompt DOMAIN "Domain name (e.g. assetiq.example.com)" "localhost"
   if [ -n "$DOMAIN" ]; then
     bash scripts/generate-self-signed-cert.sh "$DOMAIN"
   else
@@ -91,7 +81,7 @@ else
 fi
 echo ""
 
-# ── 4. Environment variables ──────────────────────────────────────────────────
+# ── 3. Environment variables ──────────────────────────────────────────────────
 
 echo -e "${BOLD}Database${RESET}"
 prompt DB_PASS  "PostgreSQL password" "$(randHex 16)"
@@ -99,10 +89,9 @@ echo ""
 
 echo -e "${BOLD}Security${RESET}"
 JWT_SECRET_GEN=$(randHex 64)
-ADMIN_KEY_GEN=$(randHex 32)
-CHECKOUT_SECRET_GEN=$(randHex 32)
+DATA_ENCRYPTION_KEY_GEN=$(randBase64 32)
 
-echo "  JWT secret, License admin key, and Checkout session secret will be"
+echo "  JWT and database encryption keys will be"
 echo "  auto-generated. You can edit .env afterwards if needed."
 echo ""
 
@@ -125,39 +114,23 @@ cat > .env << EOF
 POSTGRES_USER=assetiq
 POSTGRES_PASSWORD=${DB_PASS}
 
-JWT_SECRET=${JWT_SECRET_GEN}
-JWT_EXPIRATION_MS=86400000
+APP_JWT_SECRET=${JWT_SECRET_GEN}
+APP_JWT_EXPIRATION=900000
+APP_REFRESH_TOKEN_LIFETIME=PT12H
+APP_DATA_ENCRYPTION_KEY=${DATA_ENCRYPTION_KEY_GEN}
 
 ASSETIQ_LICENSE_KEY=${LICENSE_KEY}
+LICENSE_SERVER_URL=https://license.assetiq.io
 STORAGE_TYPE=local
-
-LICENSE_ADMIN_API_KEY=${ADMIN_KEY_GEN}
-LICENSE_RATE_LIMIT_RPM=30
-LICENSE_ABUSE_MAX_FINGERPRINTS=2
+APP_CORS_ALLOWED_ORIGINS=https://${DOMAIN:-localhost}
 
 PAYSTACK_SECRET_KEY=${PAYSTACK_KEY}
-
-CHECKOUT_SESSION_SECRET=${CHECKOUT_SECRET_GEN}
 EOF
 
 info ".env written."
 echo ""
 
-# ── 5. Copy public key into backend bundle ────────────────────────────────────
-
-BACKEND_KEY_DIR="../../Enterprise-Asset-Manager/src/main/resources/license"
-if [ -d "../../Enterprise-Asset-Manager" ]; then
-  mkdir -p "$BACKEND_KEY_DIR"
-  cp keys/public.pem "$BACKEND_KEY_DIR/public.pem"
-  info "Public key copied to $BACKEND_KEY_DIR/public.pem"
-else
-  warn "Backend source not found at ../../Enterprise-Asset-Manager."
-  warn "Manually copy keys/public.pem to:"
-  warn "  Enterprise-Asset-Manager/src/main/resources/license/public.pem"
-fi
-echo ""
-
-# ── 6. Summary ────────────────────────────────────────────────────────────────
+# ── 4. Summary ────────────────────────────────────────────────────────────────
 
 echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 echo -e "${GREEN}✅  Setup complete!${RESET}"

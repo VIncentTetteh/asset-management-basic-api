@@ -38,10 +38,15 @@ public class ExchangeRateServiceImpl extends TenantAwareService implements Excha
     @Override
     public ExchangeRateDto create(ExchangeRateDto dto) {
         Organisation org = requireTenantOrg();
+        String base = dto.getBaseCurrency().trim().toUpperCase();
+        String target = dto.getTargetCurrency().trim().toUpperCase();
+        if (base.equals(target)) {
+            throw new IllegalArgumentException("Base and target currencies must differ");
+        }
 
         ExchangeRate er = new ExchangeRate();
-        er.setBaseCurrency(dto.getBaseCurrency().toUpperCase());
-        er.setTargetCurrency(dto.getTargetCurrency().toUpperCase());
+        er.setBaseCurrency(base);
+        er.setTargetCurrency(target);
         er.setRate(dto.getRate());
         er.setEffectiveDate(dto.getEffectiveDate() != null ? dto.getEffectiveDate() : LocalDate.now());
         er.setSource(dto.getSource() != null ? dto.getSource() : "MANUAL");
@@ -82,7 +87,9 @@ public class ExchangeRateServiceImpl extends TenantAwareService implements Excha
     @Transactional(readOnly = true)
     public BigDecimal convert(BigDecimal amount, String fromCurrency, String toCurrency, LocalDate asOf) {
         if (amount == null) return BigDecimal.ZERO;
-        if (fromCurrency == null || toCurrency == null) return amount;
+        if (fromCurrency == null || toCurrency == null) {
+            throw new IllegalArgumentException("Source and target currency are required");
+        }
 
         String from = fromCurrency.toUpperCase();
         String to   = toCurrency.toUpperCase();
@@ -109,8 +116,9 @@ public class ExchangeRateServiceImpl extends TenantAwareService implements Excha
             }
         }
 
-        log.warn("No exchange rate found for {}->{} as of {}. Returning original amount.", from, to, date);
-        return amount;
+        log.warn("No exchange rate found for {}->{} as of {}", from, to, date);
+        throw new IllegalStateException(
+                "No approved exchange rate is available for " + from + " to " + to + " as of " + date);
     }
 
     // ── Mapper ────────────────────────────────────────────────────────────────

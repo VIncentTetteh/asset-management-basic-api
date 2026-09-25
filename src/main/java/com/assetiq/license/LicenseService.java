@@ -28,6 +28,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
+import com.assetiq.scheduling.RunsOnEveryInstance;
 
 /**
  * Core license enforcement service — only loaded when {@code APP_MODE=standalone}.
@@ -133,6 +134,13 @@ public class LicenseService {
 
     /** Runs every 24 hours. Validates the key against the License Server. */
     @Scheduled(fixedDelayString = "PT24H", initialDelayString = "PT24H")
+    @RunsOnEveryInstance(reason =
+            "refreshState() writes to the per-JVM cachedState AtomicReference that this "
+            + "instance serves every license check from. Locking it would let one replica "
+            + "refresh while all others kept stale state indefinitely — including, after a "
+            + "renewal or revocation, the wrong answer. The work is a read-only remote "
+            + "validation with no shared side effects, so running it on every replica is "
+            + "both correct and cheap.")
     public void scheduledRemoteValidation() {
         log.debug("Running scheduled remote license validation");
         refreshState();
