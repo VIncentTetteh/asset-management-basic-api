@@ -54,4 +54,16 @@ public interface BudgetRepository extends JpaRepository<Budget, UUID> {
                                  @Param("from") java.time.LocalDate from,
                                  @Param("to") java.time.LocalDate to);
 
+    /**
+     * Allocated and spent totals per currency over the tenant's live budgets in
+     * {@code statuses}. Rows are {@code [currency (String), SUM(totalAmount),
+     * SUM(spentAmount)]}; the caller converts each currency before adding, as a
+     * raw cross-currency sum means nothing.
+     */
+    @Query("SELECT b.currency, SUM(b.totalAmount), SUM(b.spentAmount) FROM Budget b "
+            + "WHERE b.organisation = :org AND b.deletedAt IS NULL AND b.status IN :statuses "
+            + "GROUP BY b.currency")
+    List<Object[]> sumAllocatedAndSpentByCurrency(
+            @Param("org") Organisation org,
+            @Param("statuses") java.util.Collection<com.assetiq.enums.BudgetStatus> statuses);
 }

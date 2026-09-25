@@ -10538,6 +10538,34 @@ paths:
         '403':
           description: Forbidden
 
+  /mobile/home:
+    get:
+      summary: Mobile Home screen payload
+      description: |
+        Counts, a short action queue and short lists for the mobile Home screen in one call.
+        A section the caller may not read is returned as an explicit null, never 0:
+        portfolio and recentlyUpdated follow GET /assets (ROLE_ADMIN, ROLE_ORG_ADMIN, ROLE_USER, VIEW_ASSETS);
+        overdueMaintenance follows GET /maintenance (ROLE_ADMIN, ROLE_ORG_ADMIN, ROLE_USER, VIEW_MAINTENANCE);
+        pendingTransferApprovals follows POST /asset-transfers/{id}/approve (ROLE_ADMIN, ROLE_ORG_ADMIN, TRANSFER_ASSET);
+        overdueCheckouts follows GET /checkouts/overdue (ROLE_ADMIN, ROLE_ORG_ADMIN, ROLE_USER, CHECKOUT_ASSET, VIEW_ASSETS);
+        budgetUtilisationPct follows GET /budgets/summary (ROLE_ADMIN, ROLE_ORG_ADMIN, VIEW_BUDGETS).
+        The queue only draws on sections the caller may read.
+      operationId: getMobileHome
+      tags:
+        - Mobile
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Home payload for the caller in their organisation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MobileHomeResponse'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
 
 components:
   securitySchemes:
@@ -11105,6 +11133,142 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/BogGapEntry'
+
+    MobileHomeResponse:
+      type: object
+      required: [needsYou, queue, portfolio, recentlyUpdated, budgetUtilisationPct, generatedAt]
+      properties:
+        needsYou:
+          $ref: '#/components/schemas/MobileNeedsYou'
+        queue:
+          type: array
+          maxItems: 5
+          description: >
+            Up to five items to act on, most urgent first - overdue maintenance and overdue
+            checkouts by dueAt ascending, then transfers awaiting the caller's approval by
+            request date ascending. Never null; empty when there is nothing to do.
+          items:
+            $ref: '#/components/schemas/MobileQueueItem'
+        portfolio:
+          allOf:
+            - $ref: '#/components/schemas/MobilePortfolio'
+          nullable: true
+          description: Null when the caller may not list assets.
+        recentlyUpdated:
+          type: array
+          nullable: true
+          maxItems: 10
+          description: The ten most recently updated live assets, newest first. Null when the caller may not list assets.
+          items:
+            $ref: '#/components/schemas/MobileRecentAsset'
+        budgetUtilisationPct:
+          type: integer
+          nullable: true
+          example: 46
+          description: >
+            Spent / allocated over ACTIVE and EXCEEDED budgets, converted to the tenant base
+            currency, as a whole percent (may exceed 100). Null when the caller lacks budget
+            access, when nothing is allocated, or when any budget's currency has no exchange
+            rate (a partial figure would be misleading).
+        generatedAt:
+          type: string
+          format: date-time
+
+    MobileNeedsYou:
+      type: object
+      required: [total, overdueMaintenance, pendingTransferApprovals, overdueCheckouts, unreadNotifications]
+      properties:
+        total:
+          type: integer
+          description: Sum of every non-null count below, unread notifications included.
+          example: 7
+        overdueMaintenance:
+          type: integer
+          nullable: true
+          description: Open maintenance jobs whose next due date has passed.
+        pendingTransferApprovals:
+          type: integer
+          nullable: true
+          description: REQUESTED transfers in the organisation that someone other than the caller requested.
+        overdueCheckouts:
+          type: integer
+          nullable: true
+          description: ACTIVE checkouts whose expected return date has passed.
+        unreadNotifications:
+          type: integer
+          format: int64
+          description: The caller's own unread notifications.
+
+    MobilePortfolio:
+      type: object
+      properties:
+        total:
+          type: integer
+          format: int64
+        byStatus:
+          type: object
+          description: Live assets per status; statuses with no assets are absent.
+          additionalProperties:
+            type: integer
+            format: int64
+          example:
+            IN_USE: 8
+            IN_STOCK: 4
+
+    MobileRecentAsset:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        assetTag:
+          type: string
+          nullable: true
+        status:
+          type: string
+          nullable: true
+          example: IN_USE
+        updatedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    MobileQueueItem:
+      type: object
+      required: [kind, id, assetId, title, subtitle, status, dueAt, overdue]
+      properties:
+        kind:
+          type: string
+          enum: [MAINTENANCE, TRANSFER_APPROVAL, CHECKOUT]
+        id:
+          type: string
+          format: uuid
+          description: The maintenance record, transfer or checkout record id.
+        assetId:
+          type: string
+          format: uuid
+          nullable: true
+        title:
+          type: string
+          nullable: true
+          description: The asset's name.
+        subtitle:
+          type: string
+          example: Requested by Kwame Asante
+          description: Maintenance type, "Requested by <name>" or "Checked out to <name>".
+        status:
+          type: string
+          example: REQUESTED
+          description: The underlying record's status.
+        dueAt:
+          type: string
+          format: date
+          nullable: true
+          description: Next due date or expected return date; null for approvals.
+        overdue:
+          type: boolean
 
     Error:
       type: object

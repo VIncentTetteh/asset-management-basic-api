@@ -149,6 +149,38 @@ class CrossTenantIsolationTest {
                 .isEqualTo(before);
     }
 
+    @Test
+    @DisplayName("the mobile Home counts, queue and lists cover only the caller's own tenant")
+    void mobileHome_countsScopedToCallerTenant() throws Exception {
+        JsonNode before = mobileHome(orgB);
+
+        String name = "Alpha Home Overdue " + orgA.suffix();
+        UUID assetId = createAsset(orgA, name);
+        createAsset(orgA, "Alpha Home Second " + orgA.suffix());
+        createJson("/api/v1/maintenance", orgA, Map.of(
+                "assetId", assetId.toString(),
+                "maintenanceType", "PREVENTIVE",
+                "scheduledDate", java.time.LocalDate.now().minusDays(10).toString(),
+                "nextDueDate", java.time.LocalDate.now().minusDays(5).toString()));
+
+        // Positive control: org A's own Home does show the overdue job it created.
+        JsonNode ownerView = mobileHome(orgA);
+        assertThat(ownerView.toString()).contains(name);
+        assertThat(ownerView.path("needsYou").path("overdueMaintenance").asInt()).isGreaterThanOrEqualTo(1);
+
+        JsonNode after = mobileHome(orgB);
+        assertThat(after.path("portfolio").path("total").asLong())
+                .as("org A's assets must not move org B's portfolio")
+                .isEqualTo(before.path("portfolio").path("total").asLong());
+        assertThat(after.path("needsYou").path("overdueMaintenance").asInt())
+                .as("org A's overdue job must not reach org B's count")
+                .isEqualTo(before.path("needsYou").path("overdueMaintenance").asInt());
+        assertThat(after.path("queue").size()).isEqualTo(before.path("queue").size());
+        assertThat(after.toString())
+                .as("org B's Home must not name org A's assets in its queue or recent list")
+                .doesNotContain(orgA.suffix());
+    }
+
     // ── Reference data (category / location / supplier) ───────────────────────
 
     @Test
@@ -489,6 +521,13 @@ class CrossTenantIsolationTest {
                 .andExpect(status().isOk())
                 .andReturn();
         return objectMapper.readTree(result.getResponse().getContentAsString()).get("total").asLong();
+    }
+
+    private JsonNode mobileHome(Tenant tenant) throws Exception {
+        MvcResult result = mockMvc.perform(auth(get("/api/v1/mobile/home"), tenant))
+                .andExpect(status().isOk())
+                .andReturn();
+        return objectMapper.readTree(result.getResponse().getContentAsString());
     }
 
     /** Confirms the owning tenant really can see the resource, so denial tests mean something. */

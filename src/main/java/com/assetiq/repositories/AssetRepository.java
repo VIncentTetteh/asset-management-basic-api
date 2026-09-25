@@ -96,6 +96,17 @@ public interface AssetRepository extends JpaRepository<Asset, UUID>, JpaSpecific
         @Query("SELECT a.status, COUNT(a) FROM Asset a WHERE a.organisation = :org AND a.deletedAt IS NULL GROUP BY a.status")
         List<Object[]> countGroupedByStatus(@Param("org") Organisation org);
 
+        /**
+         * The tenant's most recently updated live assets, newest first, as slim
+         * rows for the mobile Home screen. Page with {@code PageRequest.of(0, n)};
+         * rows never written since {@code updated_at} existed sort last, and id
+         * breaks ties so the order is stable between refreshes.
+         */
+        @Query("SELECT new com.assetiq.dto.mobile.RecentAsset(a.id, a.name, a.assetTag, a.status, a.updatedAt) "
+                        + "FROM Asset a WHERE a.organisation = :org AND a.deletedAt IS NULL "
+                        + "ORDER BY a.updatedAt DESC NULLS LAST, a.id")
+        List<com.assetiq.dto.mobile.RecentAsset> findRecentlyUpdated(@Param("org") Organisation org, Pageable page);
+
         /** Count assets with an assigned user. */
         @Query("SELECT COUNT(a) FROM Asset a WHERE a.organisation = :org AND a.deletedAt IS NULL AND a.assignedUser IS NOT NULL")
         long countAssigned(@Param("org") Organisation org);

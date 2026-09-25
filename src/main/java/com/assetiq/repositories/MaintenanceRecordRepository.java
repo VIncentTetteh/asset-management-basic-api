@@ -65,6 +65,25 @@ public interface MaintenanceRecordRepository extends JpaRepository<MaintenanceRe
     long countOverdue(@org.springframework.data.repository.query.Param("org") Organisation org,
                       @org.springframework.data.repository.query.Param("today") LocalDate today);
 
+    /**
+     * The jobs {@link #countOverdue} counts, oldest due first, as slim rows for
+     * the mobile Home queue. Page with {@code PageRequest.of(0, n)}. The asset is
+     * left-joined so a row the count includes can never drop out of the list.
+     */
+    @org.springframework.data.jpa.repository.Query(
+            "SELECT new com.assetiq.services.mobile.MaintenanceQueueRow("
+            + "r.id, a.id, a.name, r.maintenanceType, r.status, r.nextDueDate) "
+            + "FROM MaintenanceRecord r LEFT JOIN r.asset a "
+            + "WHERE r.organisation = :org AND r.deletedAt IS NULL "
+            + "AND r.nextDueDate IS NOT NULL AND r.nextDueDate < :today "
+            + "AND r.status NOT IN (com.assetiq.enums.MaintenanceStatus.COMPLETED, "
+            + "com.assetiq.enums.MaintenanceStatus.CANCELLED) "
+            + "ORDER BY r.nextDueDate ASC, r.id")
+    java.util.List<com.assetiq.services.mobile.MaintenanceQueueRow> findOverdueQueue(
+            @org.springframework.data.repository.query.Param("org") Organisation org,
+            @org.springframework.data.repository.query.Param("today") LocalDate today,
+            org.springframework.data.domain.Pageable page);
+
     /** Distinct assets with maintenance open and past due, whatever the reporting period. */
     @org.springframework.data.jpa.repository.Query(
             "SELECT COUNT(DISTINCT r.asset.id) FROM MaintenanceRecord r "
