@@ -151,7 +151,8 @@ class MobileHomeIntegrationTest extends BaseIntegrationTest {
         assertThat(needsYou.path("pendingTransferApprovals").asInt()).isEqualTo(2);
         assertThat(needsYou.path("overdueCheckouts").asInt()).isEqualTo(1);
         assertThat(needsYou.path("unreadNotifications").asLong()).isEqualTo(unreadBefore + 2);
-        assertThat(needsYou.path("total").asLong()).isEqualTo(2 + 2 + 1 + unreadBefore + 2);
+        // Notifications are reported but not added: they repeat the actionable items.
+        assertThat(needsYou.path("total").asLong()).isEqualTo(2 + 2 + 1);
 
         JsonNode portfolio = home.path("portfolio");
         assertThat(portfolio.path("total").asLong()).isEqualTo(assets.size());
@@ -191,8 +192,7 @@ class MobileHomeIntegrationTest extends BaseIntegrationTest {
         assertThat(needsYou.path("pendingTransferApprovals").isNull()).isTrue();
         // VIEW_ASSETS reads the overdue checkout list, so the count is present.
         assertThat(needsYou.path("overdueCheckouts").asInt()).isEqualTo(1);
-        assertThat(needsYou.path("total").asLong())
-                .isEqualTo(1 + needsYou.path("unreadNotifications").asLong());
+        assertThat(needsYou.path("total").asLong()).isEqualTo(1);
         assertThat(finance.path("portfolio").isObject()).isTrue();
         assertThat(finance.path("budgetUtilisationPct").asInt()).isEqualTo(46);
 

@@ -4,9 +4,12 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 
 /**
  * Items waiting on the caller. Each nullable count is null when the caller may
- * not read that area; {@code total} sums only the parts that are present.
+ * not read that area; {@code total} sums only the actionable
+ * counts that are present.
  *
- * @param total                    sum of every non-null count below, notifications included
+ * @param total                    sum of the non-null actionable counts (maintenance,
+ *                                 approvals, checkouts); unread notifications are excluded
+ *                                 because they repeat those items
  * @param overdueMaintenance       open maintenance jobs past their next due date
  * @param pendingTransferApprovals REQUESTED transfers the caller could approve
  *                                 (requested by someone else)

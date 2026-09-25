@@ -121,7 +121,9 @@ public class MobileHomeServiceImpl implements MobileHomeService {
                 : null;
         long unread = notificationRepository.countByUserAndOrganisationAndReadAndDeletedAtIsNull(user, org, false);
 
-        long total = unread;
+        // Unread notifications stay out of the total: a transfer request also
+        // raises a notification, so adding both would count one item twice.
+        long total = 0;
         for (Integer part : new Integer[] {overdueMaintenance, pendingApprovals, overdueCheckouts}) {
             if (part != null) {
                 total += part;

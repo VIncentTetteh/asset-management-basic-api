@@ -11180,8 +11180,10 @@ components:
       properties:
         total:
           type: integer
-          description: Sum of every non-null count below, unread notifications included.
-          example: 7
+          description: >
+            Sum of the non-null actionable counts (overdueMaintenance, pendingTransferApprovals,
+            overdueCheckouts). unreadNotifications is excluded because notifications repeat those items.
+          example: 5
         overdueMaintenance:
           type: integer
           nullable: true
