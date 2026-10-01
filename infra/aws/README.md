@@ -83,6 +83,18 @@ docker push "$REPO:$SHA"
 Tags are immutable in ECR: pushing over an existing tag is rejected. Use the git
 SHA so a running container is always traceable to an exact commit.
 
+**Already set on the live stack, and kept by `deploy` when omitted** (it reuses
+previous parameter values):
+
+- `CustomDomain=www.assetiq.techieszon.com`, `RedirectDomain=assetiq.techieszon.com`
+  (301 to www), `CustomDomainCertificateArn` = ACM cert `27d48bbc-…` in us-east-1.
+  DNS is at the registrar's host (thecloudwebhosts), not Route 53: the ACM
+  validation CNAMEs live there and must stay for renewal.
+- `AmiId=/assetiq/staging/ami-id`, an account-owned SSM parameter pinning the AMI.
+  The public `ami-amazon-linux-latest` path re-resolves on every update and a new
+  AMI **replaces the instance** (new boot, capacity risk). Bump the pin on purpose.
+  Create a change set (`--no-execute-changeset`) and check `Replacement` first.
+
 ### 3. Compute and CDN
 
 ```bash
