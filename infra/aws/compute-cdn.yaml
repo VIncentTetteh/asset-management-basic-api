@@ -36,6 +36,27 @@ Parameters:
     Type: String
     Default: ""
     Description: Comma-separated operator emails within PlatformAdminOrgId.
+  CustomDomain:
+    Type: String
+    Default: ""
+    Description: >-
+      Public hostname (e.g. www.assetiq.techieszon.com) whose DNS already points at
+      the distribution. Blank serves only the default cloudfront.net domain.
+  CustomDomainCertificateArn:
+    Type: String
+    Default: ""
+    AllowedPattern: "^$|^arn:aws:acm:us-east-1:[0-9]{12}:certificate/[0-9a-f-]+$"
+    ConstraintDescription: Must be an ACM certificate in us-east-1, the only region CloudFront accepts.
+    Description: >-
+      ISSUED ACM certificate covering CustomDomain. CloudFront rejects a pending one,
+      so validate it before deploying.
+
+Conditions:
+  # Both or neither: an alias without a certificate is refused by CloudFront, and a
+  # certificate without an alias does nothing.
+  HasCustomDomain: !And
+    - !Not [!Equals [!Ref CustomDomain, ""]]
+    - !Not [!Equals [!Ref CustomDomainCertificateArn, ""]]
 
 Resources:
 
@@ -193,13 +214,16 @@ Resources:
             AI_PROVIDER=$AI_PROVIDER_NAME
             XAI_API_KEY=$AI_KEY
             APP_DATA_ENCRYPTION_KEY=$DATA_KEY_B64
-            APP_BILLING_CALLBACK_URL=https://${DistributionDomain}/billing/callback/
+            APP_BILLING_CALLBACK_URL=https://${PublicDomain}/billing/callback/
             SPRING_DATA_REDIS_HOST=redis
             SPRING_DATA_REDIS_PORT=6379
             APP_STORAGE_S3_ENABLED=true
             APP_STORAGE_S3_BUCKET=${AppBucket}
             APP_STORAGE_S3_REGION=${AWS::Region}
-            APP_CORS_ALLOWED_ORIGINS=https://${DistributionDomain}
+            # Both hostnames: this list is also BrowserMutationOriginFilter's, so a
+            # domain missing here signs nobody in. The cloudfront.net one stays so
+            # bookmarks and QR labels printed before the custom domain still work.
+            APP_CORS_ALLOWED_ORIGINS=https://${PublicDomain},https://${DistributionDomain}
             APP_MODE=cloud
             APP_EMAIL_ENABLED=$EMAIL_ENABLED
             SMTP_HOST=$SMTP_HOST
@@ -209,8 +233,8 @@ Resources:
             SMTP_STARTTLS=$SMTP_STARTTLS
             SMTP_SSL=$SMTP_SSL
             APP_EMAIL_FROM=$EMAIL_FROM
-            APP_EMAIL_BASE_URL=https://${DistributionDomain}
-            APP_PUBLIC_BASE_URL=https://${DistributionDomain}
+            APP_EMAIL_BASE_URL=https://${PublicDomain}
+            APP_PUBLIC_BASE_URL=https://${PublicDomain}
             APP_PLATFORM_ADMIN_ORG_ID=${PlatformAdminOrgId}
             APP_PLATFORM_ADMIN_EMAILS=${PlatformAdminEmails}
             # Kept off on this demo environment even with SMTP configured: accounts
@@ -302,6 +326,7 @@ Resources:
             AppBucket:
               Fn::ImportValue: !Sub "${FoundationStackName}-AppStorageBucketName"
             DistributionDomain: !GetAtt Distribution.DomainName
+            PublicDomain: !If [HasCustomDomain, !Ref CustomDomain, !GetAtt Distribution.DomainName]
       Tags:
         - { Key: Name, Value: !Sub "${ProjectName}-${Environment}-ec2-app" }
         - { Key: Project, Value: !Ref ProjectName }
@@ -379,6 +404,7 @@ Resources:
         Comment: !Sub "${ProjectName} ${Environment} web and api"
         DefaultRootObject: index.html
         HttpVersion: http2and3
+        Aliases: !If [HasCustomDomain, [!Ref CustomDomain], !Ref AWS::NoValue]
         PriceClass: PriceClass_100
         Origins:
           - Id: web
@@ -451,10 +477,13 @@ Resources:
         # The export prerenders every route, so that is a rare edge; if it needs
         # improving later, do it in the viewer-request function, which does run per
         # behaviour.
-        ViewerCertificate:
-          # Default *.cloudfront.net certificate. Attaching a custom domain later
-          # needs an ACM certificate in us-east-1 and changes nothing else here.
-          CloudFrontDefaultCertificate: true
+        ViewerCertificate: !If
+          - HasCustomDomain
+          - AcmCertificateArn: !Ref CustomDomainCertificateArn
+            SslSupportMethod: sni-only
+            MinimumProtocolVersion: TLSv1.2_2021
+          # Default *.cloudfront.net certificate.
+          - CloudFrontDefaultCertificate: true
       Tags:
         - { Key: Project, Value: !Ref ProjectName }
         - { Key: Environment, Value: !Ref Environment }
@@ -484,7 +513,10 @@ Resources:
 
 Outputs:
   SiteUrl:
-    Value: !Sub "https://${Distribution.DomainName}"
+    Value: !If
+      - HasCustomDomain
+      - !Sub "https://${CustomDomain}"
+      - !Sub "https://${Distribution.DomainName}"
   DistributionId:
     Value: !Ref Distribution
   InstanceId:
