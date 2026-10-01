@@ -42,6 +42,12 @@ Parameters:
     Description: >-
       Public hostname (e.g. www.assetiq.techieszon.com) whose DNS already points at
       the distribution. Blank serves only the default cloudfront.net domain.
+  RedirectDomain:
+    Type: String
+    Default: ""
+    Description: >-
+      Optional second hostname (e.g. the bare assetiq.techieszon.com) that
+      permanently redirects to CustomDomain. The certificate must cover it too.
   CustomDomainCertificateArn:
     Type: String
     Default: ""
@@ -57,6 +63,9 @@ Conditions:
   HasCustomDomain: !And
     - !Not [!Equals [!Ref CustomDomain, ""]]
     - !Not [!Equals [!Ref CustomDomainCertificateArn, ""]]
+  HasRedirectDomain: !And
+    - !Condition HasCustomDomain
+    - !Not [!Equals [!Ref RedirectDomain, ""]]
 
 Resources:
 
@@ -357,28 +366,52 @@ Resources:
       FunctionConfig:
         Comment: Maps directory style paths onto the index.html emitted by the Next export.
         Runtime: cloudfront-js-2.0
-      FunctionCode: |
-        function handler(event) {
-          var request = event.request;
-          var uri = request.uri;
-          // The Next export emits <route>.html, so an extensionless path is a route
-          // and needs the suffix added before S3 sees it. Anything already carrying an
-          // extension is an asset and is passed straight through.
-          //
-          // trailingSlash is off in next.config.ts, so '/foo/' is not a route shape the
-          // export produces; normalise it rather than 404.
-          if (uri === '/' ) { request.uri = '/index.html'; return request; }
-          if (uri.endsWith('/')) { uri = uri.slice(0, -1); }
-          // The Next metadata icon route exports a real file literally named 'icon',
-          // with no extension. Appending .html to it 403s every page's favicon.
-          var FILES_WITHOUT_EXTENSION = ['/icon'];
-          if (uri.indexOf('.') === -1 && FILES_WITHOUT_EXTENSION.indexOf(uri) === -1) {
-            request.uri = uri + '.html';
-          } else {
-            request.uri = uri;
+      FunctionCode: !Sub
+        - |
+          function handler(event) {
+            var request = event.request;
+            var uri = request.uri;
+            // One canonical web address. The session cookie is host-only, so serving
+            // the app on two hostnames would sign people out as they move between
+            // them; the redirect host answers with a 301 to the canonical one instead.
+            var REDIRECT_FROM = '${RedirectFrom}';
+            var host = request.headers.host && request.headers.host.value.toLowerCase();
+            if (REDIRECT_FROM && host === REDIRECT_FROM) {
+              var qs = [];
+              for (var key in request.querystring) {
+                var param = request.querystring[key];
+                var values = param.multiValue ? param.multiValue : [param];
+                for (var i = 0; i < values.length; i++) {
+                  qs.push(key + (values[i].value === '' ? '' : '=' + values[i].value));
+                }
+              }
+              return {
+                statusCode: 301,
+                statusDescription: 'Moved Permanently',
+                headers: { location: { value: 'https://${CanonicalHost}' + uri + (qs.length ? '?' + qs.join('&') : '') } },
+              };
+            }
+            // The Next export emits <route>.html, so an extensionless path is a route
+            // and needs the suffix added before S3 sees it. Anything already carrying an
+            // extension is an asset and is passed straight through.
+            //
+            // trailingSlash is off in next.config.ts, so '/foo/' is not a route shape the
+            // export produces; normalise it rather than 404.
+            if (uri === '/' ) { request.uri = '/index.html'; return request; }
+            if (uri.endsWith('/')) { uri = uri.slice(0, -1); }
+            // The Next metadata icon route exports a real file literally named 'icon',
+            // with no extension. Appending .html to it 403s every page's favicon.
+            var FILES_WITHOUT_EXTENSION = ['/icon'];
+            if (uri.indexOf('.') === -1 && FILES_WITHOUT_EXTENSION.indexOf(uri) === -1) {
+              request.uri = uri + '.html';
+            } else {
+              request.uri = uri;
+            }
+            return request;
           }
-          return request;
-        }
+        - RedirectFrom: !If [HasRedirectDomain, !Ref RedirectDomain, ""]
+          CanonicalHost: !If [HasCustomDomain, !Ref CustomDomain, ""]
+
 
   ApiHeaderSanitizerFunction:
     Type: AWS::CloudFront::Function
@@ -404,7 +437,10 @@ Resources:
         Comment: !Sub "${ProjectName} ${Environment} web and api"
         DefaultRootObject: index.html
         HttpVersion: http2and3
-        Aliases: !If [HasCustomDomain, [!Ref CustomDomain], !Ref AWS::NoValue]
+        Aliases: !If
+          - HasRedirectDomain
+          - [!Ref CustomDomain, !Ref RedirectDomain]
+          - !If [HasCustomDomain, [!Ref CustomDomain], !Ref AWS::NoValue]
         PriceClass: PriceClass_100
         Origins:
           - Id: web
